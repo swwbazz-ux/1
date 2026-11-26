@@ -17,6 +17,7 @@ test('existing plan ring is the only accessible hourly-report entry', () => {
     assert.match(template, /aria-label="Открыть почасовой отчёт./);
     assert.equal((template.match(/data-eo-hourly-report-open/g) || []).length, 1);
     assert.match(source, /event\.key === "Enter" \|\| event\.key === " "/);
+    assert.match(source, /excavatorRoundControlFeedback\(\{sound: false\}\)/);
 });
 
 test('report remains outside replaceable shell without blocking operational refresh', () => {

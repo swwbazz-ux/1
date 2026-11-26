@@ -3128,6 +3128,24 @@ class OfflineEventSyncTests(TestCase):
             HaulAssignment.objects.filter(truck=self.truck, excavator=self.excavator).exists()
         )
 
+    def test_incoming_assignment_load_does_not_fall_back_to_free_bucket(self):
+        from assignments.services import schedule_haul_assignment
+
+        self.assignment.excavator = self.other_excavator
+        self.assignment.save(update_fields=['excavator'])
+        incoming, created = schedule_haul_assignment(truck=self.truck, excavator=self.excavator)
+        self.assertTrue(created)
+        self.assertEqual(incoming.status, AssignmentStatus.PENDING)
+        event = self.load_event('load-during-incoming-transfer', 1)
+        event['payload']['assignment_id'] = incoming.id
+
+        result = self.sync([event]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        self.assertEqual(trip.truck_id, self.truck.id)
+        self.assertFalse(FreeBucketAcceptance.objects.filter(truck=self.truck).exists())
+
     def test_load_of_truck_openly_assigned_elsewhere_goes_through_free_bucket(self):
         """Самосвал открыто числится за ДРУГИМ экскаватором — грузим через свободный ковш.
 

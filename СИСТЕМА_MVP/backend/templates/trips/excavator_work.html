@@ -46,6 +46,7 @@
     data-eo-downtime-url="{% url 'excavator_downtime_action' %}"
     data-eo-active-tab="trucks"
     data-eo-server-now="{{ server_now|date:'c' }}"
+    data-eo-free-bucket-refresh-at="{{ free_bucket_refresh_at|date:'c' }}"
     data-eo-current-excavator-id="{% if current_excavator %}{{ current_excavator.id }}{% endif %}"
     data-eo-shift-excavator-id="{% if shift_start_excavator %}{{ shift_start_excavator.id }}{% endif %}"
     data-native-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}"

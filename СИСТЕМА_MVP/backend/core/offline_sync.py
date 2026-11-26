@@ -2151,7 +2151,7 @@ def _process_excavator_loaded_via_free_bucket(access, normalized, *, shift, exca
 
 
 def _process_excavator_loaded(access, normalized):
-    from assignments.models import AssignmentStatus, HaulAssignment
+    from assignments.models import AssignmentStatus, HaulAssignment, HaulAssignmentAction
     from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
     from downtimes.models import DowntimeEvent
     from references.models import DumpPoint, RockType
@@ -2174,20 +2174,25 @@ def _process_excavator_loaded(access, normalized):
     excavator, truck = lock_trip_participant_equipment(excavator_id=shift.equipment_id, truck_id=truck_id)
     shift.equipment = excavator
     from trips.free_bucket import active_free_bucket_acceptance_for_truck
-    pending_acceptance = active_free_bucket_acceptance_for_truck(truck, for_update=True)
+    pending_acceptance = active_free_bucket_acceptance_for_truck(truck, for_update=True, reservation_only=True)
     if pending_acceptance:
         _conflict(
             'free_bucket_acceptance_required',
             'Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.',
         )
-    truck_claimed_elsewhere = (
+    open_assignments = (
         HaulAssignment.objects.select_for_update(of=('self',))
         .filter(truck_id=truck_id, ended_at__isnull=True, assigned_at__lte=normalized['occurred_at'])
-        .exclude(excavator_id=shift.equipment_id)
         .exclude(status=AssignmentStatus.CANCELLED)
-        .exists()
     )
-    if truck_claimed_elsewhere:
+    # During a transfer the previous accepted assignment remains open. A load
+    # against the incoming assignment completes that transfer through the regular path.
+    if open_assignments.exclude(excavator_id=shift.equipment_id).exists() and not open_assignments.filter(
+        pk=assignment_id,
+        excavator_id=shift.equipment_id,
+        action=HaulAssignmentAction.ASSIGN,
+        status=AssignmentStatus.PENDING,
+    ).exists():
         # Самосвал открыто числится за ДРУГИМ экскаватором прямо сейчас —
         # машинист истина по погрузке, отказа быть не должно, но и основное
         # назначение на пульте диспетчера трогать нельзя (правило: свободный

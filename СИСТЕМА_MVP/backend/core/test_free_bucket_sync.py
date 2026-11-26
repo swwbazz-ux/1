@@ -2471,6 +2471,51 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(expired_tile['free_bucket_label'], '')
         self.assertIsNone(expired_tile['free_bucket_expires_at'])
 
+    def test_spent_free_bucket_does_not_block_regular_loading_after_trip_completion(self):
+        other_client, other_operator, other_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
+        )
+        other_access = EmployeeAccess.objects.get(employee=other_operator, role=self.role)
+        identity = {
+            'actor': other_operator,
+            'access': other_access,
+            'shift': other_shift,
+            'excavator': self.other_excavator,
+        }
+        accepted = self.accept_event(**identity)
+        loaded = self.load_event(accepted, **identity)
+        results = self.sync(
+            [accepted, loaded], client=other_client, actor=other_operator, access=other_access,
+            device_id='free-bucket-spent-visual-001',
+        ).json()['results']
+        self.assertEqual([result['status'] for result in results], ['accepted', 'accepted'])
+
+        active = self.client.get(reverse('excavator_work')).context['truck_cards'][0]
+        self.assertFalse(active['can_load'])
+        trip = Trip.objects.get()
+        # Reproduce a completed trip whose original visual record is still USED.
+        Trip.objects.filter(pk=trip.pk).update(
+            status=TripStatus.UNCONTROLLED, operationally_closed_at=timezone.now(),
+        )
+        self.assertEqual(FreeBucketAcceptance.objects.get().status, FreeBucketAcceptanceStatus.USED)
+        ActiveApplicationSession.objects.create(
+            session_key='driver-online-after-spent-bucket',
+            access=self.driver_access, role_code='driver', app_code='driver', path='/driver/',
+            last_seen_at=timezone.now(), foreground_seen_at=timezone.now(),
+        )
+        ready = self.client.get(reverse('excavator_work')).context['truck_cards'][0]
+        self.assertTrue(ready['can_load'])
+        self.assertIsNone(ready['foreign_free_bucket'])
+        ordinary = self.event(
+            'ordinary-after-spent-bucket', 'excavator.trip.loaded', 1,
+            local_trip_id='local-ordinary-after-spent-bucket',
+            payload={'truck_id': self.truck.id, 'assignment_id': self.assignment.id,
+                     'dump_point_id': self.dump_point.id, 'rock_type_id': self.rock.id},
+        )
+        result = self.sync([ordinary], device_id='ordinary-after-spent-bucket-001').json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.filter(excavator=self.excavator).count(), 1)
+
     def test_excavator_fragment_carries_free_bucket_snapshots(self):
         other_client, other_operator, other_shift = (
             trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
@@ -2494,6 +2539,32 @@ class FreeBucketServerIntegrationTests(TestCase):
         ).json()
         self.assertEqual(payload['screen'], 'excavator')
         self.assertIn('free_bucket_truck_directory', payload)
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertIn('data-eo-free-bucket-refresh-at=', payload['html'])
+
+        primary = self.client.get(reverse('excavator_work'))
+        self.assertEqual(primary.context['truck_cards'][0]['load_block_reason_code'], 'free_bucket_reserved_elsewhere')
+
+        # Exact TTL boundary. Leave the stored acceptance untouched to exercise
+        # historical offline replay and assert the two display paths agree.
+        FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(
+            occurred_at=timezone.now() - timedelta(minutes=10),
+        )
+        expired = other_client.get(
+            reverse('excavator_work'),
+            {'_operational_fragment': 'excavator', '_operational_version': 0},
+        ).json()
+        self.assertEqual(expired['free_bucket_cards'], [])
+        self.assertIn('data-eo-free-bucket-refresh-at=""', expired['html'])
+        ActiveApplicationSession.objects.create(
+            session_key='driver-online-after-bucket-ttl',
+            access=self.driver_access, role_code='driver', app_code='driver', path='/driver/',
+            last_seen_at=timezone.now(), foreground_seen_at=timezone.now(),
+        )
+        primary = self.client.get(reverse('excavator_work'))
+        self.assertTrue(primary.context['truck_cards'][0]['can_load'])
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
         self.assertEqual(
             [card['truck_id'] for card in payload['free_bucket_cards']],
             [self.truck.id],

@@ -365,14 +365,16 @@ function bindExcavatorTransferCountdowns(shell) {
     var previewBadges = Array.prototype.slice.call(
         shell.querySelectorAll("[data-eo-queue-truck][data-eo-transfer-preview-deadline]")
     );
-    if (!cards.length && !previewBadges.length) return;
+    var freeBucketDeadline = Date.parse(shell.dataset.eoFreeBucketRefreshAt || "");
+    if (!cards.length && !previewBadges.length && !Number.isFinite(freeBucketDeadline)) return;
     var serverEpoch = Date.parse(shell.dataset.eoServerNow || "");
     var clientEpoch = Date.now();
     if (!Number.isFinite(serverEpoch)) serverEpoch = clientEpoch;
 
     function tick() {
         var authoritativeNow = serverEpoch + (Date.now() - clientEpoch);
-        var needsServerConfirmation = false;
+        var freeBucketExpired = Number.isFinite(freeBucketDeadline) && freeBucketDeadline <= authoritativeNow;
+        var needsServerConfirmation = freeBucketExpired;
         cards.forEach(function (card) {
             if (!card.isConnected) return;
             var createdAt = Date.parse(card.dataset.eoTransferCreated || "");
@@ -411,7 +413,7 @@ function bindExcavatorTransferCountdowns(shell) {
             badge.setAttribute("aria-label", "Самосвал " + (badge.dataset.eoTruckNumber || badge.textContent || "") + ". Ожидает подтверждения перевода");
             needsServerConfirmation = true;
         });
-        if (!needsServerConfirmation) return;
+        if (!needsServerConfirmation || document.hidden || navigator.onLine === false) return;
         var retryAt = Number(window.eoTransferDeadlineRefreshRetryAt || 0);
         var lastWake = Number(window.eoTransferDeadlineLastWake || 0);
         if (
@@ -422,7 +424,7 @@ function bindExcavatorTransferCountdowns(shell) {
         window.eoTransferDeadlineLastWake = Date.now();
         if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
             try {
-                window.AppRealtime.wake("haul_transfer_deadline");
+                window.AppRealtime.wake(freeBucketExpired ? "free_bucket_deadline" : "haul_transfer_deadline");
             } catch (error) {
                 /* Прямой серверный refresh всё равно должен продолжиться. */
             }

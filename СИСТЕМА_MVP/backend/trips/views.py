@@ -94,11 +94,13 @@ from .manual_loading import (
     truck_driver_participation,
 )
 from .free_bucket import (
+    FREE_BUCKET_REQUEST_TTL,
     active_free_bucket_acceptance_filter,
     free_bucket_acceptance_expires_at,
     free_bucket_dump_card_expires_at,
     free_bucket_dump_card_is_visible,
     free_bucket_dump_card_visibility_filter,
+    free_bucket_reservation_filter,
     reconcile_expired_free_bucket_acceptances,
 )
 from users.active_role import role_session_state
@@ -4377,7 +4379,7 @@ def excavator_truck_loaded_view(request):
                 status=409,
             )
         from trips.free_bucket import active_free_bucket_acceptance_for_truck
-        if active_free_bucket_acceptance_for_truck(locked_truck, for_update=True):
+        if active_free_bucket_acceptance_for_truck(locked_truck, for_update=True, reservation_only=True):
             return JsonResponse({
                 'ok': False,
                 'error': 'Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.',
@@ -5654,6 +5656,8 @@ def excavator_work_view(request):
     # assignment, so the primary excavator keeps its normal card.  It must
     # nevertheless see why that card is temporarily unavailable.
     from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+    free_bucket_snapshot_at = timezone.now()
+    free_bucket_deadlines = []
     foreign_free_bucket_by_truck_id = {}
     if current_excavator:
         for acceptance in (
@@ -5661,16 +5665,16 @@ def excavator_work_view(request):
             .filter(
                 truck_id__in=[assignment.truck_id for assignment in available_assignments],
             )
-            .filter(active_free_bucket_acceptance_filter(now=timezone.now()))
+            .filter(free_bucket_reservation_filter(now=free_bucket_snapshot_at))
             .exclude(excavator=current_excavator)
-            .select_related('excavator', 'used_trip')
+            .select_related('excavator')
             .order_by('-occurred_at', '-id')
         ):
+            free_bucket_deadlines.append(acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL)
             foreign_free_bucket_by_truck_id.setdefault(
                 acceptance.truck_id,
                 {
                     'label': str(acceptance.excavator.garage_number or acceptance.excavator),
-                    'is_loaded': acceptance.status == FreeBucketAcceptanceStatus.USED,
                 },
             )
 
@@ -5723,11 +5727,7 @@ def excavator_work_view(request):
             'equipment_state_code': equipment_state_code,
             'status_key': status_key,
             'status_label': (
-                (
-                    'На разгрузку под свободным ковшом'
-                    if foreign_free_bucket and foreign_free_bucket['is_loaded']
-                    else 'Под свободным ковшом'
-                )
+                'Под свободным ковшом'
                 if foreign_free_bucket
                 else active_truck_downtime.reason.button_label
                 if active_truck_downtime
@@ -5858,9 +5858,11 @@ def excavator_work_view(request):
                 excavator=current_excavator,
                 status=FreeBucketAcceptanceStatus.ACCEPTED,
             )
+            .filter(free_bucket_reservation_filter(now=free_bucket_snapshot_at))
             .select_related('truck', 'primary_assignment__excavator')
             .order_by('occurred_at', 'id')
         ):
+            free_bucket_deadlines.append(acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL)
             free_bucket_cards.append({
                 'id': acceptance.id,
                 'client_acceptance_id': acceptance.client_acceptance_id,
@@ -6174,6 +6176,7 @@ def excavator_work_view(request):
             'truck_cards': truck_cards,
             'free_bucket_truck_directory': free_bucket_truck_directory,
             'free_bucket_cards': free_bucket_cards,
+            'free_bucket_refresh_at': min(free_bucket_deadlines, default=None),
             'assignment_snapshot_cards': assignment_snapshot_cards,
             'first_ready_assignment_id': first_ready_assignment_id,
             'legacy_trip_client_action_id': legacy_trip_client_action_id,

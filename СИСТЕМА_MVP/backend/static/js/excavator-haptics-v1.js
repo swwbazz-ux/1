@@ -62,8 +62,9 @@
         else clickContext.resume().then(start).catch(function () {});
     }
 
-    function roundControlFeedback() {
+    function roundControlFeedback(options) {
         vibrate([145, 45, 110], 255);
+        if (options && options.sound === false) return;
         try { playControlClick(); } catch (error) {}
     }
 

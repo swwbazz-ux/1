@@ -36,36 +36,14 @@ def free_bucket_acceptance_expires_at(acceptance):
     return anchor + FREE_BUCKET_DUMP_CARD_VISIBILITY if anchor else None
 
 
-def active_free_bucket_acceptance_filter(*, now=None):
-    """Keep requests/acceptances until action; keep USED only for its card window.
-
-    The five-minute window never cancels a pending driver request or an accepted
-    one-load right.  It only retires the already-consumed Excavator card.
-
-    An unspent right also dies with its own shift.  Normally
-    ``cancel_free_bucket_acceptances_for_shift`` does that at shift close, but a
-    row whose shift ended without that cleanup (crash, lost request, a shift
-    closed by another path) used to stay "active" forever: the truck kept
-    showing as taken under a free bucket on the dispatcher board and in the
-    Excavator app, and neither side could clear it.  The right belongs to the
-    shift it was requested in, so an ended or missing shift means it is spent.
-    ``USED`` rows are deliberately left alone here — they belong to a real Trip.
-    """
+def free_bucket_reservation_filter(*, now=None):
+    """Only an unspent, current right can reserve a truck for a temporary load."""
     from .models import FreeBucketAcceptanceStatus
 
     now = now or timezone.now()
-    cutoff = now - FREE_BUCKET_DUMP_CARD_VISIBILITY
     # Включённый, но не использованный ковш живёт не дольше FREE_BUCKET_REQUEST_TTL
     # с момента включения (occurred_at — момент выбора на устройстве водителя).
     request_is_fresh = Q(occurred_at__gt=now - FREE_BUCKET_REQUEST_TTL)
-    used_time_is_recent = Q(used_trip__loaded_at__gt=cutoff) | Q(
-        used_trip__loaded_at__isnull=True,
-        used_at__gt=cutoff,
-    ) | Q(
-        used_trip__loaded_at__isnull=True,
-        used_at__isnull=True,
-        used_trip__created_at__gt=cutoff,
-    )
     # Заявку может завести и водитель (requesting_shift), и машинист
     # экскаватора (loading_shift). Право живо, пока жива хотя бы одна из своих
     # смен; без единой привязки к смене не трогаем — такие записи заводят
@@ -75,27 +53,43 @@ def active_free_bucket_acceptance_filter(*, now=None):
         | Q(loading_shift__isnull=False, loading_shift__closed_at__isnull=True)
         | Q(requesting_shift__isnull=True, loading_shift__isnull=True)
     )
-    return (
-        Q(status__in=(
-            FreeBucketAcceptanceStatus.REQUESTED,
-            FreeBucketAcceptanceStatus.ACCEPTED,
-        )) & shift_is_alive & request_is_fresh
-    ) | (
+    return Q(status__in=(
+        FreeBucketAcceptanceStatus.REQUESTED,
+        FreeBucketAcceptanceStatus.ACCEPTED,
+    )) & shift_is_alive & request_is_fresh
+
+
+def active_free_bucket_acceptance_filter(*, now=None):
+    """Include the spent right during its visual window as well as live reservations."""
+    from .models import FreeBucketAcceptanceStatus
+
+    now = now or timezone.now()
+    cutoff = now - FREE_BUCKET_DUMP_CARD_VISIBILITY
+    used_time_is_recent = Q(used_trip__loaded_at__gt=cutoff) | Q(
+        used_trip__loaded_at__isnull=True,
+        used_at__gt=cutoff,
+    ) | Q(
+        used_trip__loaded_at__isnull=True,
+        used_at__isnull=True,
+        used_trip__created_at__gt=cutoff,
+    )
+    return free_bucket_reservation_filter(now=now) | (
         Q(status=FreeBucketAcceptanceStatus.USED)
         & used_time_is_recent
     )
 
 
-def active_free_bucket_acceptance_for_truck(truck, *, for_update=False, now=None):
-    """Return an unspent request/acceptance while the caller holds the truck lock."""
+def active_free_bucket_acceptance_for_truck(truck, *, for_update=False, now=None, reservation_only=False):
+    """Find a reservation, optionally including the spent right's visual window."""
     from .models import FreeBucketAcceptance
 
+    lookup = free_bucket_reservation_filter if reservation_only else active_free_bucket_acceptance_filter
     queryset = FreeBucketAcceptance.objects.select_related(
         'excavator', 'operator', 'loading_shift', 'requested_by', 'requesting_shift',
     ).filter(
         truck=truck,
     ).filter(
-        active_free_bucket_acceptance_filter(now=now),
+        lookup(now=now),
     ).order_by('-occurred_at', '-id')
     if for_update:
         queryset = queryset.select_for_update(of=('self',))
