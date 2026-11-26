@@ -939,28 +939,11 @@
             <button type="button" class="settlement-room-panel-close" data-employee-panel-close aria-label="Закрыть карточку жильца">×</button>
         </header>
         <div class="settlement-employee-panel-body">
-            <div data-employee-panel-body></div>
             <p class="settlement-resident-card-feedback" data-resident-card-feedback role="status" hidden></p>
-            <button type="button" class="settlement-bed-prep-secondary" data-resident-card-edit hidden>Редактировать данные</button>
-            <form class="settlement-resident-card-form" data-resident-card-form hidden>
-                <fieldset data-resident-external-fields>
-                    <legend>Данные жильца</legend>
-                    <label>ФИО <input name="full_name" maxlength="255" required></label>
-                    <label>Организация <input name="organization" maxlength="255" required></label>
-                    <label>Должность <input name="position_title" maxlength="255"></label>
-                    <label>Табельный номер <input name="external_personnel_number" maxlength="64"></label>
-                    <label>Телефон <input name="phone" type="tel" maxlength="64"></label>
-                    <label>Пол
-                        <select name="sex" required>
-                            <option value="male">Мужской</option>
-                            <option value="female">Женский</option>
-                        </select>
-                    </label>
-                </fieldset>
-                <label>Заметка по проживанию
-                    <textarea name="housing_note" rows="4" maxlength="3000"></textarea>
-                </label>
-                <div class="settlement-resident-card-actions">
+            <form class="settlement-resident-card-form" data-resident-card-form>
+                <div data-employee-panel-body></div>
+                <button type="button" class="settlement-bed-prep-secondary" data-resident-card-edit hidden>Редактировать данные</button>
+                <div class="settlement-resident-card-actions" data-resident-card-actions hidden>
                     <button type="submit" class="settlement-place-button">Сохранить</button>
                     <button type="button" class="settlement-place-button" data-resident-card-start hidden>Начать работу</button>
                     <button type="button" class="settlement-bed-prep-secondary" data-resident-card-cancel>Отмена</button>
@@ -1040,7 +1023,7 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-excel-residents-v1-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3-map-header-v1-relocate-v1-resident-card-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3-map-header-v1-relocate-v1-resident-card-v2"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1-relocate-v1-resident-card-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-resident-card-v1"></script>

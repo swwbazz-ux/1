@@ -5,13 +5,14 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, router, transaction
 from django.db.models import Count, Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
-from core.production_time import production_work_date
+from core.production_time import BUSINESS_TIME_ZONE, DAY_SHIFT_START, production_work_date
 from shifts.models import WatchPeriod
-from users.models import Employee, PersonnelPosition
+from users.models import AdminActionLog, Employee, PersonnelPosition
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 
-from .intervals import occupancy_interval
+from .intervals import intervals_overlap, occupancy_interval
 from .models import (
     AccommodationAnchor,
     AccommodationAnchorBedAssignment,
@@ -20,6 +21,7 @@ from .models import (
     PhysicalBed,
     PhysicalRoom,
     SettlementBedPreparation,
+    SettlementBedReserve,
     SettlementCohortMember,
     SettlementPlacementEvent,
     SettlementPreviewApplication,
@@ -1325,6 +1327,108 @@ def _validate_occupancy_conflicts(
             ValidationError(block.message, code=block.code)
             for block in conflict_result.blocks
         ])
+
+
+def resident_stay_version(occupancy):
+    return f'{occupancy.starts_at.isoformat()}/{occupancy.ends_at.isoformat() if occupancy.ends_at else ""}'
+
+
+def can_edit_stay(occupancy):
+    return (
+        occupancy.assignment_type != EmployeeBedOccupancy.AssignmentType.PROPOSED
+        and occupancy.terminated_at is None and occupancy.ended_at is None
+    )
+
+
+def _stay_input(value, previous, *, required):
+    if value == '' and not required:
+        return None
+    if previous is not None and value == previous.astimezone(BUSINESS_TIME_ZONE).isoformat(timespec='minutes')[:16]:
+        return previous
+    try:
+        result = parse_datetime(value)
+    except (ValueError, OverflowError):
+        result = None
+    if result is None or timezone.is_aware(result) or value != result.isoformat(timespec='minutes'):
+        raise ValidationError('Укажите дату и время по Владивостоку.')
+    return result.replace(tzinfo=BUSINESS_TIME_ZONE)
+
+
+@transaction.atomic
+def update_resident_stay(*, resident_id, occupancy_id, version, starts_at, ends_at, control_context):
+    using = router.db_for_write(EmployeeBedOccupancy)
+    lease = lock_settlement_write_lease(control_context=control_context, using=using)
+    snapshot = _occupancy_snapshot_by_id(occupancy_id=occupancy_id, using=using)
+    if snapshot[1] != resident_id:
+        raise _settlement_error('Размещение изменилось. Откройте карточку заново.', 'settlement.manual.occupancy_stale')
+    plan = build_settlement_resident_lock_plan(resident_ids=(resident_id,), using=using)
+    locked = lock_settlement_write_access(
+        lease=lease, control_context=control_context, employee_ids=plan.employee_ids, using=using,
+    )
+    actor = locked.access_by_id(control_context.owner_access_id)
+    resident = lock_settlement_residents_after_access(
+        plan, locked_employees=locked.employees,
+    ).resident_by_id(resident_id)
+    _lock_occupancy_context_rows(snapshot=snapshot, using=using)
+    bed = _locked_beds(snapshot[2], using=using)[snapshot[2]]
+    room = _locked_rooms(bed.room_id, using=using)[bed.room_id]
+    related = _locked_related_occupancies(resident_id=resident_id, bed_ids=(bed.pk,), using=using)
+    occupancy = next((row for row in related if row.pk == occupancy_id), None)
+    now = timezone.now()
+    if (
+        occupancy is None or occupancy.physical_bed_id != bed.pk or not occupancy.is_active_at(now)
+        or not can_edit_stay(occupancy) or resident_stay_version(occupancy) != version
+    ):
+        raise _settlement_error('Размещение изменилось. Откройте карточку заново.', 'settlement.manual.occupancy_stale')
+    start = _stay_input(starts_at, occupancy.starts_at, required=True)
+    end = _stay_input(ends_at, occupancy.ends_at, required=False)
+    if (start, end) == occupancy_interval(occupancy):
+        return
+    if start > now:
+        raise ValidationError('Дата фактического заселения не может быть в будущем.')
+    if end is not None and end <= now:
+        raise ValidationError('Для завершения проживания используйте «Освободить койко-место».')
+    _validate_assignment_interval(assignment_type=occupancy.assignment_type, starts_at=start, ends_at=end)
+    _validate_occupancy_conflicts(
+        resident_id=resident_id, bed=bed, starts_at=start, ends_at=end,
+        persisted_occupancies=related, current_occupancy_id=occupancy.pk,
+    )
+
+    added_intervals = []
+    if start < occupancy.starts_at:
+        added_intervals.append((start, occupancy.starts_at))
+    if occupancy.ends_at and (end is None or end > occupancy.ends_at):
+        if SettlementBedReserve.objects.using(using).filter(physical_bed=bed, is_active=True).exists():
+            raise ValidationError('Койко-место в резерве. Продлить срок можно после снятия резерва.')
+        preparations = SettlementBedPreparation.objects.using(using).filter(
+            physical_bed=bed, status=SettlementBedPreparation.Status.PREPARED, hold_until__gt=now,
+        )
+        if any(
+            intervals_overlap(
+                occupancy.ends_at, end,
+                datetime.combine(preparation.arrival_date, DAY_SHIFT_START, BUSINESS_TIME_ZONE),
+                preparation.hold_until,
+            )
+            for preparation in preparations
+        ):
+            raise ValidationError('На новый срок койко-место подготовлено для заезда.')
+        added_intervals.append((occupancy.ends_at, end))
+    for added_start, added_end in added_intervals:
+        _validate_resident_and_destination(
+            resident=resident, room=room, starts_at=added_start, ends_at=added_end,
+            confirm_itr=True, placement_reason=occupancy.placement_reason,
+            exclude_occupancy_ids=(occupancy.pk,), using=using,
+        )
+    original = resident_stay_version(occupancy)
+    occupancy.starts_at = start
+    occupancy.ends_at = end
+    occupancy.save(using=using, update_fields=['starts_at', 'ends_at'])
+    AdminActionLog.objects.using(using).create(
+        actor_id=actor.employee_id, action='Изменён срок проживания',
+        object_type='EmployeeBedOccupancy', object_id=str(occupancy.pk),
+        old_value=original, new_value=resident_stay_version(occupancy),
+        comment=f'Доступ расселения №{actor.pk}',
+    )
 
 
 def _create_occupancy(

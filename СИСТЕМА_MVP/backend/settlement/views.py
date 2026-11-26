@@ -132,12 +132,15 @@ from .services import (
     current_housing_official_assignments,
     current_roster_resolution,
     build_auto_settlement_preview,
+    can_edit_stay,
     effective_occupancy_at_q,
     relocate_resident_to_bed,
     release_resident_from_bed,
+    resident_stay_version,
     settle_resident_on_bed,
     swap_resident_beds,
     unsettled_current_roster_employees,
+    update_resident_stay,
 )
 from .special_fund import room_anchor_types_by_room
 from .temporary_placement import (
@@ -1641,7 +1644,7 @@ def settlement_employee_detail_view(request, employee_id):
     })
 
 
-def _resident_stay_fields(**subject):
+def _resident_stay_fields(*, editable=False, **subject):
     occupancy = (
         EmployeeBedOccupancy.objects
         .filter(effective_occupancy_at_q(timezone.now()), **subject)
@@ -1659,10 +1662,20 @@ def _resident_stay_fields(**subject):
             f'койка {bed.position} ({bed.stable_id})'
         )
 
-    return {
+    fields = {
         'residence': residence,
         'stay_period': _bed_stay_period(occupancy) if occupancy else None,
     }
+    if editable and occupancy and can_edit_stay(occupancy):
+        fields['stay_edit'] = {
+            'occupancy_id': occupancy.pk,
+            'version': resident_stay_version(occupancy),
+            'start': business_localtime(occupancy.starts_at).isoformat(timespec='minutes')[:16],
+            'end': business_localtime(occupancy.ends_at).isoformat(timespec='minutes')[:16] if occupancy.ends_at else '',
+            'end_editable': occupancy.assignment_type != EmployeeBedOccupancy.AssignmentType.TEMPORARY_UNAPPROVED,
+            'end_required': occupancy.assignment_type == EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        }
+    return fields
 
 
 def _employee_card_fields(employee):
@@ -1690,13 +1703,14 @@ def _employee_card_fields(employee):
 
 def _resident_card_payload(resident):
     fields = _external_resident_payload(resident) if resident.is_external else _employee_card_fields(resident.employee)
+    editable = resident.status == SettlementResident.Status.ACTIVE
     return {
         **fields,
-        **_resident_stay_fields(resident=resident),
+        **_resident_stay_fields(resident=resident, editable=editable),
         'id': resident.pk,
         'personnel_number': resident.personnel_number,
         'is_external': resident.is_external,
-        'editable': resident.status == SettlementResident.Status.ACTIVE,
+        'editable': editable,
         'revision': resident.revision,
         'housing_note': resident.housing_note,
     }
@@ -1716,6 +1730,7 @@ def settlement_resident_detail_view(request, resident_id):
         try:
             payload = _external_resident_request_payload(request)
             revision = payload.pop('revision', None)
+            stay = payload.pop('stay', None)
             fields = {'housing_note': forms.CharField(label='Заметка', max_length=3000, required=False)}
             if resident.is_external:
                 fields.update({
@@ -1734,15 +1749,33 @@ def settlement_resident_detail_view(request, resident_id):
                     updates[key] = fields[key].clean(value)
                 except ValidationError as error:
                     raise ValidationError(f'{fields[key].label}. {error.messages[0]}') from error
-            resident = update_resident_card(
-                resident_id=resident.pk, expected_revision=revision,
-                control_context=_settlement_write_control_context(request), **updates,
-            )
+            control = _settlement_write_control_context(request)
+            with transaction.atomic():
+                if stay is not None:
+                    if (
+                        not isinstance(stay, dict) or set(stay) != {'occupancy_id', 'version', 'start', 'end'}
+                        or type(stay['occupancy_id']) is not int or stay['occupancy_id'] <= 0
+                        or any(not isinstance(stay[key], str) for key in ('version', 'start', 'end'))
+                    ):
+                        raise ValidationError('Некорректные данные срока проживания.')
+                    update_resident_stay(
+                        resident_id=resident.pk, occupancy_id=stay['occupancy_id'],
+                        version=stay['version'], starts_at=stay['start'], ends_at=stay['end'],
+                        control_context=control,
+                    )
+                resident = update_resident_card(
+                    resident_id=resident.pk, expected_revision=revision, control_context=control, **updates,
+                )
         except ValidationError as error:
-            code = getattr(error, 'code', None) or ''
+            _, code = _validation_error_details(error)
+            code = code or ''
             if code.startswith('settlement.control.'):
                 return _control_error_response(request, error)
-            status = 409 if code in ('settlement.resident.stale_revision', 'settlement.resident.archived') else 400
+            status = 409 if code in (
+                'settlement.resident.stale_revision', 'settlement.resident.archived',
+                'settlement.manual.occupancy_stale', 'settlement.manual.occupancy_not_found',
+                'settlement.bed.interval_overlap', 'settlement.employee.interval_overlap',
+            ) else 400
             return JsonResponse({'ok': False, 'error': ' '.join(error.messages)}, status=status)
     return JsonResponse({'ok': True, 'resident': _resident_card_payload(resident)})
 

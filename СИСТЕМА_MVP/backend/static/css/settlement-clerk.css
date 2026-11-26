@@ -3259,22 +3259,15 @@ body.settlement-auto-preview-modal-open {
     font-weight: 500;
 }
 
-.settlement-resident-card-form,
-.settlement-resident-card-form fieldset {
+.settlement-resident-card-form {
     display: grid;
     gap: 12px;
     min-width: 0;
 }
 
-.settlement-resident-card-form fieldset {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin: 0;
-    padding: 0;
-    border: 0;
-}
-
-.settlement-resident-card-form legend { margin-bottom: 8px; font-weight: 700; }
-.settlement-resident-card-form label { display: grid; gap: 4px; margin: 0; font-weight: 600; }
+.settlement-resident-card-form dt { align-self: center; }
+.settlement-resident-card-form label { margin: 0; font: inherit; }
+.settlement-employee-panel-details:has(textarea) > :nth-last-child(-n+2) { grid-column: 1 / -1; }
 .settlement-resident-card-form :is(input, select, textarea) {
     width: 100%;
     min-width: 0;
@@ -3295,7 +3288,7 @@ body.settlement-auto-preview-modal-open {
 .settlement-resident-card-feedback.is-error { color: var(--admin-red); }
 
 @media (max-width: 480px) {
-    .settlement-resident-card-form fieldset { grid-template-columns: minmax(0, 1fr); }
+    .settlement-resident-card-form .settlement-employee-panel-details { grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr); }
 }
 
 .settlement-occupied-actions {

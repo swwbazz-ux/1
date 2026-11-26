@@ -16,6 +16,7 @@ from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.production_time import business_localtime
 from references.models import Dormitory
 from shifts.models import WatchPeriod
 from users.models import (
@@ -1688,6 +1689,57 @@ class BedReserveServiceTests(TemporaryPlacementBase):
 
 
 class TemporaryPlacementHttpTests(TemporaryPlacementBase):
+    def test_resident_card_corrects_stay_and_saves_note_together(self):
+        resident = self.candidate_resident
+        original_end = timezone.now() + timedelta(days=2)
+        occupancy = self.create_occupancy(resident=resident, bed=self.beds[0], ends_at=original_end)
+        self.authenticate()
+        self.acquire()
+        url = reverse('settlement_resident_detail', args=[resident.pk])
+        card = self.client.get(url).json()['resident']
+        stay = card['stay_edit']
+        new_end = business_localtime(original_end + timedelta(days=1)).replace(second=0, microsecond=0)
+        payload = {
+            'revision': card['revision'], 'housing_note': 'Срок уточнён',
+            'stay': {
+                'occupancy_id': stay['occupancy_id'], 'version': stay['version'],
+                'start': stay['start'], 'end': new_end.isoformat(timespec='minutes')[:16],
+            },
+        }
+        response = self.post_json('settlement_resident_detail', payload, args=[resident.pk])
+        self.assertEqual(response.status_code, 200, response.json())
+        updated_start = occupancy.starts_at
+        occupancy.refresh_from_db()
+        self.assertEqual(occupancy.starts_at, updated_start)
+        self.assertEqual(occupancy.ends_at, new_end)
+        self.assertEqual(self.client.get(url).json()['resident']['housing_note'], 'Срок уточнён')
+        self.assertEqual(self.post_json('settlement_resident_detail', payload, args=[resident.pk]).status_code, 409)
+
+    def test_stay_extension_over_another_booking_rejects_the_note_too(self):
+        resident = self.candidate_resident
+        end = timezone.now() + timedelta(days=2)
+        occupancy = self.create_occupancy(resident=resident, bed=self.beds[0], ends_at=end)
+        self.create_occupancy(
+            resident=self.second_candidate_resident, bed=occupancy.physical_bed,
+            starts_at=end, ends_at=end + timedelta(days=4),
+        )
+        self.authenticate()
+        self.acquire()
+        card = self.client.get(reverse('settlement_resident_detail', args=[resident.pk])).json()['resident']
+        stay = card['stay_edit']
+        response = self.post_json('settlement_resident_detail', {
+            'revision': card['revision'], 'housing_note': 'Нельзя сохранить частично',
+            'stay': {
+                'occupancy_id': stay['occupancy_id'], 'version': stay['version'], 'start': stay['start'],
+                'end': business_localtime(end + timedelta(days=1)).isoformat(timespec='minutes')[:16],
+            },
+        }, args=[resident.pk])
+        self.assertEqual(response.status_code, 409, response.json())
+        occupancy.refresh_from_db()
+        resident.refresh_from_db()
+        self.assertEqual(occupancy.ends_at, end)
+        self.assertFalse(resident.housing_note)
+
     def test_employee_resident_card_saves_note_and_reads_number_from_employee(self):
         resident = self.candidate_resident
         self.candidate.personnel_number = '0012'

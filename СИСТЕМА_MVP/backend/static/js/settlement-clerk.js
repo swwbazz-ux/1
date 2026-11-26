@@ -40,6 +40,7 @@
     var employeePanelBody = root.querySelector("[data-employee-panel-body]");
     var residentEditButton = root.querySelector("[data-resident-card-edit]");
     var residentEditForm = root.querySelector("[data-resident-card-form]");
+    var residentCardActions = root.querySelector("[data-resident-card-actions]");
     var residentCardStart = root.querySelector("[data-resident-card-start]");
     var residentCardFeedback = root.querySelector("[data-resident-card-feedback]");
     var openedResident = null;
@@ -1918,18 +1919,44 @@
         employeePanelBackdrop.hidden = true;
     }
 
-    function renderResidentPanel(resident) {
+    function residentInput(name, value, {type = "text", maxLength, required = false} = {}) {
+        var input = document.createElement("input");
+        input.name = name;
+        input.type = type;
+        input.value = value || "";
+        input.required = required;
+        if (maxLength) input.maxLength = maxLength;
+        return input;
+    }
+
+    function renderResidentPanel(resident, editing = false) {
         if (!employeePanelBody || !employeePanelTitle) return;
         employeePanelTitle.textContent = resident.full_name;
         employeePanelBody.textContent = "";
         var details = element("dl", "settlement-employee-panel-details");
-        var fields = [["Табельный номер", resident.personnel_number || "Не указан"]];
+        var externalEdit = editing && resident.is_external;
+        var fields = [];
+        if (externalEdit) {
+            fields.push(["ФИО", "", residentInput("full_name", resident.full_name, {maxLength: 255, required: true})]);
+        }
+        fields.push(["Табельный номер", resident.personnel_number || "Не указан",
+            externalEdit && residentInput("external_personnel_number", resident.personnel_number, {maxLength: 64})]);
         if (resident.is_external) {
+            var sex;
+            if (externalEdit) {
+                sex = document.createElement("select");
+                sex.name = "sex";
+                sex.add(new Option("Мужской", "male"));
+                sex.add(new Option("Женский", "female"));
+                sex.value = resident.external_sex;
+            }
             fields.push(
                 ["Тип жильца", resident.resident_type_label],
-                ["Организация", resident.organization],
-                ["Должность", resident.position_title || "Не указана"],
-                ["Пол", resident.external_sex === "female" ? "Женский" : "Мужской"]
+                ["Организация", resident.organization,
+                    externalEdit && residentInput("organization", resident.organization, {maxLength: 255, required: true})],
+                ["Должность", resident.position_title || "Не указана",
+                    externalEdit && residentInput("position_title", resident.position_title, {maxLength: 255})],
+                ["Пол", resident.external_sex === "female" ? "Женский" : "Мужской", sex]
             );
         } else {
             fields.push(
@@ -1941,21 +1968,50 @@
                 ["Пол", resident.sex]
             );
         }
-        fields.push(["Телефон", resident.phone || "Не указан"], ["Фактическое место", resident.residence]);
+        fields.push(
+            ["Телефон", resident.phone || "Не указан",
+                externalEdit && residentInput("phone", resident.phone, {type: "tel", maxLength: 64})],
+            ["Фактическое место", resident.residence]
+        );
         if (resident.stay_period) {
+            var stay = editing && resident.stay_edit;
             fields.push(
-                ["Заселение на койку", resident.stay_period.start],
-                ["Выезд с койки", resident.stay_period.end || "Дата не указана"]
+                [stay ? "Заселение по Владивостоку" : "Заселение на койку", resident.stay_period.start,
+                    stay && residentInput("stay_start", stay.start, {type: "datetime-local", required: true})],
+                [stay ? "Плановый выезд по Владивостоку" : "Выезд с койки", resident.stay_period.end || "Дата не указана",
+                    stay && stay.end_editable && residentInput("stay_end", stay.end, {
+                        type: "datetime-local", required: stay.end_required
+                    })]
             );
         }
+        var note;
+        if (editing) {
+            note = document.createElement("textarea");
+            note.name = "housing_note";
+            note.value = resident.housing_note;
+            note.maxLength = 3000;
+            note.rows = 3;
+        }
+        fields.push(["Заметка по проживанию", resident.housing_note || "Нет заметки", note, "settlement-resident-card-note"]);
         fields.forEach(function (row) {
-            details.appendChild(element("dt", "", row[0]));
-            details.appendChild(element("dd", "", row[1]));
+            var [label, value, input, cssClass] = row;
+            var term = element("dt", "");
+            var definition = element("dd", cssClass || "");
+            if (input) {
+                input.id = "resident-card-" + input.name;
+                var labelElement = element("label", "", label);
+                labelElement.htmlFor = input.id;
+                term.appendChild(labelElement);
+                definition.appendChild(input);
+            } else {
+                term.textContent = label;
+                definition.textContent = value;
+            }
+            details.append(term, definition);
         });
-        details.appendChild(element("dt", "", "Заметка по проживанию"));
-        details.appendChild(element("dd", "settlement-resident-card-note", resident.housing_note || "Нет заметки"));
         employeePanelBody.appendChild(details);
-        residentEditButton.hidden = !resident.editable;
+        residentCardActions.hidden = !editing;
+        residentEditButton.hidden = editing || !resident.editable;
     }
 
     function residentCardUrl(id) {
@@ -1983,7 +2039,7 @@
         employeePanelBody.hidden = false;
         employeePanelBody.replaceChildren();
         employeePanelTitle.textContent = "Карточка жильца";
-        residentEditForm.hidden = residentEditButton.hidden = true;
+        residentCardActions.hidden = residentEditButton.hidden = true;
         employeePanel.hidden = employeePanelBackdrop.hidden = false;
         employeePanel.setAttribute("aria-hidden", "false");
         employeePanelClose.focus();
@@ -2000,7 +2056,7 @@
     }
 
     function syncResidentCardControls() {
-        if (!residentEditForm || residentEditForm.hidden) return;
+        if (!residentCardActions || residentCardActions.hidden) return;
         var submit = residentEditForm.querySelector("[type=submit]");
         submit.hidden = !controlHeld;
         submit.disabled = residentCardSaving;
@@ -2009,40 +2065,37 @@
     }
 
     if (residentEditForm) {
-        var externalCardFields = residentEditForm.querySelector("[data-resident-external-fields]");
         residentEditButton.addEventListener("click", function () {
-            var resident = openedResident;
-            externalCardFields.hidden = externalCardFields.disabled = !resident.is_external;
-            var fields = residentEditForm.elements;
-            fields.housing_note.value = resident.housing_note;
-            if (resident.is_external) {
-                fields.full_name.value = resident.full_name;
-                fields.organization.value = resident.organization;
-                fields.position_title.value = resident.position_title;
-                fields.external_personnel_number.value = resident.personnel_number;
-                fields.phone.value = resident.phone;
-                fields.sex.value = resident.external_sex;
-            }
             showResidentCardFeedback("");
-            employeePanelBody.hidden = residentEditButton.hidden = true;
-            residentEditForm.hidden = false;
+            renderResidentPanel(openedResident, true);
             syncResidentCardControls();
-            (resident.is_external ? fields.full_name : fields.housing_note).focus();
+            residentEditForm.querySelector("input, textarea").focus();
         });
         residentCardStart.addEventListener("click", acquireControl);
         residentEditForm.querySelector("[data-resident-card-cancel]").addEventListener("click", function () {
             if (residentCardSaving) return;
-            residentEditForm.hidden = true;
-            employeePanelBody.hidden = residentEditButton.hidden = false;
+            renderResidentPanel(openedResident);
             showResidentCardFeedback("");
             residentEditButton.focus();
         });
         residentEditForm.addEventListener("submit", async function (event) {
             event.preventDefault();
-            if (!openedResident || residentCardSaving || !controlHeld) return;
+            if (!openedResident || residentCardActions.hidden || residentCardSaving || !controlHeld) return;
             var request = residentCardRequest;
             var changes = Object.fromEntries(new FormData(residentEditForm));
             changes.revision = openedResident.revision;
+            var oldStay = openedResident.stay_edit;
+            if (oldStay) {
+                var end = changes.stay_end ?? oldStay.end;
+                if (changes.stay_start !== oldStay.start || end !== oldStay.end) {
+                    changes.stay = {
+                        occupancy_id: oldStay.occupancy_id, version: oldStay.version,
+                        start: changes.stay_start, end: end
+                    };
+                }
+                delete changes.stay_start;
+                delete changes.stay_end;
+            }
             residentCardSaving = true;
             syncResidentCardControls();
             showResidentCardFeedback("Сохраняем…");
@@ -2055,6 +2108,10 @@
                 root.querySelectorAll('[data-bed][data-resident-id="' + resident.id + '"]').forEach(function (bed) {
                     bed.dataset.occupantName = resident.full_name;
                     bed.dataset.personnelNumber = resident.personnel_number || "";
+                    if (resident.stay_edit && Number(bed.dataset.occupancyId) === resident.stay_edit.occupancy_id) {
+                        bed.dataset.stayStart = resident.stay_period.start;
+                        bed.dataset.stayEnd = resident.stay_period.end;
+                    }
                     if (resident.is_external) {
                         bed.dataset.workLabel = bed.dataset.tooltipWorkLabel = resident.organization;
                     }
@@ -2063,8 +2120,6 @@
                 refreshResidentSearch();
                 if (request !== residentCardRequest) return;
                 openedResident = resident;
-                residentEditForm.hidden = true;
-                employeePanelBody.hidden = false;
                 renderResidentPanel(resident);
                 showResidentCardFeedback("Данные сохранены");
                 residentEditButton.focus();
