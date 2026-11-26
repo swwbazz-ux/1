@@ -55,6 +55,21 @@
 .duty-older, .duty-return { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }
 .duty-paging { text-align: center; }
 .duty-heading-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 16px; }
+.duty-history { min-width: 0; }
+.duty-history summary { width: fit-content; color: var(--duty-link); cursor: pointer; }
+.duty-history form { margin: 8px 0 0; padding: 12px; border: 1px solid var(--gd-line); border-radius: 6px; background: var(--gd-panel); }
+.duty-history form p { margin: 0 0 10px; color: var(--duty-secondary); }
+.duty-history-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.duty-history-controls label { display: block; margin-block-end: 4px; }
+.duty-history-controls input[type="date"] {
+    min-height: 44px; width: 11em; max-width: 100%; padding: 6px 10px;
+    border: 1px solid var(--duty-secondary); border-radius: 5px;
+    background: var(--gd-panel); color: var(--gd-ink); color-scheme: dark; font: inherit;
+}
+.dispatcher-day .duty-history-controls input[type="date"] { color-scheme: light; }
+.duty-history-controls input[type="date"]::-webkit-calendar-picker-indicator { opacity: 1; filter: none; cursor: pointer; }
+.duty-history-controls button { width: auto; min-height: 44px; }
+.duty-history-controls button[value="save"] { color: var(--duty-link); border-color: currentColor; }
 .duty-report a.duty-period-link { display: inline-flex; align-items: center; min-height: 40px; padding: 6px 12px; border: 1px solid currentColor; border-radius: 5px; font-weight: 600; text-decoration: none; }
 .duty-staff { margin: 2px 0 10px; font-size: 14px; }
 .duty-report button.duty-plot { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: start; }
@@ -124,6 +139,9 @@
     [data-duty-report] .dispatcher-subnav { flex-basis: 100%; }
     [data-duty-report] .dispatcher-report-actions { margin-left: auto; }
     [data-duty-report] .dispatcher-report-actions button:disabled { display: none; }
+}
+@media print {
+    .duty-history { display: none; }
 }
 @media (pointer: coarse) {
     .duty-report button, .duty-dialog button, .duty-dialog select { min-height: 44px; }

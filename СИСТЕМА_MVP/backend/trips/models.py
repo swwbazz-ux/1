@@ -348,6 +348,7 @@ class DispatcherDutyTracking(models.Model):
     """Дата начала достоверного учёта поста, в том числе непринятых смен."""
 
     started_at = models.DateTimeField('Начало учёта', default=timezone.now)
+    history_from = models.DateField('Показывать смены с', null=True, blank=True)
 
 
 class DispatcherDutyWindow(models.Model):

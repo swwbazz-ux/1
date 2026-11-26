@@ -22,7 +22,7 @@ class PeriodReportTests(TestCase):
     def setUpTestData(cls):
         cls.manager, cls.dispatcher, cls.relief = [cls.access(role, person) for role, person in
             [('manager', 'Руководитель'), ('dispatcher', '=Диспетчер А'), ('dispatcher', 'Диспетчер Б')]]
-        DispatcherDutyTracking.objects.update_or_create(pk=1, defaults={'started_at': cls.start})
+        DispatcherDutyTracking.objects.update_or_create(pk=1, defaults={'started_at': cls.start, 'history_from': None})
 
     @staticmethod
     def access(code, name):

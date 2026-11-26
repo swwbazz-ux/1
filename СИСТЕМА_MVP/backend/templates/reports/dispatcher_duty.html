@@ -4,8 +4,8 @@
 {% block body_class %}dispatcher-control-screen dispatcher-duty-screen{% endblock %}
 {% block extra_head %}
 {{ block.super }}
-<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=6">
-<script src="{% static 'js/dispatcher-duty-report.js' %}?v=4" defer></script>
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=7">
+<script src="{% static 'js/dispatcher-duty-report.js' %}?v=5" defer></script>
 {% endblock %}
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme data-duty-report>
@@ -17,6 +17,18 @@
         <div class="duty-heading-tools"><span class="duty-as-of">По Владивостоку · Обновлено <time data-duty-as-of>{{ report.as_of|date:"d.m.Y H:i" }}</time></span>
           <a class="duty-period-link" href="{% url 'management_dispatcher_period' %}">Отчёт за период</a></div>
       </div>
+      <details class="duty-history">
+        <summary>Настроить историю</summary>
+        <form method="post" action="{% url 'management_dispatcher_history' %}">
+          {% csrf_token %}
+          <p>Настройка действует для всех руководителей. Смены до выбранной даты скрываются в журнале и отчёте. Их можно вернуть в любой момент.</p>
+          <div class="duty-history-controls">
+            <div>{{ history_form.history_from.label_tag }}{{ history_form.history_from }}</div>
+            <button type="submit" name="action" value="save">Применить</button>
+            <button type="submit" name="action" value="restore" formnovalidate>Показать всю историю</button>
+          </div>
+        </form>
+      </details>
       <div class="duty-legend" aria-label="Обозначения шкалы">
         <span><i class="duty-on"></i>В пульте</span><span><i class="duty-out"></i>Вне пульта</span>
         <span><i class="duty-unknown"></i>Нет данных</span><span><i class="duty-future"></i>Предстоит</span>

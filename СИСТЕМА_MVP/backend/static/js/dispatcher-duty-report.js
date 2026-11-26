@@ -7,6 +7,7 @@
     const log = dialog.querySelector("[data-duty-log]");
     const selection = dialog.querySelector("[data-duty-selection]");
     const status = root.querySelector(".duty-refresh-status");
+    const history = root.querySelector(".duty-history");
     const feed = root.querySelector("[data-duty-slots]");
     const paging = feed.querySelector("[data-duty-paging]");
     let fetching = false;
@@ -66,7 +67,8 @@
     });
 
     function canUpdate() {
-        return !document.hidden && !dialog.open && !pointerDown && !window.getSelection()?.toString();
+        return !document.hidden && !dialog.open && !pointerDown &&
+            !history?.contains(document.activeElement) && !window.getSelection()?.toString();
     }
     async function readPage(url) {
         url.searchParams.set("partial", "1");
@@ -124,15 +126,20 @@
         url.searchParams.set("since", (visible.at(-1) || first).dataset.dutyDay);
         fetching = true;
         try {
-            const next = await readPage(url);
+            let next = await readPage(url);
             if (!next || !canUpdate()) return;
+            const historyChanged = feed.dataset.historyFrom !== next.dataset.historyFrom;
+            if (historyChanged) {
+                next = await readPage(new URL(location.pathname, location.origin));
+                if (!next || !canUpdate()) return;
+            }
             const days = [...next.querySelectorAll("[data-duty-day]")];
             if (!days.length) return;
             const focus = document.activeElement;
             const focusedSlot = focus.closest("[data-duty-slot]");
             const focusIndex = focusedSlot ? [...focusedSlot.querySelectorAll("[data-open-duty]")].indexOf(focus) : -1;
             const focusedDate = focusedSlot?.closest("[data-duty-day]").dataset.dutyDay;
-            if (before || days.some(day => day.dataset.dutyDay === first.dataset.dutyDay)) {
+            if (!historyChanged && (before || days.some(day => day.dataset.dutyDay === first.dataset.dutyDay))) {
                 const existing = new Map(Array.from(feed.querySelectorAll("[data-duty-day]"), day => [day.dataset.dutyDay, day]));
                 for (const day of days) {
                     const old = existing.get(day.dataset.dutyDay);
@@ -144,6 +151,12 @@
                 feed.querySelectorAll("[data-duty-day]").forEach(day => day.remove());
                 paging.before(...days);
                 updatePaging(next);
+            }
+            feed.dataset.historyFrom = next.dataset.historyFrom;
+            if (history) {
+                const field = history.querySelector('input[name="history_from"]');
+                field.max = next.dataset.date;
+                if (historyChanged) field.value = next.dataset.historyFrom;
             }
             if (focusIndex >= 0 && !focus.isConnected) {
                 const day = days.find(item => item.dataset.dutyDay === focusedDate);

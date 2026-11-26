@@ -1,5 +1,5 @@
 {% load l10n %}
-<div data-duty-slots data-date="{{ report.date|date:'Y-m-d' }}" data-as-of="{{ report.as_of|date:'d.m.Y H:i' }}">
+<div data-duty-slots data-date="{{ report.date|date:'Y-m-d' }}" data-as-of="{{ report.as_of|date:'d.m.Y H:i' }}" data-history-from="{{ history_from|date:'Y-m-d' }}">
 {% for day in report.days %}
 <section class="duty-day" data-duty-day="{{ day.date|date:'Y-m-d' }}" aria-labelledby="duty-day-{{ day.date|date:'Y-m-d' }}">
   <h3 class="duty-day-heading" id="duty-day-{{ day.date|date:'Y-m-d' }}"><time datetime="{{ day.date|date:'Y-m-d' }}">{{ day.date|date:"j E Y" }}</time></h3>

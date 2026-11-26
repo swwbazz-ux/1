@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from django.apps import apps
 from django.db import connection
-from django.test import RequestFactory, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -33,7 +33,7 @@ class DispatcherDutyTests(TestCase):
         cls.relief = cls.access('dispatcher', 'Диспетчер Б')
         cls.manager = cls.access('manager', 'Руководитель')
         cls.admin = cls.access('admin', 'Администратор')
-        DispatcherDutyTracking.objects.update_or_create(pk=1, defaults={'started_at': cls.start})
+        DispatcherDutyTracking.objects.update_or_create(pk=1, defaults={'started_at': cls.start, 'history_from': None})
 
     @staticmethod
     def access(code, name):
@@ -102,7 +102,8 @@ class DispatcherDutyTests(TestCase):
         with patch('django.utils.timezone.now', return_value=self.start + timedelta(days=1, hours=2)):
             page = self.client.get(path, {'date': self.start.date()})
             self.assertEqual([d['date'] for d in page.context['report']['days']], [today, self.start.date()])
-            self.assertNotContains(page, 'type="date"')
+            self.assertNotContains(page, 'name="date"')
+            self.assertContains(page, 'name="history_from"')
             self.assertContains(page, 'Идёт сейчас', count=1)
             self.assertContains(page, f'href="{path}"')
             history = self.client.get(path, {'before': today, 'partial': '1'})
@@ -112,6 +113,47 @@ class DispatcherDutyTests(TestCase):
             self.assertEqual(fallback.context['report']['days'][0]['date'], today)
             archive = self.client.get(path, {'format': 'json', 'date': self.start.date()}).json()
             self.assertEqual(archive['date'], self.start.date().isoformat())
+
+    def test_history_cutoff_applies_to_feed_archive_and_period_without_removing_records(self):
+        old_day = self.start - timedelta(days=2)
+        first_day = self.start - timedelta(days=1)
+        old_shift = self.shift(opened=old_day, closed=old_day + timedelta(hours=12))
+        self.shift(opened=first_day, closed=first_day + timedelta(hours=12))
+        self.shift()
+        history = reverse('management_dispatcher_history')
+        feed = reverse('management_dispatcher_duty')
+        period = reverse('management_dispatcher_period')
+        self.authorize(self.manager)
+        with patch('django.utils.timezone.now', return_value=self.start + timedelta(hours=2)):
+            self.assertRedirects(self.client.post(history, {'action': 'save', 'history_from': first_day.date()}), feed)
+            report = self.client.get(feed).context['report']
+            self.assertEqual([day['date'] for day in report['days']], [self.start.date(), first_day.date()])
+            self.assertFalse(report['next_before'])
+            self.assertFalse(self.client.get(feed, {'before': first_day.date(), 'partial': 1}).context['report']['days'])
+            self.assertEqual(self.client.get(feed, {'date': old_day.date(), 'format': 'json'}).status_code, 404)
+            self.assertEqual(self.client.get(period).context['report']['date_from'], first_day.date())
+            response = self.client.get(period, {'date_from': old_day.date(), 'date_to': self.start.date(), 'export': 'xlsx'})
+            self.assertContains(response, 'История доступна с 24.11.2026.', status_code=400)
+            self.assertTrue(EmployeeShift.objects.filter(pk=old_shift.pk).exists())
+
+            self.client.post(history, {'action': 'save', 'history_from': self.start.date() + timedelta(days=1)})
+            self.assertEqual(DispatcherDutyTracking.objects.get(pk=1).history_from, first_day.date())
+            self.assertRedirects(self.client.post(history, {'action': 'restore'}), feed)
+            self.assertEqual(self.client.get(feed).context['report']['days'][-1]['date'], old_day.date())
+            self.assertEqual(self.client.get(feed, {'date': old_day.date(), 'format': 'json'}).status_code, 200)
+            response = self.client.get(period, {'date_from': old_day.date(), 'date_to': self.start.date(), 'export': 'xlsx'})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('spreadsheetml', response['Content-Type'])
+
+    def test_history_update_requires_post_manager_and_csrf(self):
+        path = reverse('management_dispatcher_history')
+        self.assertEqual(self.client.get(path).status_code, 405)
+        self.assertEqual(self.client.post(path, {'action': 'restore'}).status_code, 302)
+        for access in (self.dispatcher, self.admin):
+            self.authorize(access)
+            self.assertEqual(self.client.post(path, {'action': 'restore'}).status_code, 403)
+        client = self.authorize(self.manager, Client(enforce_csrf_checks=True))
+        self.assertEqual(client.post(path, {'action': 'restore'}).status_code, 403)
 
     def test_report_only_for_active_management_in_all_representations(self):
         path = reverse('management_dispatcher_duty')

@@ -16,7 +16,7 @@ from shifts.models import ShiftType
 from trips.dispatcher_duty import WindowState
 from trips.models import DispatcherDutyTracking
 
-from .dispatcher_duty import management_duty_view, period_records, timeline
+from .dispatcher_duty import dispatcher_history_start, management_duty_view, period_records, timeline
 from .dispatcher_duty_export import period_workbook_response
 
 
@@ -35,6 +35,13 @@ class PeriodForm(forms.Form):
     date_to = forms.DateField(label='По', input_formats=['%Y-%m-%d'],
                               widget=forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}))
 
+    def __init__(self, *args, history_from=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.history_from = history_from
+        if history_from:
+            for field in self.fields.values():
+                field.widget.attrs['min'] = history_from.isoformat()
+
     def clean(self):
         values = super().clean()
         for key, value in list(values.items()):
@@ -44,6 +51,8 @@ class PeriodForm(forms.Form):
             return values
         if values['date_from'] > values['date_to']:
             self.add_error('date_to', 'Конец периода должен быть не раньше его начала.')
+        if self.history_from and values['date_from'] < self.history_from:
+            self.add_error('date_from', f'История доступна с {self.history_from:%d.%m.%Y}.')
         return values
 
 
@@ -165,9 +174,13 @@ def period_report(date_from, date_to, now=None):
 def management_dispatcher_period(request, access):
     now = timezone.now()
     today = production_work_date(now)
-    defaults = {'date_from': (today - timedelta(days=6)).isoformat(), 'date_to': today.isoformat()}
+    history_from = dispatcher_history_start()
+    date_from = today - timedelta(days=6)
+    if history_from:
+        date_from = max(date_from, history_from)
+    defaults = {'date_from': date_from.isoformat(), 'date_to': today.isoformat()}
     supplied = 'date_from' in request.GET or 'date_to' in request.GET
-    form = PeriodForm(request.GET if supplied else defaults)
+    form = PeriodForm(request.GET if supplied else defaults, history_from=history_from)
     context = {'access': access, 'selected_date': today, 'form': form}
     if form.is_valid():
         report = period_report(**form.cleaned_data, now=now)

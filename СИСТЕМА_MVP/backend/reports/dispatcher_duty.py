@@ -1,16 +1,18 @@
 """Шкала дежурства и журнал действий для витрины руководства."""
 
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 from functools import wraps
 
+from django import forms
+from django.contrib import messages
 from django.db.models import Q
-from django.http import HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.http import HttpResponseBadRequest, HttpResponseForbidden, HttpResponseNotFound, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
 from assignments.models import HaulAssignmentHandoff
 from core.production_time import business_localtime, production_shift_bounds, production_work_date
@@ -325,13 +327,15 @@ def duty_report(selected_date, now=None):
                 slots=[build_slot(selected_date, kind, now, tracking, shifts, actions) for kind in (ShiftType.DAY, ShiftType.NIGHT)])
 
 
-def duty_feed(*, now, before=None, since=None):
+def duty_feed(*, now, before=None, since=None, history_from=None):
     today = production_work_date(now)
     tracking = DispatcherDutyTracking.objects.filter(pk=1).values_list('started_at', flat=True).first()
-    first_shift = dispatcher_shift_queryset(open_only=False).order_by('opened_at').values_list('opened_at', flat=True).first()
-    first_action = (DispatcherActionLog.objects.filter(actor_role_code='dispatcher')
-                    .order_by('created_at').values_list('created_at', flat=True).first())
-    first_date = production_work_date(min(at for at in (now, tracking, first_shift, first_action) if at))
+    first_date = history_from
+    if first_date is None:
+        first_shift = dispatcher_shift_queryset(open_only=False).order_by('opened_at').values_list('opened_at', flat=True).first()
+        first_action = (DispatcherActionLog.objects.filter(actor_role_code='dispatcher')
+                        .order_by('created_at').values_list('created_at', flat=True).first())
+        first_date = production_work_date(min(at for at in (now, tracking, first_shift, first_action) if at))
     newest = min(today, before - timedelta(days=1)) if before else today
     oldest = max(first_date, newest - timedelta(days=FEED_DAYS - 1))
     if since:
@@ -352,9 +356,8 @@ def duty_feed(*, now, before=None, since=None):
                 next_before=oldest.isoformat() if oldest > first_date and days else '')
 
 
-def management_duty_view(view):
+def management_duty_access(view):
     @never_cache
-    @require_GET
     @wraps(view)
     def protected(request):
         if not request.session.get('employee_access_id'):
@@ -369,6 +372,54 @@ def management_duty_view(view):
     return protected
 
 
+def management_duty_view(view):
+    return management_duty_access(require_GET(view))
+
+
+def dispatcher_history_start():
+    return DispatcherDutyTracking.objects.filter(pk=1).values_list('history_from', flat=True).first()
+
+
+class HistoryStartForm(forms.Form):
+    history_from = forms.DateField(
+        label='Показывать смены с', input_formats=['%Y-%m-%d'],
+        widget=forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date', 'min': '0002-01-01'}),
+    )
+
+    def __init__(self, *args, today, **kwargs):
+        super().__init__(*args, label_suffix='', **kwargs)
+        self.today = today
+        self.fields['history_from'].widget.attrs['max'] = today.isoformat()
+
+    def clean_history_from(self):
+        value = self.cleaned_data['history_from']
+        if not date(2, 1, 1) <= value <= self.today:
+            raise forms.ValidationError('Укажите дату начала истории не позже текущей смены.')
+        return value
+
+
+@require_POST
+@management_duty_access
+def management_dispatcher_history(request, access):
+    action = request.POST.get('action')
+    if action == 'save':
+        form = HistoryStartForm(request.POST, today=production_work_date(timezone.now()))
+        if not form.is_valid():
+            messages.error(request, 'Укажите дату начала истории не позже текущей смены.')
+            return redirect('management_dispatcher_duty')
+        history_from = form.cleaned_data['history_from']
+    elif action == 'restore':
+        history_from = None
+    else:
+        return HttpResponseBadRequest('Неизвестное действие с историей смен.')
+    DispatcherDutyTracking.objects.update_or_create(pk=1, defaults={'history_from': history_from})
+    if history_from:
+        messages.success(request, f'История смен показывается с {history_from:%d.%m.%Y}.')
+    else:
+        messages.success(request, 'Вся история смен снова доступна.')
+    return redirect('management_dispatcher_duty')
+
+
 @management_duty_view
 def management_dispatcher_duty(request, access):
     dates = {}
@@ -380,15 +431,22 @@ def management_dispatcher_duty(request, access):
                 return HttpResponseBadRequest('Неверная дата смены.')
             dates[key] = parsed
     now = timezone.now()
+    history_from = dispatcher_history_start()
     if request.GET.get('format') == 'json':
-        return JsonResponse(duty_report(dates.get('date') or production_work_date(now), now))
+        selected_date = dates.get('date') or production_work_date(now)
+        if history_from and selected_date < history_from:
+            return HttpResponseNotFound('Эта дата скрыта в истории смен.')
+        return JsonResponse(duty_report(selected_date, now))
     partial = request.GET.get('partial') == '1'
     before = dates.get('before')
-    report = duty_feed(now=now, before=before, since=dates.get('since') if partial else None)
+    report = duty_feed(now=now, before=before, since=dates.get('since') if partial else None, history_from=history_from)
     # A plain archive link also works without incremental loading.
     if before and not partial and (not report['days'] or report['days'][0]['date'] < report['date']):
-        current = duty_feed(now=now, since=report['date'])
+        current = duty_feed(now=now, since=report['date'], history_from=history_from)
         report['days'] = current['days'] + report['days']
-    context = {'access': access, 'selected_date': report['date'], 'report': report, 'archive_page': bool(before)}
+    context = {'access': access, 'selected_date': report['date'], 'report': report, 'archive_page': bool(before),
+               'history_from': history_from}
+    if not partial:
+        context['history_form'] = HistoryStartForm(today=report['date'], initial={'history_from': history_from})
     template = 'reports/includes/dispatcher_duty_slots.html' if partial else 'reports/dispatcher_duty.html'
     return render(request, template, context)
