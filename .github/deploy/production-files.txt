@@ -1,5 +1,8 @@
-СИСТЕМА_MVP/backend/settlement/views.py
-СИСТЕМА_MVP/backend/static/css/settlement-map-header.css
-СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
-СИСТЕМА_MVP/backend/static/js/settlement-temporary-placement.js
-СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
+СИСТЕМА_MVP/backend/reports/dispatcher_duty.py
+СИСТЕМА_MVP/backend/templates/reports/dispatcher_shift_report.html
+СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html
+СИСТЕМА_MVP/backend/trips/dispatcher_duty.py
+СИСТЕМА_MVP/backend/trips/dispatcher_duty_offline.py
+СИСТЕМА_MVP/backend/trips/dispatcher_pwa.py
+СИСТЕМА_MVP/backend/users/live_monitor_views.py
+СИСТЕМА_MVP/backend/users/role_apps.py
