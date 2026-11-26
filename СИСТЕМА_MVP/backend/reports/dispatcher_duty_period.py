@@ -166,7 +166,7 @@ def period_report(date_from, date_to, now=None):
     gaps = post_gaps(shifts, observed_start, stop) if observed_start and observed_start < stop else []
     return dict(date_from=date_from, date_to=date_to, start=start, end=end, stop=stop, now=now,
                 tracking=tracking, future=start > now, rows=rows[::-1],
-                people=sorted(summary, key=lambda x: x['person']), unassigned=commands[None],
+                people=sorted(summary, key=lambda x: x['person']),
                 gaps=gaps, gap_seconds=sum(gap.seconds for gap in gaps), covers_post=bool(observed_start and observed_start < stop))
 
 

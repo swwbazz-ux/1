@@ -76,8 +76,6 @@ def period_workbook_response(report):
         for row in report['rows']:
             for event in row['commands']:
                 yield [event['person'], row['opened'], event['when'], event['title'], event['detail']]
-        for event in report['unassigned']:
-            yield [event['person'], 'Без привязки к смене', event['when'], event['title'], event['detail']]
     sheet('Операции', ['Исполнитель', 'Открытие смены', 'Время действия', 'Действие', 'Подробности'], command_rows())
     sheet('Пост без открытой смены', ['С', 'По', 'Длительность'],
           ([gap.start, gap.end, timedelta(seconds=gap.seconds)] for gap in report['gaps']))

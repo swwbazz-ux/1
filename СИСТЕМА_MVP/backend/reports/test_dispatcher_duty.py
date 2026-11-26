@@ -306,12 +306,61 @@ class DispatcherDutyTests(TestCase):
         self.assertEqual(self.client.post(path, body).status_code, 409)
         self.assertFalse(DispatcherDutyWindow.objects.exists())
 
+    def test_operations_count_only_dispatcher_role_on_the_authors_own_shift(self):
+        handoff = self.start + timedelta(hours=2)
+        old = self.shift(closed=handoff)
+        current = self.shift(self.relief, opened=handoff)
+        admin_role, _ = Role.objects.get_or_create(code='admin', defaults={'name': 'Администратор'})
+        as_admin = EmployeeAccess.objects.create(employee=self.relief.employee, role=admin_role, access_code='111111',
+                                                 status=EmployeeAccess.Status.ACTIVATED)
+        scenarios = [
+            ('работа до передачи', self.dispatcher, old, 45, 'dispatcher'),
+            ('работа после передачи', self.relief, current, 120, 'dispatcher'),
+            ('команда вне своей смены', self.dispatcher, None, 130, 'dispatcher'),
+            ('чужая смена', self.dispatcher, current, 135, 'dispatcher'),
+            ('в точку закрытия', self.dispatcher, old, 120, 'dispatcher'),
+            ('преждевременная команда', self.relief, current, 119, 'dispatcher'),
+            ('работа администратора', as_admin, current, 140, 'admin'),
+            ('работа наблюдателя', self.relief, current, 145, 'observer'),
+        ]
+        for summary, access, duty, minute, role in scenarios:
+            when = self.start + timedelta(minutes=minute)
+            with patch('django.utils.timezone.now', return_value=when):
+                row = log_dispatcher_action(
+                    actor=access.employee, access=access,
+                    request=SimpleNamespace(observer_mode=role == 'observer'),
+                    action_type=DispatcherActionType.CANCEL_ASSIGNMENT, target_summary=summary,
+                )
+            self.assertEqual(row.actor_role_code, role)
+            if row.duty_shift_id != getattr(duty, 'pk', None):
+                DispatcherActionLog.objects.filter(pk=row.pk).update(duty_shift=duty)
+
+        now = self.start + timedelta(hours=3)
+        self.authorize(self.manager)
+        path = reverse('management_dispatcher_duty')
+        with patch('django.utils.timezone.now', return_value=now):
+            data = self.client.get(path, {'date': self.start.date(), 'format': 'json'}).json()['slots'][0]
+            self.assertEqual(data['count'], 2)
+            self.assertEqual([member['operations'] for member in data['staff']], [1, 1])
+            self.assertEqual([band['count'] for band in data['bands']], [1, 1, 0, 0, 0, 0])
+            self.assertEqual([event['detail'] for event in data['events'] if event['kind'] == 'operation'],
+                             ['работа до передачи', 'работа после передачи'])
+            self.assertEqual(data['last_op'], '09:00')
+            self.assertEqual(len(data['marks']), 2)
+            for query in ({}, {'partial': 1}):
+                page = self.client.get(path, query)
+                self.assertContains(page, 'работа после передачи')
+                for summary, *_ in scenarios[2:]:
+                    self.assertNotContains(page, summary)
+        self.assertEqual(DispatcherActionLog.objects.count(), len(scenarios))
+
     def test_closure_labels_identify_owner_author_and_verbatim_reason_in_archive_and_feed(self):
         at = self.start + timedelta(hours=1)
         note = 'омрио · <уточнение>'
         shift = self.shift(closed=at, closed_by=self.relief.employee, is_service_closed=True,
                            service_close_kind='neglected', service_close_note=note)
-        row = DispatcherActionLog.objects.create(actor=self.relief.employee, actor_role_code='dispatcher',
+        own = self.shift(self.relief, opened=at)
+        row = DispatcherActionLog.objects.create(actor=self.relief.employee, duty_shift=own, actor_role_code='dispatcher',
             action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT, shift=shift, target_summary='Диспетчер А / Дневная', reason=note)
         DispatcherActionLog.objects.filter(pk=row.pk).update(created_at=at)
         path = reverse('management_dispatcher_duty')

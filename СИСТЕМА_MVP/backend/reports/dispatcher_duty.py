@@ -167,14 +167,17 @@ def journal_event(at, kind, title, person='', detail=''):
 
 
 def operations(start, end, tracking, shifts):
+    if not shifts:
+        return []
+    by_id = {shift.pk: shift for shift in shifts}
     rows = DispatcherActionLog.objects.filter(created_at__gte=start, created_at__lt=end)
-    eligible = Q(actor_role_code='dispatcher')
+    eligible = Q(actor_role_code='dispatcher', duty_shift_id__in=by_id)
     # Old rows have no acting role. Only include a historical action if its
     # author held the post and has no alternative role that can issue the command.
     staff_shifts = defaultdict(list)
     for shift in shifts:
         staff_shifts[shift.employee_id].append(shift)
-    if tracking and start < tracking and staff_shifts:
+    if tracking and start < tracking:
         other = EmployeeAccess.objects.filter(employee_id__in=staff_shifts.keys(),
             role__code__in=['admin', 'manager', 'mining_master']).values_list('employee_id', flat=True)
         eligible |= Q(actor_role_code='', created_at__lt=tracking, actor_id__in=set(staff_shifts).difference(other))
@@ -188,7 +191,6 @@ def operations(start, end, tracking, shifts):
             f'{dispatcher_complex_label(handoff.source_excavator)} → {dispatcher_complex_label(handoff.target_assignment.excavator)}'
         )
     result = []
-    by_id = {s.pk: s for s in shifts}
     for row in actions:
         duty_id = row.duty_shift_id
         if not row.actor_role_code:
@@ -197,11 +199,11 @@ def operations(start, end, tracking, shifts):
             if len(matches) != 1:
                 continue
             duty_id = matches[0]
-        elif duty_id:
-            own = by_id.get(duty_id)
-            if (own is None or own.employee_id != row.actor_id or row.created_at < own.opened_at
+        else:
+            own = by_id[duty_id]
+            if (own.employee_id != row.actor_id or row.created_at < own.opened_at
                     or (own.closed_at is not None and row.created_at >= own.closed_at)):
-                duty_id = None
+                continue
         label = ('Изменение расстановки' if row.action_type == DispatcherActionType.CANCEL_ASSIGNMENT
                  else row.get_action_type_display())
         if row.action_type == 'report_source_correction' and row.duty_detail:
@@ -355,9 +357,7 @@ def duty_feed(*, now, before=None, since=None, history_from=None):
     first_date = history_from
     if first_date is None:
         first_shift = dispatcher_shift_queryset(open_only=False).order_by('opened_at').values_list('opened_at', flat=True).first()
-        first_action = (DispatcherActionLog.objects.filter(actor_role_code='dispatcher')
-                        .order_by('created_at').values_list('created_at', flat=True).first())
-        first_date = production_work_date(min(at for at in (now, tracking, first_shift, first_action) if at))
+        first_date = production_work_date(min(at for at in (now, tracking, first_shift) if at))
     newest = min(today, before - timedelta(days=1)) if before else today
     oldest = max(first_date, newest - timedelta(days=FEED_DAYS - 1))
     if since:

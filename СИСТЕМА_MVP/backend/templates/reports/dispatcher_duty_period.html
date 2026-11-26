@@ -84,9 +84,6 @@
           {% for gap in report.gaps %}<li>{{ gap.start|date:"d.m.Y H:i" }} — {{ gap.end|date:"d.m.Y H:i" }} · {{ gap.seconds|duty_duration }}</li>{% endfor %}
         </ol></details>{% else %}<p>В течение всего учтённого времени была открыта хотя бы одна смена.</p>{% endif %}
       </section>{% endif %}
-      {% if report.unassigned %}<details class="period-log"><summary>Операции без привязки к личной смене ({{ report.unassigned|length }})</summary><ol>
-        {% for event in report.unassigned %}<li>{{ event.when|date:"d.m.Y H:i" }} · {{ event.person }} · {{ event.title }}{% if event.detail %} · {{ event.detail }}{% endif %}</li>{% endfor %}
-      </ol></details>{% endif %}
       {% endif %}
     </section>
   </section>

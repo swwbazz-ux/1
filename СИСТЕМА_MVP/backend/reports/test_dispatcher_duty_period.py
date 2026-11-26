@@ -99,7 +99,7 @@ class PeriodReportTests(TestCase):
         self.assertIsNone(report['people'][0]['background_percent'])
         self.assertEqual(report['gap_seconds'],(721-15)*60)
 
-    def test_own_hours_are_a_union_and_ambiguous_legacy_actions_are_not_assigned(self):
+    def test_own_hours_are_a_union_and_only_confirmed_own_commands_are_reported(self):
         DispatcherDutyTracking.objects.filter(pk=1).update(started_at=self.at(50))
         first = self.shift(0,60)
         second = self.shift(30,90)
@@ -109,11 +109,28 @@ class PeriodReportTests(TestCase):
         self.command(first,20,actor=self.relief.employee)
         self.command(second,95)
         self.command(None,120)
+        self.command(first,15,role='admin')
+        self.command(first,16,role='observer')
         report = period_report(self.start.date(),self.start.date(),self.at(125))
         own = next(p for p in report['people'] if p['person']==self.dispatcher.employee.full_name)
         self.assertEqual((own['duties'],own['duration'],own['count']), (2,90*60,1))
         self.assertEqual(report['gap_seconds'],10*60)
-        self.assertEqual([e['when'] for e in report['unassigned']], [self.at(20),self.at(95),self.at(120)])
+        self.assertEqual([e['when'] for row in report['rows'] for e in row['commands']], [self.at(10)])
+
+        self.login_as(self.manager)
+        path = reverse('management_dispatcher_period')
+        query = {'date_from': self.start.date(), 'date_to': self.start.date()}
+        with patch('django.utils.timezone.now', return_value=self.at(125)):
+            page = self.client.get(path, query)
+            export = self.client.get(path, {**query, 'export': 'xlsx'})
+        self.assertNotContains(page, 'Операции без привязки к личной смене')
+        self.assertContains(page, 'Журнал операций (1)', count=1)
+        workbook = load_workbook(BytesIO(export.content), read_only=True)
+        self.assertEqual(workbook['Операции'].max_row, 3)
+        commands = list(workbook['Операции'].values)
+        self.assertEqual(commands[2][:3], (self.dispatcher.employee.full_name,
+                                           self.start.replace(tzinfo=None), self.at(10).replace(tzinfo=None)))
+        workbook.close()
 
     def test_future_is_empty_and_pretracking_vacancy_unknown(self):
         DispatcherDutyTracking.objects.filter(pk=1).update(started_at=self.at(100))
