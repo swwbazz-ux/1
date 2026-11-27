@@ -1539,6 +1539,9 @@
         const save = form.querySelector("button[type='submit']");
         const close = dialog.querySelector("[data-watch-template-close]");
         const result = dialog.querySelector("[data-watch-template-result]");
+        const receipt = dialog.querySelector("[data-watch-template-receipt]");
+        const heading = dialog.querySelector("h2");
+        const formTitle = heading.textContent;
         const history = dialog.querySelector("[data-watch-template-history]");
         const list = history.querySelector("ul");
         let workDate;
@@ -1552,6 +1555,9 @@
 
         watchTemplateButton.addEventListener("click", async function () {
             const request = ++loading;
+            heading.textContent = formTitle;
+            form.hidden = false;
+            receipt.hidden = true;
             save.disabled = true;
             history.hidden = true;
             period.parentElement.hidden = true;
@@ -1582,12 +1588,15 @@
             }
         });
         close.addEventListener("click", () => dialog.close());
+        receipt.querySelector("[data-template-done]").addEventListener("click", () => dialog.close());
         dialog.addEventListener("cancel", event => { if (close.disabled) event.preventDefault(); });
         form.addEventListener("submit", async function (event) {
             event.preventDefault();
             if (save.disabled) return;
             save.disabled = close.disabled = true;
-            result.textContent = "Сохраняем шаблон…";
+            name.disabled = period.disabled = true;
+            save.textContent = "Сохраняем…";
+            result.textContent = "";
             try {
                 const response = await fetch(form.action, {
                     method: "POST",
@@ -1596,17 +1605,24 @@
                         name: name.value, period_id: period.value ? Number(period.value) : null, work_date: workDate
                     })
                 });
-                const data = await response.json();
+                const data = await response.json().catch(() => null);
+                if (!data) throw new Error("Сервер не подтвердил сохранение. Попробуйте ещё раз.");
                 if (!response.ok) throw new Error(data.error || "Не удалось сохранить шаблон.");
-                result.textContent = (data.created ? "Шаблон сохранён. " : "Шаблон уже сохранён. ") +
-                    "Занятых коек " + data.occupied_beds + " · с отметками " + data.marked_beds + ". ";
-                const link = templateLink(data.template);
-                link.textContent = "Открыть шаблон";
-                result.append(link);
+                receipt.querySelector("[data-template-name]").textContent = data.template.name;
+                receipt.querySelector("[data-template-stats]").textContent = data.template.saved_at +
+                    " · Занятых коек " + data.occupied_beds + " · Коек с отметками " + data.marked_beds;
+                receipt.querySelector("[data-template-link]").href = data.template.url;
+                heading.textContent = data.created ? "Шаблон сохранён" : "Этот шаблон уже сохранён";
+                form.hidden = history.hidden = true;
+                receipt.hidden = false;
+                dialog.scrollTop = 0;
+                heading.focus();
             } catch (error) {
-                result.textContent = error.message || "Не удалось сохранить шаблон.";
+                result.textContent = error instanceof TypeError ? "Нет ответа от сервера. Проверьте связь и повторите сохранение." : error.message;
             } finally {
-                save.disabled = close.disabled = false;
+                name.disabled = period.disabled = close.disabled = false;
+                save.disabled = form.hidden;
+                save.textContent = "Сохранить шаблон";
             }
         });
     }

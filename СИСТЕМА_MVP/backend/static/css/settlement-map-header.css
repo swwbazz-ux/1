@@ -157,6 +157,15 @@
 }
 .settlement-watch-template-dialog [data-watch-template-result]:empty { display: none; }
 .settlement-watch-template-dialog ul { padding-inline-start: 1.3em; }
+.settlement-watch-template-dialog [hidden] { display: none; }
+.settlement-template-receipt { overflow-wrap: anywhere; }
+.settlement-template-receipt strong { font-size: 1.1rem; }
+.settlement-template-receipt p { color: var(--admin-muted); }
+.settlement-watch-template-dialog:has(.settlement-template-receipt:not([hidden])) h2 {
+    color: var(--settlement-accent);
+}
+.settlement-template-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settlement-template-actions a { display: inline-flex; align-items: center; text-decoration: none; }
 
 .settlement-map-entry .settlement-control-panel {
     display: flex;
