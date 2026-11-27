@@ -412,20 +412,20 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v168',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v169',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v168',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v169',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v168',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v169',
         )
         self.assertContains(
             response,
-            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v168',
+            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v169',
         )
         self.assertContains(
             response,
@@ -433,15 +433,15 @@ class DispatcherSharedShiftStartTests(TestCase):
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v168',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v169',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v168',
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v169',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v168',
+            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v169',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)

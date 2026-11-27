@@ -5,3 +5,4 @@
 СИСТЕМА_MVP/backend/trips/dispatcher_read_model.py
 СИСТЕМА_MVP/backend/trips/views.py
 СИСТЕМА_MVP/backend/users/role_apps.py
+СИСТЕМА_MVP/backend/templates/reports/dispatcher_shift_report.html
