@@ -1780,6 +1780,7 @@ def build_dispatcher_dashboard_context(
     equipment_card_ids=None,
     equipment_work_assignments=(),
     reporting_period=None,
+    stable_complex_order=True,
 ):
     active_trips_list = list(active_trips)
     pending_assignments_list = list(pending_assignments)
@@ -2737,14 +2738,17 @@ def build_dispatcher_dashboard_context(
         'normal': 4,
         'gray': 5,
     }
-    complex_zones = sorted(
-        complex_cards,
-        key=lambda card: (
-            status_order.get(card['status_key'], 3),
+    def complex_number_order(card):
+        return (
             dispatcher_complex_number_int(card),
             card.get('id') or '',
-        ),
-    )
+            card['equipment_card_id'],
+        )
+
+    def complex_priority_order(card):
+        return (status_order.get(card['status_key'], 3), *complex_number_order(card))
+
+    complex_zones = sorted(complex_cards, key=complex_number_order if stable_complex_order else complex_priority_order)
     while len(complex_zones) < 9:
         index = len(complex_zones) + 1
         complex_zones.append({
@@ -2782,11 +2786,7 @@ def build_dispatcher_dashboard_context(
             'unload_points': [],
             'attention_label': '',
         })
-    mobile_complex_zones = [
-        zone
-        for zone in complex_zones
-        if not zone.get('is_empty')
-    ]
+    mobile_complex_zones = sorted(complex_cards, key=complex_priority_order)
     mobile_empty_complex_zones = [
         zone
         for zone in complex_zones
@@ -3334,6 +3334,7 @@ def build_dispatcher_dashboard_context(
         'mobile_excavator_garage_row_count': mobile_excavator_garage_row_count,
         'complex_cards': complex_cards,
         'complex_zones': complex_zones,
+        'stable_complex_order': stable_complex_order,
         'mobile_complex_zones': mobile_complex_zones,
         'truck_garage_tiles': truck_garage_tiles,
         'mobile_truck_garage_tiles': mobile_truck_garage_tiles,

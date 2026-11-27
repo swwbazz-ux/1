@@ -94,6 +94,15 @@
             var grid = hostDocument.querySelector(".dispatcher-zone-grid");
             if (!grid) return;
             var cards = Array.from(grid.querySelectorAll(".dispatcher-complex-card"));
+            var stableOrder = grid.dataset.stableComplexOrder !== undefined;
+            function complexNumber(card) {
+                var number = String(card.dataset.zoneLabel || card.dataset.excavatorSlot || "").match(/\d+/);
+                return number ? Number(number[0]) : 9999;
+            }
+            function compareText(left, right) {
+                if (left === right) return 0;
+                return left < right ? -1 : 1;
+            }
             function sortWeight(card) {
                 if (card.classList.contains("status-red") || card.classList.contains("status-danger")) return 0;
                 if (card.classList.contains("status-orange")) return 1;
@@ -105,14 +114,19 @@
             var active = cards
                 .filter(function (card) { return !card.classList.contains("status-empty"); })
                 .sort(function (a, b) {
+                    if (stableOrder) {
+                        return complexNumber(a) - complexNumber(b) ||
+                            compareText(a.dataset.zoneLabel || "", b.dataset.zoneLabel || "") ||
+                            compareText(a.dataset.equipmentId || "", b.dataset.equipmentId || "");
+                    }
                     var statusDiff = sortWeight(a) - sortWeight(b);
                     if (statusDiff !== 0) return statusDiff;
                     return (parseInt(a.dataset.excavatorSlot || "999", 10) || 999) - (parseInt(b.dataset.excavatorSlot || "999", 10) || 999);
                 });
             var empty = cards.filter(function (card) { return card.classList.contains("status-empty"); });
-            active.concat(empty).forEach(function (card) {
-                grid.appendChild(card);
-            });
+            var ordered = active.concat(empty);
+            if (ordered.every(function (card, index) { return card === cards[index]; })) return;
+            ordered.forEach(function (card) { grid.appendChild(card); });
         }
 
         return {

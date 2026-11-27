@@ -318,3 +318,28 @@ test("после fragment-замены layout работает с новой д�
     assert.equal(newFixture.board.style.getPropertyValue("--truck-garage-columns"), "2");
     assert.equal(oldFixture.board.style.getPropertyValue("--truck-garage-columns"), "1");
 });
+
+test("на пульте номер сохраняет место при простое и возобновлении работы", () => {
+    const harness = createHarness();
+    const fixture = makeBoardFixture();
+    fixture.grid.dataset.stableComplexOrder = "";
+    harness.activate(fixture);
+    const card = (number, status, id) => new ElementStub({
+        dataset: {zoneLabel: "K-" + number, equipmentId: String(id)},
+        classNames: ["dispatcher-complex-card", status],
+    });
+    const first = card("5", "status-blue", 1);
+    const cat = card("CAT-9", "status-blue", 3);
+    const tenth = card("10", "status-blue", 2);
+    const empty = card("4", "status-empty", 0);
+    [empty, cat, tenth, first].forEach(node => fixture.grid.appendChild(node));
+    harness.layout.normalizeComplexGrid();
+    assert.deepEqual(fixture.grid.children, [first, cat, tenth, empty]);
+
+    fixture.grid.appendChild = () => { throw new Error("Уже упорядоченные карточки не должны перемещаться в DOM"); };
+    for (const status of ["status-red", "status-orange", "status-blue"]) {
+        tenth.className = "dispatcher-complex-card " + status;
+        harness.layout.normalizeComplexGrid();
+        assert.deepEqual(fixture.grid.children, [first, cat, tenth, empty]);
+    }
+});

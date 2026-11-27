@@ -280,6 +280,7 @@ def build_dispatcher_control_read_model(
         equipment_card_ids=equipment_card_ids,
         equipment_work_assignments=equipment_work_assignments,
         reporting_period=reporting_period,
+        stable_complex_order=access.role.code != 'mining_master',
     )
 
     return DispatcherControlReadModel(

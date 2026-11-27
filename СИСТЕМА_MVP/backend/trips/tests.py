@@ -401,7 +401,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v168')
+        self.assertContains(response, 'dispatcher-desktop-shell-v169')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -429,7 +429,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v168',
+            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v169',
         )
         self.assertContains(
             response,
@@ -1722,6 +1722,31 @@ class DispatcherDowntimeControlTests(TestCase):
         self.assertContains(response, 'data-gd-downtime-timer')
         self.assertContains(response, 'data-gd-detail-downtime-close')
         self.assertContains(response, 'data-dispatcher-downtime-close-url-template=')
+
+    def test_dispatcher_complexes_stay_in_number_order_through_a_downtime_and_resume(self):
+        cat = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='CAT-9')
+        last = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='10')
+        for excavator in (last, cat):
+            ExcavatorPlacement.objects.create(excavator=excavator, zone=ExcavatorPlacement.Zone.ACTIVE)
+
+        def assert_order():
+            url = reverse('dispatcher_control')
+            response = self.client.get(url)
+            zones = response.context['dispatcher_dashboard']['complex_zones']
+            self.assertEqual([zone['id'] for zone in zones[:3]], ['K-5', 'K-CAT-9', 'K-10'])
+            self.assertTrue(all(zone['is_empty'] for zone in zones[3:]))
+            fragment = self.client.get(url, {'_operational_fragment': 'dispatcher'})
+            self.assertEqual(fragment.status_code, 200)
+            markup = fragment.json()['html']
+            ids = [f'data-zone-id="equipment-{machine.pk}"' for machine in (self.excavator, cat, last)]
+            self.assertEqual([markup.index(key) for key in ids], sorted(markup.index(key) for key in ids))
+            return zones[2]
+
+        self.assertFalse(assert_order()['active_downtime']['active'])
+        downtime = self.create_downtime(last, self.excavator_reason)
+        self.assertEqual(assert_order()['active_downtime']['event_id'], downtime.pk)
+        self.assertEqual(self.close_downtime(downtime).status_code, 200)
+        self.assertFalse(assert_order()['active_downtime']['active'])
 
 
 class ExcavatorWorkServerIntegrationTests(TestCase):

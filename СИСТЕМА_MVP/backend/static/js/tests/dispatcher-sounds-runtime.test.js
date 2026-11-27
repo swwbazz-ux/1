@@ -257,7 +257,7 @@ test("dispatcher shell wires and precaches the isolated sound module", () => {
     assert.match(template, /dispatcher-detail-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
     assert.match(template, /dispatcher-equipment-card-trigger-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
     assert.match(template, /dispatcher-equipment-search-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
-    assert.match(template, /dispatcher-board-layout-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
+    assert.match(template, /dispatcher-board-layout-v1\.js[^\n]+dispatcher-desktop-shell-v169/);
     assert.match(template, /dispatcher-complex-truck-racks-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
     assert.match(template, /dispatcher-haul-assignment-state-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
     assert.match(template, /dispatcher-board-dnd-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
@@ -266,7 +266,7 @@ test("dispatcher shell wires and precaches the isolated sound module", () => {
     assert.match(template, /dispatcher-board-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
     assert.match(template, /dispatcher-realtime-v1\.js[^\n]+dispatcher-desktop-shell-v168/);
     assert.match(header, /data-dispatcher-sound-toggle/);
-    assert.match(dispatcherPwa, /dispatcher-desktop-shell-v168/);
+    assert.match(dispatcherPwa, /dispatcher-desktop-shell-v169/);
     assert.match(dispatcherPwa, /\/static\/js\/dispatcher-sounds-v1\.js/);
     assert.match(dispatcherPwa, /\/static\/js\/dispatcher-detail-settings-v1\.js/);
     assert.match(dispatcherPwa, /\/static\/js\/dispatcher-detail-charts-v1\.js/);
