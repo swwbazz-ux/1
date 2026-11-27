@@ -411,6 +411,41 @@ class DeputyPlanningViewTests(TestCase):
         ).exists())
         self.assertFalse(EquipmentAssignment.objects.filter(employee=person, role=self.driver_role).exists())
 
+    def test_factual_assignment_distinguishes_missing_specialization_from_position_default(self):
+        specialization = ProductionSpecialization.objects.get(code='haul_truck_driver')
+        specialization.access_role = self.driver_role
+        specialization.save(update_fields=['access_role'])
+        position = PersonnelPosition.objects.get(default_specialization=specialization)
+        person = Employee.objects.create(
+            full_name='Водитель из фактической смены', personnel_position=position, status=Employee.Status.ACTIVE,
+        )
+        plan = self.create_draft()
+        plan.slots.filter(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).update(reported_employee=person)
+        url = reverse('deputy_mining_manager_placement')
+
+        def review():
+            payload = self.client.get(url).context['planning_payload']
+            return next(slot['specialization_review'] for row in payload['rows'] for slot in row['slots']
+                        if slot['reported_name'] == person.full_name)
+
+        missing = review()
+        self.assertEqual(missing['base'], '')
+        self.assertEqual(missing['current'], '')
+        self.assertEqual(missing['suggested'], specialization.name)
+        self.assertTrue(missing['warning'])
+        self.assertFalse(missing['can_assign'])
+        person.refresh_from_db()
+        self.assertIsNone(person.base_specialization_id)
+
+        person.base_specialization = specialization
+        person.save(update_fields=['base_specialization'])
+        saved = review()
+        self.assertEqual(saved['base'], specialization.name)
+        self.assertEqual(saved['current'], specialization.name)
+        self.assertEqual(saved['suggested'], '')
+        self.assertFalse(saved['warning'])
+        self.assertTrue(saved['can_assign'])
+
     def test_reported_truck_driver_has_no_operational_grant(self):
         person = Employee.objects.create(full_name='Тестовый водитель без специализации', status=Employee.Status.ACTIVE)
         response = self.client.post(reverse('deputy_mining_manager_import'), {

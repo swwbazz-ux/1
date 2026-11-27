@@ -778,6 +778,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
     }
     reported_specializations = effective_specializations_by_employee_id(reported_employees.values())
     required_specialization = ', '.join(spec.name for spec in transfer_specializations) or plan.role.name
+    required_specialization_names = {spec.pk: spec.name for spec in transfer_specializations}
 
     local_bookings = {}
     repeated = {}
@@ -876,6 +877,8 @@ def build_crew_plan_payload(plan, *, deputy=None):
             if slot.reported_employee_id:
                 reported_employee = slot.reported_employee
                 spec = reported_specializations[reported_employee.id]
+                personnel_position = reported_employee.personnel_position
+                base_specialization = reported_employee.base_specialization
                 review_issue = _slot_employee_issue(
                     reported_employee, eligible_employee_ids, other_role_assignment_employee_ids,
                     equipment=equipment,
@@ -883,10 +886,12 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 specialization_review = {
                     'employee_id': reported_employee.pk,
                     'position': (
-                        reported_employee.personnel_position.name if reported_employee.personnel_position_id
-                        else reported_employee.position
+                        personnel_position.name if personnel_position else reported_employee.position
                     ),
+                    'base': base_specialization.name if base_specialization else '',
                     'current': spec.name if spec else '',
+                    'suggested': required_specialization_names.get(personnel_position.default_specialization_id, '')
+                    if personnel_position and not spec else '',
                     'required': required_specialization,
                     'issue': review_issue,
                     'warning': review_issue == 'Не соответствует производственной специализации',

@@ -790,15 +790,20 @@
         var required = review.required || state.role.label;
         if (review.warning) {
             var reason = review.current
-                ? "В карточке сотрудника указана другая специализация."
-                : "В карточке сотрудника не указана производственная специализация.";
+                ? "Действующая специализация не подходит для этого места."
+                : "В карточке сотрудника не сохранена производственная специализация.";
             appendRecordField("Почему появилась пометка", reason + " Для этой техники требуется «" + required + "».", "is-summary is-warning");
         } else {
             appendRecordField("Результат проверки", review.issue || (review.employee_id
                 ? "Сотрудник подходит для этого места." : "Требуется сверка карточки сотрудника."), "is-summary");
         }
         appendRecordField("Штатная должность", review.position || "Не указана");
-        appendRecordField("Специализация в справочнике", review.current || "Не указана");
+        var savedSpecialization = review.base === undefined ? review.current : review.base;
+        appendRecordField("Специализация в карточке", savedSpecialization || "Не указана");
+        if (review.current && review.current !== savedSpecialization) {
+            appendRecordField("Действующая специализация", review.current);
+        }
+        if (review.suggested) appendRecordField("По умолчанию для должности", review.suggested);
         if (!review.warning) appendRecordField("Требуется для техники", required);
         if (review.warning) {
             appendRecordField("Что делать", "Если сотрудник действительно работает на этой машине, оставьте его в смене. "
@@ -1505,7 +1510,8 @@
             var flags = createElement("span", "deputy-slot-flags");
             if (reportedName) {
                 var warning = !slot.specialization_review || review.warning;
-                var label = warning ? "Специализация отличается" : "Фактический состав";
+                var label = "Фактический состав";
+                if (warning) label = review.current === "" ? "Специализация не указана" : "Специализация отличается";
                 var badge = createElement("span", "deputy-specialization-review" + (warning ? "" : " is-resolved"));
                 badge.appendChild(createElement("span", "deputy-review-label", label));
                 badge.appendChild(createElement("span", "deputy-review-symbol", warning ? "!" : "Ф"));

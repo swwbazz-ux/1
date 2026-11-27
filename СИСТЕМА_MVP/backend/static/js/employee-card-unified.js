@@ -216,6 +216,7 @@
     function initSpecialization() {
         var position = document.querySelector("[data-personnel-position]");
         var specialization = document.querySelector("[data-base-specialization]");
+        var suggestion = document.querySelector("[data-specialization-suggestion]");
         var settlementCategory = document.getElementById("employee-settlement-category");
         if (!position || !specialization) return;
         var accessRole = document.querySelector("select[name='role'], select[name='access_role']");
@@ -226,7 +227,7 @@
             catalog = JSON.parse(specialization.dataset.specializationCatalog || "{}");
         } catch (error) {}
 
-        function syncSpecializationOptions() {
+        function syncSpecializationOptions(applyDefault) {
             var config = catalog[position.value] || null;
             if (settlementCategory) {
                 settlementCategory.value = (config && config.settlement_category_label) || "Не указана";
@@ -234,18 +235,23 @@
             var allowed = config && Array.isArray(config.allowed) ? config.allowed.map(String) : [];
             var hasOptions = allowed.length > 0;
             var selectedAllowed = false;
+            var defaultOption = null;
 
             Array.prototype.forEach.call(specialization.options, function (option) {
                 if (!option.value) return;
                 var isAllowed = allowed.indexOf(option.value) !== -1;
-                option.hidden = Boolean(position.value) && !isAllowed;
-                option.disabled = Boolean(position.value) && !isAllowed;
+                // On opening a card, keep the stored option visible even if the catalogue changed.
+                var preserveSelection = !applyDefault && option.selected;
+                option.hidden = Boolean(position.value) && !isAllowed && !preserveSelection;
+                option.disabled = option.hidden;
                 if (option.selected && isAllowed) selectedAllowed = true;
+                if (isAllowed && option.value === String(config.default)) defaultOption = option;
             });
 
-            if (!position.value || !hasOptions) {
+            if ((!position.value || !hasOptions) && (applyDefault || !specialization.value)) {
                 specialization.value = "";
                 specialization.disabled = true;
+                updateSpecializationSuggestion(null);
                 if (issueAccess) {
                     issueAccess.checked = false;
                     issueAccess.dispatchEvent(new Event("change"));
@@ -254,9 +260,10 @@
             }
 
             specialization.disabled = false;
-            if (!selectedAllowed) {
-                specialization.value = config.default ? String(config.default) : "";
+            if (applyDefault && !selectedAllowed) {
+                specialization.value = defaultOption ? defaultOption.value : "";
             }
+            updateSpecializationSuggestion(defaultOption);
             var selectedOption = specialization.options[specialization.selectedIndex];
             var accessRoleId = selectedOption ? selectedOption.dataset.accessRoleId || "" : "";
             if (accessRole && accessRoleId) {
@@ -269,8 +276,18 @@
             }
         }
 
-        syncSpecializationOptions();
-        position.addEventListener("change", syncSpecializationOptions);
+        function updateSpecializationSuggestion(defaultOption) {
+            if (!suggestion) return;
+            var showSuggestion = Boolean(defaultOption && !specialization.value);
+            suggestion.hidden = !showSuggestion;
+            suggestion.textContent = showSuggestion
+                ? "По умолчанию для должности: «" + defaultOption.textContent.trim() + "»."
+                : "";
+        }
+
+        syncSpecializationOptions(specialization.form.dataset.cardMode === "create");
+        position.addEventListener("change", function () { syncSpecializationOptions(true); });
+        specialization.addEventListener("change", function () { syncSpecializationOptions(false); });
     }
 
     function initWorkSchedule() {

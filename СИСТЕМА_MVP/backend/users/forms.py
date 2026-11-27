@@ -283,6 +283,7 @@ class EmployeeCardForm(forms.ModelForm):
         self.fields['position'].required = False
         self.fields['personnel_position'].required = False
         self.fields['base_specialization'].required = False
+        self.fields['base_specialization'].empty_label = 'Не указана'
         self.fields['personnel_department'].required = False
         self.fields['work_schedule'].required = False
         self.fields['brigade_number'].required = False

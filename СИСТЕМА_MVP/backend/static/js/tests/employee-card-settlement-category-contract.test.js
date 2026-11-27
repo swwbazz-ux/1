@@ -48,10 +48,10 @@ test("карточка сотрудника показывает категор�
 test("версия скрипта карточки поднята", () => {
     assert.match(
         CARD_TEMPLATE,
-        /js\/employee-card-unified\.js[\s\S]{0,40}20261122-1/
+        /js\/employee-card-unified\.js[\s\S]{0,40}20261127-saved-specialization/
     );
     assert.equal(
-        CARD_TEMPLATE.split("20261122-1").length - 1,
+        CARD_TEMPLATE.split("20261127-saved-specialization").length - 1,
         1
     );
 });
@@ -66,7 +66,7 @@ test("employee-card-unified.js перерисовывает подпись по 
         /settlementCategory\.value = \(config && config\.settlement_category_label\) \|\| "Не указана";/
     );
     // Подпись обновляется внутри той же функции, что и список специализаций.
-    const functionIndex = CARD_JS.indexOf("function syncSpecializationOptions()");
+    const functionIndex = CARD_JS.indexOf("function syncSpecializationOptions(");
     const assignIndex = CARD_JS.indexOf("settlementCategory.value =");
     assert.ok(functionIndex > 0 && assignIndex > functionIndex);
 });
