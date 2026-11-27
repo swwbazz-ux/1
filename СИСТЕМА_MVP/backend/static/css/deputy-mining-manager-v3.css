@@ -1523,7 +1523,14 @@ button.deputy-avatar {
     top: 12px;
     right: 12px;
     z-index: 2;
+    display: grid;
+    place-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
 }
+
+.deputy-record-close svg { display: block; }
 
 .deputy-record-head {
     display: grid;
@@ -1680,13 +1687,17 @@ button.deputy-avatar {
     --record-gutter: clamp(16px, 3vw, 28px);
 }
 
+.deputy-record-dialog.is-employee {
+    width: min(1120px, calc(100% - 24px));
+}
+
 .deputy-record-dialog.is-employee,
 .deputy-record-form {
     font-family: "Segoe UI", system-ui, sans-serif;
 }
 
 .is-employee .deputy-record-head {
-    padding: 24px 62px 20px var(--record-gutter);
+    padding: 18px 68px 16px var(--record-gutter);
     grid-template-columns: 60px minmax(0, 1fr);
     border: 0;
 }
@@ -1778,42 +1789,16 @@ button.deputy-avatar {
     display: none;
 }
 
-.deputy-record-duty {
-    margin: 0 var(--record-gutter) 18px;
+.deputy-record-form {
+    display: block;
+    container-type: inline-size;
+    padding: 14px 16px;
+    margin: 0 var(--record-gutter) 16px;
     border: 1px solid var(--admin-line);
     border-radius: 8px;
 }
+.deputy-record-form label { margin: 0; }
 
-.deputy-record-duty summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 16px;
-    border-radius: 7px;
-    background: var(--admin-panel-soft);
-    color: var(--admin-ink);
-    font-size: 16px;
-    font-weight: 750;
-    cursor: pointer;
-    list-style: none;
-}
-
-.deputy-record-duty summary::-webkit-details-marker { display: none; }
-.deputy-record-duty summary::after {
-    content: "";
-    width: 8px;
-    height: 8px;
-    margin: 0 3px;
-    border: solid var(--admin-muted);
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-}
-
-.deputy-record-duty[open] summary::after { transform: rotate(225deg); }
-.deputy-record-duty[open] summary { border-radius: 7px 7px 0 0; }
-
-.deputy-record-form { display: block; padding: 14px 16px; }
 .deputy-duty-options {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1825,9 +1810,10 @@ button.deputy-avatar {
 }
 
 .deputy-duty-options legend {
-    padding: 0 0 8px;
-    color: var(--admin-muted);
-    font-size: 14px;
+    padding: 0 0 10px;
+    color: var(--admin-ink);
+    font-size: 16px;
+    font-weight: 700;
 }
 
 .deputy-duty-options label {
@@ -1854,20 +1840,20 @@ button.deputy-avatar {
     accent-color: var(--admin-green);
 }
 
-.deputy-duty-options strong { font-size: 15px; }
+.deputy-duty-options strong { font-size: 15px; white-space: nowrap; }
 .deputy-duty-options small,
 .deputy-record-duty-inputs small {
     color: var(--admin-muted);
     font-size: 13px;
     font-weight: 500;
 }
-.deputy-duty-options small { display: block; margin-top: 3px; }
+.deputy-duty-options small { display: block; margin-top: 3px; white-space: nowrap; }
 
 .deputy-record-duty-inputs {
     display: grid;
     grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
     gap: 14px;
-    margin-top: 16px;
+    margin-top: 12px;
 }
 
 .deputy-record-duty-inputs label {
@@ -1902,8 +1888,10 @@ button.deputy-avatar {
     border-top: 1px solid var(--admin-line-soft);
     padding-top: 12px;
 }
-.deputy-record-duty-confirm p {
+.deputy-record-duty-feedback {
     flex: 1 1 15em;
+}
+.deputy-record-duty-feedback p {
     margin: 0;
     color: var(--admin-muted);
 }
@@ -1917,12 +1905,17 @@ button.deputy-avatar {
     font: 650 15px/1.25 "Segoe UI", system-ui, sans-serif;
     letter-spacing: normal;
     text-transform: none;
-    white-space: normal;
+    white-space: nowrap;
 }
-.deputy-record-duty-confirm .admin-button-primary:hover { background: #105e3a; }
-.deputy-record-duty-confirm .admin-button-primary:disabled { opacity: .6; }
+.deputy-record-duty-confirm .admin-button-primary:enabled:hover { background: #105e3a; }
+.deputy-record-duty-confirm .admin-button-primary:disabled {
+    color: var(--admin-muted);
+    background: var(--admin-panel-soft);
+    box-shadow: none;
+    cursor: default;
+}
 .deputy-record-form :is(input, select, button):focus-visible,
-.deputy-record-duty summary:focus-visible {
+.deputy-record-close:focus-visible {
     outline: 2px solid var(--admin-green);
     outline-offset: 2px;
 }
@@ -1933,15 +1926,38 @@ button.deputy-avatar {
     overflow-wrap: anywhere;
 }
 
-@media (max-width: 620px) {
-    .deputy-duty-options, .deputy-record-duty-inputs { grid-template-columns: minmax(0, 1fr); }
+@container (max-width: 50rem) {
+    .deputy-duty-options { grid-template-columns: minmax(0, 1fr); }
     .deputy-duty-options label { align-items: center; }
-    .deputy-duty-options small { display: inline; margin-inline-start: .5em; }
+    .deputy-duty-options label > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+    .deputy-duty-options small { margin: 0; }
+}
+@media (max-width: 800px) {
+    .deputy-record-dialog.is-employee[open] {
+        display: flex;
+        flex-direction: column;
+        reading-flow: flex-visual;
+    }
+    .is-employee > * { flex-shrink: 0; }
+    .is-employee .deputy-record-close { order: -1; reading-order: -1; }
+    .is-employee .deputy-record-fields { order: 1; }
+    .is-employee .deputy-record-form { margin-block: 12px 0; }
+}
+@media (max-width: 620px) {
+    .deputy-record-dialog { --record-gutter: 12px; }
+    .deputy-record-dialog.is-employee { max-height: calc(100dvh / var(--admin-interface-scale, 1) - 24px); }
+    .deputy-record-form { padding: 12px; }
+    .deputy-duty-options label { min-height: 48px; }
+    .deputy-record-duty-inputs { grid-template-columns: minmax(0, 1fr); }
     .deputy-record-duty-confirm .admin-button-primary { width: 100%; }
     .deputy-record-assignment,
     .deputy-record-dialog.is-employee .deputy-record-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
     .is-employee .deputy-record-head { grid-template-columns: 46px minmax(0, 1fr); gap: 10px; padding-top: 16px; }
     .is-employee .deputy-record-visual { width: 46px; height: 46px; }
+}
+
+@media (min-width: 360px) and (max-width: 620px) {
+    .deputy-record-assignment { grid-template-columns: minmax(0, 1fr) auto; }
 }
 
 .deputy-toast {

@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261127-employee-duty-layout">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261128-employee-duty">
 {% endblock %}
 
 {% block body %}
@@ -185,7 +185,11 @@
 </dialog>
 
 <dialog class="deputy-dialog deputy-record-dialog" data-record-dialog aria-labelledby="deputy-record-title">
-    <button type="button" class="deputy-dialog-close deputy-record-close" data-record-close aria-label="Закрыть">×</button>
+    <button type="button" class="deputy-dialog-close deputy-record-close" data-record-close aria-label="Закрыть">
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+            <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+        </svg>
+    </button>
     <div class="deputy-record-head">
         <div class="deputy-record-visual" data-record-visual aria-hidden="true"></div>
         <div>
@@ -199,37 +203,37 @@
         <div><dt>Бригада</dt><dd data-record-brigade></dd></div>
     </dl>
     <dl class="deputy-record-fields" data-record-fields></dl>
-    <details class="deputy-record-duty" data-record-duty hidden>
-        <summary>Перевод в раздел «Без техники»</summary>
-        <form class="deputy-record-form" data-record-duty-form>
-            <fieldset class="deputy-duty-options">
-                <legend>Выберите состояние</legend>
-                <label><input type="radio" name="status" value="reserve" required><span><strong>Резерв</strong><small>На выбранную смену</small></span></label>
-                <label><input type="radio" name="status" value="other_work" required><span><strong>Работа без техники</strong><small>На производственные сутки</small></span></label>
-                <label><input type="radio" name="status" value="suspended" required><span><strong>Отстранён от управления</strong><small>До подтверждения возврата</small></span></label>
-            </fieldset>
-            <div class="deputy-record-duty-inputs" data-record-duty-inputs hidden>
-                <label><span>Смена <small data-duty-shift-hint></small></span>
-                    <select name="shift_type">
-                        <option value="">Требует уточнения</option>
-                        <option value="day">Первая смена</option>
-                        <option value="night">Вторая смена</option>
-                    </select>
-                </label>
-                <label><span>Где и чем занят <small data-duty-location-hint></small></span>
-                    <input name="location" maxlength="180" placeholder="Например, помогает слесарям на сборке">
-                </label>
-                <div class="deputy-record-duty-confirm">
-                    <p data-record-duty-removal hidden>При публикации сотрудник будет снят с машины.</p>
-                    <button type="submit" class="admin-button admin-button-primary">Перевести и опубликовать</button>
-                </div>
-                <p class="deputy-record-duty-error" data-record-duty-error role="alert" hidden></p>
-            </div>
-        </form>
-    </details>
     <div class="deputy-dialog-actions" data-record-actions>
         <button type="button" class="admin-button admin-button-secondary" data-record-close>Закрыть</button>
     </div>
+    <form class="deputy-record-duty deputy-record-form" data-record-duty data-record-duty-form hidden>
+        <fieldset class="deputy-duty-options">
+            <legend>Перевод в раздел «Без техники»</legend>
+            <label><input type="radio" name="status" value="reserve" required><span><strong>Резерв</strong><small>На выбранную смену</small></span></label>
+            <label><input type="radio" name="status" value="other_work" required><span><strong>Работа без техники</strong><small>На производственные сутки</small></span></label>
+            <label><input type="radio" name="status" value="suspended" required><span><strong>Отстранён от управления</strong><small>До подтверждения возврата</small></span></label>
+        </fieldset>
+        <div class="deputy-record-duty-inputs">
+            <label><span>Смена <small data-duty-shift-hint></small></span>
+                <select name="shift_type">
+                    <option value="">Требует уточнения</option>
+                    <option value="day">Первая смена</option>
+                    <option value="night">Вторая смена</option>
+                </select>
+            </label>
+            <label><span>Где и чем занят <small data-duty-location-hint></small></span>
+                <input name="location" maxlength="180" placeholder="Например, помогает слесарям на сборке">
+            </label>
+            <div class="deputy-record-duty-confirm">
+                <div class="deputy-record-duty-feedback" aria-live="polite">
+                    <p data-record-duty-prompt>Выберите состояние для перевода.</p>
+                    <p data-record-duty-removal hidden>При публикации сотрудник будет снят с машины.</p>
+                </div>
+                <button type="submit" class="admin-button admin-button-primary" disabled>Перевести и опубликовать</button>
+            </div>
+            <p class="deputy-record-duty-error" data-record-duty-error role="alert" hidden></p>
+        </div>
+    </form>
 </dialog>
 
 <dialog class="deputy-dialog deputy-publish-dialog" data-publish-dialog aria-labelledby="deputy-publish-title">
@@ -307,6 +311,6 @@
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
 <script src="{% static 'js/deputy-people-search.js' %}?v=3" defer></script>
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261127-employee-duty-layout" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261128-employee-duty" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

@@ -115,8 +115,9 @@
     var recordAssignment = document.querySelector("[data-record-assignment]");
     var recordFields = document.querySelector("[data-record-fields]");
     var recordActions = document.querySelector("[data-record-actions]");
-    var recordDuty = document.querySelector("[data-record-duty]");
     var recordDutyForm = document.querySelector("[data-record-duty-form]");
+    var recordDutySubmit = recordDutyForm && recordDutyForm.querySelector("button[type=submit]");
+    var recordDutyPrompt = document.querySelector("[data-record-duty-prompt]");
     var recordDutyRemoval = document.querySelector("[data-record-duty-removal]");
     var recordDutyError = document.querySelector("[data-record-duty-error]");
     var publishDialog = document.querySelector("[data-publish-dialog]");
@@ -737,10 +738,7 @@
         closeDialog(photoDialog);
         recordDialog.classList.remove("is-specialization", "is-employee");
         recordAssignment.hidden = true;
-        if (recordDuty) {
-            recordDuty.hidden = true;
-            recordDuty.open = false;
-        }
+        if (recordDutyForm) recordDutyForm.hidden = true;
         recordVisual.replaceChildren();
         recordFields.replaceChildren();
         if (recordActions) {
@@ -755,12 +753,19 @@
     function updateRecordDutyFields() {
         var fields = recordDutyForm.elements;
         var status = fields.status.value;
-        recordDutyForm.querySelector("[data-record-duty-inputs]").hidden = !status;
         fields.shift_type.required = status === "reserve";
         fields.location.required = status === "other_work";
-        recordDutyForm.querySelector("[data-duty-shift-hint]").textContent = fields.shift_type.required ? "обязательно" : "можно уточнить позже";
-        recordDutyForm.querySelector("[data-duty-location-hint]").textContent = fields.location.required ? "обязательно" : "по желанию";
-        recordDutyError.hidden = true;
+        var shiftHint = fields.shift_type.required ? "обязательно" : "можно уточнить позже";
+        var locationHint = fields.location.required ? "обязательно" : "по желанию";
+        recordDutyForm.querySelector("[data-duty-shift-hint]").textContent = status ? shiftHint : "";
+        recordDutyForm.querySelector("[data-duty-location-hint]").textContent = status ? locationHint : "";
+        var prompt = "";
+        if (!status) prompt = "Выберите состояние для перевода.";
+        else if (fields.shift_type.required && !fields.shift_type.value) prompt = "Укажите смену для резерва.";
+        else if (fields.location.required && !fields.location.value.trim()) prompt = "Укажите, где и чем занят сотрудник.";
+        if (recordDutyPrompt.textContent !== prompt) recordDutyPrompt.textContent = prompt;
+        recordDutyPrompt.hidden = !prompt;
+        recordDutySubmit.disabled = Boolean(prompt) || saving || !planEditable();
     }
 
     function prepareRecordDuty(employeeId, shiftType) {
@@ -772,8 +777,9 @@
         recordDutyForm.dataset.workDate = state.plan.work_date;
         recordDutyForm.elements.shift_type.value = shiftType || "";
         recordDutyRemoval.hidden = !shiftType;
+        recordDutyError.hidden = true;
+        recordDutyForm.hidden = false;
         updateRecordDutyFields();
-        recordDuty.hidden = false;
     }
 
     function openEmployeeRecord(employee, assignmentLabel, shiftType) {
@@ -1830,6 +1836,7 @@
     }
 
     function updatePublishButton() {
+        if (recordDialog && recordDialog.open && recordDutyForm && !recordDutyForm.hidden) updateRecordDutyFields();
         if (exportButton) {
             var canExport = Boolean(state.plan.id && state.endpoints.export && !saving);
             exportButton.href = canExport ? state.endpoints.export : "#";
@@ -1969,12 +1976,11 @@
 
     async function submitRecordDuty(event) {
         event.preventDefault();
-        if (saving || !planEditable() || recordDuty.hidden) return;
+        if (saving || !planEditable() || recordDutyForm.hidden || recordDutySubmit.disabled) return;
         var fields = new FormData(recordDutyForm);
         var selection = recordDutyForm.dataset;
-        var submit = recordDutyForm.querySelector("button[type=submit]");
         saving = true;
-        submit.disabled = true;
+        recordDutySubmit.disabled = true;
         recordDutyError.hidden = true;
         updateAutosave("saving", "Публикую статус…");
         updatePublishButton();
@@ -1998,7 +2004,6 @@
             updateAutosave("error", "Статус не опубликован");
         } finally {
             saving = false;
-            submit.disabled = false;
             updatePublishButton();
         }
     }
@@ -2300,8 +2305,9 @@
         button.addEventListener("click", function () { closeDialog(recordDialog); });
     });
     if (recordDutyForm) {
-        recordDutyForm.addEventListener("change", function (event) {
-            if (event.target.name === "status") updateRecordDutyFields();
+        recordDutyForm.addEventListener("input", function () {
+            recordDutyError.hidden = true;
+            updateRecordDutyFields();
         });
         recordDutyForm.addEventListener("submit", submitRecordDuty);
     }
