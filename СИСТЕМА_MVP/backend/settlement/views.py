@@ -21,6 +21,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import AssignmentStatus, CrewPlan, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment
+from assignments.off_equipment import off_equipment_on
 from core.production_time import (
     BUSINESS_TIME_ZONE, DAY_SHIFT_START, business_localtime, production_day_bounds, production_work_date,
 )
@@ -953,7 +954,11 @@ def _employee_profiles(employees, *, settlement_date=None):
     specializations = effective_specializations_by_employee_id(employees, as_of=settlement_date) if settlement_date else {}
     published_roles = set()
     published_slots = defaultdict(list)
+    off_equipment = {}
     if settlement_date and employee_ids:
+        off_equipment = {
+            entry.employee_id: entry for entry in off_equipment_on(settlement_date, employee_ids=employee_ids)
+        }
         plans = dict(CrewPlan.objects.filter(
             work_date=settlement_date, status=CrewPlanStatus.PUBLISHED,
         ).values_list('pk', 'role__code'))
@@ -1008,6 +1013,8 @@ def _employee_profiles(employees, *, settlement_date=None):
             'published_slots': slots,
             'has_published_assignment_data': has_plan,
             'requires_equipment': needs_equipment,
+            'off_equipment': off_equipment.get(employee.pk),
+            'work_date': settlement_date,
         }
     return profiles
 
@@ -1042,6 +1049,16 @@ def _unsettled_employee_cards(moment):
 
 
 def _resident_work_display(resident, occupancy, profile, *, from_excel):
+    off = profile.get('off_equipment') if profile else None
+    if off:
+        shift = DAY_NIGHT_LABELS.get(off.shift_type) if off.work_date == profile['work_date'] else None
+        work = ' · '.join(filter(None, (off.get_status_display(), off.location)))
+        return {
+            'shift_label': shift or UNKNOWN_LABEL,
+            'tooltip_shift_label': ' · '.join((shift, 'по расстановке')) if shift else 'Смена требует уточнения',
+            'work_label': work, 'work_caption': 'Статус', 'tooltip_work_label': work,
+            'assignment_warning': '' if shift else 'Смена требует уточнения',
+        }
     work_shift = occupancy.work_shift if occupancy else None
     recorded = DAY_NIGHT_LABELS.get(work_shift)
     shift = recorded or (profile['shift_label'] if profile else UNKNOWN_LABEL)

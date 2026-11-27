@@ -53,6 +53,7 @@ from .models import (
     CrewPlanStatus,
     WorkShiftType,
 )
+from .off_equipment import blocked_off_equipment_ids
 from .services import (
     CREW_SLOT_POSITION_PRIMARY,
     CREW_SLOT_POSITION_SECONDARY,
@@ -702,6 +703,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
     transfer_specializations = []
     transfer_pending_employee_ids = set()
     current_watch_periods = []
+    blocked_employee_ids = blocked_off_equipment_ids(plan.work_date) if editable else set()
     if editable or any(slot.reported_employee_id for slot in slots):
         category = AUXILIARY_CATEGORIES.get(plan.role.code)
         specialization_filter = {'code': category.specialization} if category else {'access_role': plan.role}
@@ -713,6 +715,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
             Employee.objects.filter(id__in=all_eligible_employee_ids)
             .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .exclude(id__in=assigned_employee_ids)
+            .exclude(id__in=blocked_employee_ids)
             .exclude(id__in=other_role_assignment_employee_ids)
             .order_by('full_name')
         )
@@ -729,7 +732,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 is_active=True,
                 status=Employee.Status.ACTIVE,
             )
-            .exclude(id__in=eligible_employee_ids)
+            .exclude(id__in=eligible_employee_ids | blocked_employee_ids)
             .select_related('personnel_position', 'work_schedule', 'contractor_organization', 'base_specialization')
             .order_by('full_name')
         )

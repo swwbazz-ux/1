@@ -39,7 +39,11 @@ from users.models import (
 )
 from users.work_profiles import employee_has_effective_access_role
 
-from .models import AssignmentStatus, CrewPlan, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
+from .models import (
+    AssignmentStatus, CrewOffEquipment, CrewPlan, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment,
+    OffEquipmentStatus, WorkShiftType,
+)
+from .off_equipment import off_equipment_on
 from .services import (
     get_active_equipment_assignment,
     get_or_create_crew_draft,
@@ -49,6 +53,81 @@ from .services import (
 
 
 class DeputyPlanningViewTests(TestCase):
+    def test_off_equipment_publication_is_read_by_settlement_and_blocks_equipment_until_return(self):
+        from types import SimpleNamespace
+
+        from settlement.views import _employee_profiles, _resident_work_display
+
+        day = production_work_date()
+        person = Employee.objects.create(
+            full_name='Проверкин Тестовый Водитель', status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        url = reverse('deputy_off_equipment')
+        search_url = url + '?q=Проверкин'
+        self.assertContains(self.client.get(search_url), 'Требует уточнения')
+        body = {
+            'employee_id': person.pk, 'work_date': day.isoformat(), 'status': OffEquipmentStatus.SUSPENDED,
+            'shift_type': WorkShiftType.SHIFT_1, 'location': 'Площадка сборки · помощь слесарям',
+        }
+        self.assertRedirects(self.client.post(search_url, body), search_url, fetch_redirect_response=False)
+        entry = CrewOffEquipment.objects.get(employee=person, work_date=day)
+        self.assertEqual(entry.status, OffEquipmentStatus.SUSPENDED)
+        self.assertTrue(off_equipment_on(day + timedelta(days=1), employee_ids=[person.pk]).exists())
+
+        resident = SimpleNamespace(organization='')
+        profile = _employee_profiles([person], settlement_date=day)[person.pk]
+        display = _resident_work_display(resident, None, profile, from_excel=True)
+        self.assertIn('Площадка сборки', display['work_label'])
+        self.assertEqual(display['assignment_warning'], '')
+
+        response = self.upload_crew_excel(
+            [['Самосвал БЕЛАЗ', self.truck_2.garage_number, person.full_name, None]],
+            selections={'factual': '1'},
+        )
+        self.assertContains(response, OffEquipmentStatus.SUSPENDED.label, status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+
+        plan = self.create_draft()
+        slot_body = {
+            'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+            'shift_type': WorkShiftType.SHIFT_1, 'employee_id': person.pk, 'factual': True,
+        }
+        response = self.client.post(reverse('deputy_mining_manager_slot'), slot_body, content_type='application/json')
+        self.assertEqual(response.json()['code'], 'crew_off_equipment')
+        body['expected_version'] = entry.updated_at.isoformat()
+        response = self.client.post(search_url, {**body, 'status': OffEquipmentStatus.RESERVE})
+        self.assertContains(response, 'Сначала подтвердите возврат', status_code=400)
+        response = self.client.post(search_url, {**body, 'status': OffEquipmentStatus.CLEARED})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(off_equipment_on(day + timedelta(days=1), employee_ids=[person.pk]).exists())
+        self.assertEqual(self.client.post(
+            reverse('deputy_mining_manager_slot'), slot_body, content_type='application/json',
+        ).status_code, 200)
+
+    def test_reserve_is_cleared_only_when_the_crew_is_published(self):
+        person = Employee.objects.create(
+            full_name='Резервов Тестовый Водитель', status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        day = production_work_date()
+        url = reverse('deputy_off_equipment')
+        data = {'work_date': day.isoformat(), 'status': OffEquipmentStatus.RESERVE, 'shift_type': WorkShiftType.SHIFT_1}
+        self.assertEqual(self.client.post(url, {**data, 'employee_id': self.driver.pk}).status_code, 400)
+        self.assertEqual(self.client.post(url, {**data, 'employee_id': person.pk}).status_code, 302)
+        plan = self.create_draft()
+        response = self.client.post(reverse('deputy_mining_manager_slot'), {
+            'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+            'shift_type': WorkShiftType.SHIFT_1, 'employee_id': person.pk,
+        }, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(off_equipment_on(day, employee_ids=[person.pk]).exists())
+        published = self.client.post(reverse('deputy_mining_manager_publish'), {
+            'plan_id': plan.pk, 'expected_version': response.json()['payload']['plan']['version'],
+        }, content_type='application/json')
+        self.assertEqual(published.status_code, 200, published.content)
+        self.assertFalse(off_equipment_on(day, employee_ids=[person.pk]).exists())
+
     def setUp(self):
         self.deputy_role, _created = Role.objects.update_or_create(
             code='deputy_mining_manager',

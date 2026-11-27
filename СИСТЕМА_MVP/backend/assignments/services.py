@@ -26,6 +26,7 @@ from users.work_profiles import (
     eligible_employee_ids_for_work_role, employee_has_effective_access_role, legacy_work_category_for_specialization,
 )
 from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS
+from .off_equipment import clear_assigned_reserves, validate_off_equipment_assignment
 
 from .models import (
     AssignmentStatus,
@@ -632,6 +633,7 @@ def update_crew_draft_slot(
             .select_related('contractor_organization')
             .get(pk=employee.pk)
         )
+        validate_off_equipment_assignment(locked_plan.work_date, [employee.pk])
         if validate_new_employee is not None and (
             specialization_id is not None or not locked_plan.slots.filter(
                 Q(employee=employee) | Q(secondary_employee=employee) | Q(reported_employee=employee),
@@ -835,6 +837,7 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
             .filter(id__in=occupied_ids)
             .order_by('id')
         )
+        validate_off_equipment_assignment(locked_plan.work_date, occupied_ids)
         refreshed_employees = (
             Employee.objects.select_related('contractor_organization')
             .in_bulk(target_employee_ids)
@@ -1112,6 +1115,7 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
             slots=slots,
             actor_access=actor_access,
         )
+    clear_assigned_reserves(locked_plan.work_date, occupied_ids, actor)
     bump_operational_state(
         'CrewPlan:published',
         event_type='personnel_assignment_changed',
@@ -1204,6 +1208,7 @@ def validate_work_assignment(*, employee, role, equipment, shift_type, exclude_a
         raise ValidationError('Сотрудник неактивен.')
     if not employee_matches_work_role(employee, role):
         raise ValidationError('Производственная специализация сотрудника не соответствует выбранной роли.')
+    validate_off_equipment_assignment(production_work_date(), [employee.pk])
     if not equipment_queryset_for_work_role(role.code).filter(id=equipment.id).exists():
         raise ValidationError('Выбранная техника не соответствует рабочей роли или неактивна.')
     validate_employee_equipment_organization(employee, equipment)
@@ -1324,6 +1329,7 @@ def set_active_equipment_assignment(*, employee, role, equipment, shift_type, as
         )
     except IntegrityError as error:
         raise ValidationError('Назначение конфликтует с другим активным назначением. Обновите страницу.') from error
+    clear_assigned_reserves(production_work_date(now), [employee.pk], assigned_by)
     _emit_work_assignment_changed(assignment, 'assigned')
     return assignment, True
 

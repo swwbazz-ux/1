@@ -7,6 +7,7 @@ from users.work_profiles import effective_specializations_by_employee_id
 
 from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS
 from .models import AssignmentStatus, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
+from .off_equipment import blocked_off_equipment_ids
 from .services import WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES, eligible_crew_employee_ids, production_work_date
 
 
@@ -66,8 +67,9 @@ def placement_people_index(work_date, *, visible_free):
     eligible = defaultdict(set)
     free = []
     if current:
+        unavailable_ids = set(locations) | blocked_off_equipment_ids(work_date)
         free = list(Employee.objects.filter(Employee.work_eligibility_q(), is_active=True, status=Employee.Status.ACTIVE)
-                    .exclude(pk__in=locations).select_related('base_specialization'))
+                    .exclude(pk__in=unavailable_ids).select_related('base_specialization'))
         specs = effective_specializations_by_employee_id(free, infer_from_position=True)
         for role in roles.intersection({'driver', 'excavator_operator'}):
             for person in eligible_crew_employee_ids(role):

@@ -967,11 +967,13 @@
             var link = event.target.closest("a[href]");
             if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey ||
                 event.shiftKey || event.altKey || link.target || !window.AbortController) return;
-            event.preventDefault();
             if (saving) {
+                event.preventDefault();
                 showToast("Дождитесь сохранения расстановки.");
                 return;
             }
+            if (link.hasAttribute("data-off-equipment-link")) return;
+            event.preventDefault();
             if (peopleSearch) peopleSearch.clear(true);
             switchCategory(new URL(link.href), false);
         });
@@ -988,7 +990,7 @@
     function renderCategories() {
         if (!categoryNav) return;
         categoryNav.replaceChildren();
-        categoryNav.hidden = state.categories.length === 0;
+        categoryNav.hidden = false;
         state.categories.forEach(function (category) {
             var link = createElement("a", "", "");
             link.href = category.url || "#";
@@ -1010,6 +1012,13 @@
             }
             categoryNav.appendChild(link);
         });
+        if (categoryNav.dataset.offEquipmentUrl) {
+            var offEquipmentLink = createElement("a", "", "");
+            offEquipmentLink.href = categoryNav.dataset.offEquipmentUrl;
+            offEquipmentLink.setAttribute("data-off-equipment-link", "");
+            offEquipmentLink.appendChild(createElement("strong", "", "Без техники"));
+            categoryNav.appendChild(offEquipmentLink);
+        }
         var current = categoryNav.querySelector('[aria-current="page"]');
         if (current && categoryNav.scrollWidth > categoryNav.clientWidth) {
             var navBox = categoryNav.getBoundingClientRect();
