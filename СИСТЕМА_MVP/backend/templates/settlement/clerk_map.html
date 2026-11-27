@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-toolbar-v2-swap-picker-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-map-header.css' %}?v={{ static_asset_release }}-map-header-v1-watch-template-v2">
+<link rel="stylesheet" href="{% static 'css/settlement-map-header.css' %}?v={{ static_asset_release }}-map-header-v1-next-excel">
 <link rel="stylesheet" href="{% static 'css/settlement-floor-heading.css' %}?v={{ static_asset_release }}-floor-heading-v1">
 {% endblock %}
 
@@ -54,7 +54,7 @@
                 <button type="button" class="is-active" data-map-mode="current" aria-pressed="true">Текущая вахта</button>
                 <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
             </nav>
-            <div class="settlement-map-entry__excel" role="group" aria-label="Обмен с Excel">
+            <div class="settlement-map-entry__excel" data-current-excel role="group" aria-label="Обмен с Excel">
                 <a href="{% url 'settlement_current_housing_import' %}" title="Выбрать файл для проверки и загрузки расселения">
                     <svg viewBox="0 0 30 26" aria-hidden="true" focusable="false">
                         <path d="M3 2h11l5 5v17H3z M14 2v5h5 M6 11h10v8H6z M6 15h10 M11 11v8"/>
@@ -223,6 +223,7 @@
                 <div>
                     <span>План без изменения фактического проживания</span>
                     <h2>Следующий заезд</h2>
+                    <a class="settlement-auto-preview-trigger" href="{% url 'next_housing_import' %}">Прошлое расселение из Excel</a>
                     <a class="settlement-auto-preview-trigger" href="{% url 'settlement_provisional_period' %}">Рассчитать по готовым</a>
                 </div>
                 <fieldset class="settlement-filter-group">
@@ -1062,7 +1063,7 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v6-room-preview"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-watch-template-v2"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-next-excel-v1"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>

@@ -1,0 +1,32 @@
+{% extends "clerk/base.html" %}
+{% load static %}
+{% block title %}Прошлое расселение · Следующий заезд{% endblock %}
+{% block clerk_extra_head %}
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v11">
+{% endblock %}
+{% block clerk_content %}
+<main class="admin-console-page settlement-page settlement-routing-page">
+  <section class="admin-console-section">
+    <header class="admin-console-section-header"><div><span>Следующий заезд</span><h1>Прошлое расселение из Excel</h1></div>
+      <a href="{% url 'settlement_map' %}?mode=next">К следующему заезду</a></header>
+    <p>Выберите файл за прошлую вахту этой бригады и дату, на которую нужно взять расселение. Текущая карта останется прежней.</p>
+    <form class="housing-import__form" method="post" enctype="multipart/form-data">{% csrf_token %}
+      <div class="housing-import__inputs">
+        <div>{{ form.workbook.label_tag }}{{ form.workbook }}{{ form.workbook.errors }}</div>
+        <div>{{ form.as_of.label_tag }}{{ form.as_of }}{{ form.as_of.errors }}</div>
+        <button name="action" value="preview">Проверить Excel</button>
+      </div>
+    </form>
+    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  </section>
+  {% if draft %}<section class="admin-console-section"><h2>{{ draft.filename }}</h2><p>Расселение на {{ draft.as_of|date:"d.m.Y" }}</p>
+    {% if draft.review.entries %}<form method="post">{% csrf_token %}<input type="hidden" name="revision" value="{{ draft.revision }}">
+      <label>Название шаблона <input required name="name" maxlength="128" value="{{ template_name }}"></label>
+      <button class="settlement-place-button" name="action" value="save">Сохранить отдельный шаблон</button></form>{% endif %}
+    {% include "settlement/next_housing_rows.html" with snapshot=draft.review %}
+  </section>{% endif %}
+  {% if recent %}<section class="admin-console-section"><h2>Шаблоны из прошлых расселений</h2><ul>
+    {% for item in recent %}<li><a href="{% url 'settlement_watch_template_detail' item.pk %}">{{ item.name }} · {{ item.work_date|date:"d.m.Y" }}</a></li>{% endfor %}
+  </ul></section>{% endif %}
+</main>
+{% endblock %}

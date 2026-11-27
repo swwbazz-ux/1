@@ -121,6 +121,39 @@ class CurrentHousingPreviewTests(TestCase):
         session['employee_access_id'] = self.access.pk
         session.save()
 
+    def test_next_arrival_freezes_excel_review_without_changing_live_placements(self):
+        from .models import SettlementWatchTemplate
+
+        url = reverse('next_housing_import')
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.use_clerk_session()
+        original = list(EmployeeBedOccupancy.objects.order_by('pk').values())
+        with TemporaryDirectory() as private, self.settings(PORTAL_PRIVATE_MEDIA_ROOT=private):
+            workbook = self.upload([
+                (2, '02А-1', self.workers[0], False, self.ends),
+                (2, '02А-2', self.itr, False, self.ends),
+                (2, '02А-3', self.workers[2], False, self.ends),
+                (3, '03А-1', self.workers[3], True, self.ends),
+            ])
+            response = self.client.post(url, {'action': 'preview', 'as_of': self.as_of, 'workbook': workbook}, follow=True)
+            self.assertContains(response, 'В блоке три койки')
+            self.assertContains(response, 'В комнате указаны и рабочие, и ИТР')
+            self.assertNotContains(response, 'Койка занята другим жильцом')
+            self.assertContains(response, 'Межвахта')
+            self.assertFalse(SettlementWatchTemplate.objects.exists())
+            draft = response.context['draft']
+            save = {'action': 'save', 'name': 'Бригада Б', 'revision': 'старая'}
+            self.assertEqual(self.client.post(url, save).status_code, 400)
+            save['revision'] = draft.revision
+            saved = self.client.post(url, save, follow=True)
+            self.assertContains(saved, 'Шаблон сохранён')
+            self.assertContains(saved, 'Бригада Б')
+            self.assertContains(saved, 'В блоке три койки')
+            self.assertContains(self.client.post(url, save, follow=True), 'уже сохранён')
+            self.assertEqual(SettlementWatchTemplate.objects.get().snapshot, draft.review)
+            self.assertEqual(self.client.get(reverse('settlement_watch_templates')).json()['recent'], [])
+            self.assertEqual(list(EmployeeBedOccupancy.objects.order_by('pk').values()), original)
+
     def test_protected_preview_reports_interwatch_and_conflicts_without_writes(self):
         url = reverse('settlement_current_housing_import')
         self.assertEqual(self.client.get(url).status_code, 302)

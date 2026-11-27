@@ -86,6 +86,10 @@ def save_watch_template(*, rooms, moment, name, watch_period, access):
         'rooms': room_rows,
     }
     work_date = production_work_date(moment)
+    return store_watch_snapshot(snapshot, name, work_date, moment, watch_period, access)
+
+
+def store_watch_snapshot(snapshot, name, work_date, moment, watch_period, access):
     fingerprint = hashlib.sha256(json.dumps(
         [name, watch_period.pk if watch_period else None, work_date.isoformat(), snapshot],
         sort_keys=True, ensure_ascii=False,

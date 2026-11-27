@@ -1512,6 +1512,8 @@
 
     function setMapMode(mode) {
         activeMapMode = mode === "next" ? "next" : "current";
+        const currentExcel = root.querySelector("[data-current-excel]");
+        if (currentExcel) currentExcel.hidden = activeMapMode === "next";
         if (watchExtensionDetails) watchExtensionDetails.hidden = activeMapMode === "next";
         if (watchTemplateButton) watchTemplateButton.hidden = activeMapMode === "next";
         mapModeButtons.forEach(function (button) {
@@ -3444,7 +3446,7 @@
 
     restoreMapSelection();
     applyFilters();
-    setMapMode("current");
+    setMapMode(new URLSearchParams(window.location.search).get("mode"));
     if (watchExtensionStateNode) {
         acceptWatchExtensions(JSON.parse(watchExtensionStateNode.textContent), Date.now());
         document.addEventListener("visibilitychange", resumeWatchExtensions);

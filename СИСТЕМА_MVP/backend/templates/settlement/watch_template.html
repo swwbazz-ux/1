@@ -5,18 +5,23 @@
     <section class="admin-console-section" aria-labelledby="watch-template-title">
         <header class="admin-console-section-header">
             <div>
-                <span>Шаблон вахты</span>
+                {% for message in messages %}<p role="status"><strong>{{ message }}</strong></p>{% endfor %}
+                <span>{% if watch_template.snapshot.source_kind == 'next_excel' %}Шаблон следующего заезда из Excel{% else %}Шаблон вахты{% endif %}</span>
                 <h2 id="watch-template-title">{{ watch_template.name }}</h2>
                 <p>Сохранён {{ captured_at|date:"d.m.Y H:i" }} по Владивостоку
                     {% if watch_template.watch_period %} · {{ watch_template.watch_period.name }}{% endif %}
                 </p>
-                <p>Занятых коек {{ watch_template.snapshot.occupied_beds }} ·
+                {% if watch_template.snapshot.source_kind == 'next_excel' %}
+                <p>{{ watch_template.snapshot.filename }} · Расселение на {{ watch_template.work_date|date:"d.m.Y" }}</p>
+                {% else %}<p>Занятых коек {{ watch_template.snapshot.occupied_beds }} ·
                     Коек с отметками {{ watch_template.snapshot.marked_beds }}
-                </p>
+                </p>{% endif %}
             </div>
-            <a href="{% url 'settlement_map' %}">На карту расселения</a>
+            {% if watch_template.snapshot.source_kind == 'next_excel' %}<a href="{% url 'settlement_map' %}?mode=next">К следующему заезду</a>
+            {% else %}<a href="{% url 'settlement_map' %}">На карту расселения</a>{% endif %}
         </header>
-        <div class="admin-console-table-wrap">
+        {% if watch_template.snapshot.source_kind == 'next_excel' %}{% include "settlement/next_housing_rows.html" with snapshot=watch_template.snapshot %}
+        {% else %}<div class="admin-console-table-wrap">
             <table>
                 <thead>
                     <tr>
@@ -54,7 +59,7 @@
                     {% endfor %}
                 </tbody>
             </table>
-        </div>
+        </div>{% endif %}
     </section>
 </main>
 {% endblock %}

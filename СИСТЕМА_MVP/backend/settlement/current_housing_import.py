@@ -829,7 +829,7 @@ def _apply_review_decisions(rows, review):
             row.invalid_excel_dates = False
 
 
-def build_current_housing_preview(rows, as_of, *, filename='', review=None):
+def build_current_housing_preview(rows, as_of, *, filename='', review=None, historical=False):
     if review:
         _apply_review_decisions(rows, review)
     roster = defaultdict(list)
@@ -869,12 +869,12 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
         row.physical_bed_id = bed.pk if bed else None
         row_places[row.source] = room, bed
     _excel_conflicts(rows, as_of, _workbook_end(filename, as_of))
-    anchors = room_anchor_types_by_room(room_ids=room_ids)
+    anchors = {} if historical else room_anchor_types_by_room(room_ids=room_ids)
     selected_day_start, selected_day_end = production_day_bounds(as_of)
-    held_beds, reserved_beds = _housing_bed_restrictions(room_ids, selected_day_start, selected_day_end)
+    held_beds, reserved_beds = (set(), set()) if historical else _housing_bed_restrictions(room_ids, selected_day_start, selected_day_end)
     candidates = [row for row in rows if not row.status and not row.other_room and row.ends and row.starts <= as_of < row.ends]
     bed_use, room_use, subject_use = defaultdict(list), defaultdict(list), defaultdict(list)
-    if candidates:
+    if candidates and not historical:
         first, _ = production_day_bounds(min(row.starts for row in candidates))
         last, _ = production_day_bounds(max(row.ends for row in candidates))
         employee_ids = [person.pk for people in roster.values() for person in people]
@@ -904,7 +904,7 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
             row.issues.append(BED_MISSING)
         elif not room:
             row.issues.append('Комната отсутствует в жилфонде или номер встречается на нескольких этажах.')
-        elif not room.dormitory.is_active or not room.is_transferred:
+        elif not historical and (not room.dormitory.is_active or not room.is_transferred):
             row.issues.append(ROOM_UNAVAILABLE)
         elif not bed:
             row.issues.append(BED_MISSING)
@@ -947,7 +947,7 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
             ends, _ = production_day_bounds(row.ends)
             if row.sex:
                 matched_rooms[room.pk].append(row)
-            if _check_occupancy(row, bed, starts, ends, bed_use[bed.pk],
+            if not historical and _check_occupancy(row, bed, starts, ends, bed_use[bed.pk],
                                 subject_use[row.placement_subject], room_use[room.pk]):
                 already_placed.add(row.source)
 

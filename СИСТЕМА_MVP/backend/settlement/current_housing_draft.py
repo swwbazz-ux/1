@@ -33,8 +33,9 @@ class CurrentHousingDraft:
 
 
 class CurrentHousingDraftStorage:
-    def __init__(self, access_id):
-        directory = Path(settings.PORTAL_PRIVATE_MEDIA_ROOT) / 'settlement' / 'current_housing'
+    def __init__(self, access_id, *, next_arrival=False):
+        folder = 'next_arrival' if next_arrival else 'current_housing'
+        directory = Path(settings.PORTAL_PRIVATE_MEDIA_ROOT) / 'settlement' / folder
         self.path = directory / f'{int(access_id)}.json'
 
     @contextmanager

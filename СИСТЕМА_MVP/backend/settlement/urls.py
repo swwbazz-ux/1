@@ -18,6 +18,7 @@ from .views import (
     settlement_clerk_shift_open_view,
     settlement_clerk_shift_state_view,
     settlement_clerk_extensions_view,
+    next_housing_import_view,
     settlement_current_housing_export_view,
     settlement_current_housing_import_view,
     settlement_watch_template_detail_view,
@@ -94,6 +95,7 @@ urlpatterns = [
     path('clerk/', settlement_map_view, name='clerk_home'),
     path('clerk/settlement/assignments/', settlement_map_assignments, name='settlement_map_assignments'),
     path('clerk/settlement/', settlement_map_view, name='settlement_map'),
+    path('clerk/settlement/next/housing-import/', next_housing_import_view, name='next_housing_import'),
     path('clerk/settlement/watch-templates/', settlement_watch_templates_view, name='settlement_watch_templates'),
     path(
         'clerk/settlement/watch-templates/<int:template_id>/',

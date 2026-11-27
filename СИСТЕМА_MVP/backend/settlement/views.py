@@ -76,7 +76,8 @@ from .resolver import resolve_ready_arrivals
 from .cohort_readiness import build_arrival_roster_cohort_overview, build_arrival_roster_cohort_readiness
 from .current_housing_draft import CurrentHousingDraft, CurrentHousingDraftStorage
 from .current_housing_export import build_current_housing_export
-from .watch_templates import active_template_periods, save_watch_template
+from .watch_templates import active_template_periods, save_watch_template, store_watch_snapshot
+from .next_housing import next_housing_snapshot
 from .current_housing_import import (
     MANUAL_BED_BLOCKERS,
     MAX_FILE_SIZE,
@@ -1517,6 +1518,60 @@ def settlement_current_housing_export_view(request):
     )
 
 
+class PreviousHousingWorkbookForm(CurrentHousingWorkbookForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['workbook'].required = True
+        self.fields['as_of'].label = 'Дата прошлого расселения'
+
+
+@never_cache
+@require_http_methods(['GET', 'POST'])
+def next_housing_import_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return redirect(f'{reverse("clerk_login")}?{urlencode({"next": request.path})}')
+    action = request.POST.get('action') if request.method == 'POST' else None
+    uploading = action == 'preview'
+    form = PreviousHousingWorkbookForm(request.POST if uploading else None, request.FILES if uploading else None)
+    storage = CurrentHousingDraftStorage(access.pk, next_arrival=True)
+    error = ''
+    status = 200
+    draft = None
+    name = request.POST.get('name', '').strip()
+    try:
+        with storage.locked():
+            draft = storage.load()
+            if uploading and form.is_valid():
+                file = form.cleaned_data['workbook']
+                candidate = CurrentHousingDraft.from_workbook(file.name, file.read(MAX_FILE_SIZE + 1), form.cleaned_data['as_of'])
+                storage.save(candidate.with_review(next_housing_snapshot(candidate)))
+                return redirect('next_housing_import')
+            if action == 'save':
+                if not draft or request.POST.get('revision') != draft.revision:
+                    raise ValidationError('Файл для сверки изменился. Проверьте открытый предпросмотр.')
+                if not draft.review['entries']:
+                    raise ValidationError('На выбранную дату нет строк проживания.')
+                name = forms.CharField(max_length=128).clean(name)
+                template, created = store_watch_snapshot(draft.review, name, draft.as_of, timezone.now(), None, access)
+                messages.success(request, 'Шаблон сохранён' if created else 'Этот шаблон уже сохранён')
+                return redirect('settlement_watch_template_detail', template.pk)
+    except ValidationError as exc:
+        error = ' '.join(exc.messages)
+        status = 400
+    except OSError:
+        error = 'Не удалось открыть или записать черновик. Повторите попытку.'
+        status = 503
+    if draft:
+        form.initial['as_of'] = draft.as_of
+    recent = SettlementWatchTemplate.objects.filter(snapshot__source_kind='next_excel').defer('snapshot')[:20]
+    return render(request, 'settlement/next_housing_import.html', {
+        'access': access, 'clerk_active_section': 'settlement', 'form': form, 'draft': draft,
+        'template_name': name or (draft.filename.rsplit('.', 1)[0][:128] if draft else ''),
+        'recent': recent, 'error': error,
+    }, status=400 if form.errors else status)
+
+
 def _watch_template_link(template):
     return {
         'name': template.name,
@@ -1539,7 +1594,7 @@ def settlement_watch_templates_view(request):
             'default_name': periods[0].name if len(periods) == 1 else f'Вахта {work_date:%d.%m.%Y}',
             'periods': [{'id': period.pk, 'name': period.name} for period in periods],
             'recent': [_watch_template_link(template) for template in
-                       SettlementWatchTemplate.objects.defer('snapshot')[:8]],
+                       SettlementWatchTemplate.objects.exclude(snapshot__has_key='source_kind').defer('snapshot')[:8]],
         })
 
     try:

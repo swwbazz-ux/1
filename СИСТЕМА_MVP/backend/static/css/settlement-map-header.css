@@ -158,6 +158,7 @@
 .settlement-watch-template-dialog [data-watch-template-result]:empty { display: none; }
 .settlement-watch-template-dialog ul { padding-inline-start: 1.3em; }
 .settlement-watch-template-dialog [hidden] { display: none; }
+.settlement-map-entry [data-current-excel][hidden] { display: none; }
 .settlement-template-receipt { overflow-wrap: anywhere; }
 .settlement-template-receipt strong { font-size: 1.1rem; }
 .settlement-template-receipt p { color: var(--admin-muted); }
