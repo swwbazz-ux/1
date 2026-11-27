@@ -4,7 +4,7 @@
 {% block body_class %}dispatcher-control-screen dispatcher-duty-screen{% endblock %}
 {% block extra_head %}
 {{ block.super }}
-<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=8">
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=9">
 <script src="{% static 'js/dispatcher-duty-report.js' %}?v=6" defer></script>
 {% endblock %}
 {% block body %}
@@ -30,10 +30,12 @@
         </form>
       </details>
       <div class="duty-legend" aria-label="Обозначения шкалы">
-        <span><i class="duty-on"></i>В пульте</span><span><i class="duty-out"></i>Вне пульта</span>
+        <span><i class="duty-shift-open"></i>Смена открыта</span><span><i class="duty-shift-vacant"></i>Вне смены</span>
+        <span><i class="duty-on"></i>Пульт на экране</span><span><i class="duty-background"></i>Пульт в фоне</span>
+        <span><i class="duty-out"></i>Пульт закрыт</span>
         <span><i class="duty-unknown"></i>Нет данных</span><span><i class="duty-future"></i>Предстоит</span>
         <span><i class="duty-diamond"></i>Операция</span>
-        <span><i class="duty-window-hidden"></i>Окно в фоне</span><span><i class="duty-window-visible"></i>Возврат на экран</span>
+        <span><i class="duty-window-hidden"></i>Свернули пульт</span><span><i class="duty-window-visible"></i>Вернули на экран</span>
       </div>
       {% if report.tracking_began %}<p class="duty-archive-note">Подробный учёт связи ведётся с {{ report.tracking_began|date:"d.m.Y H:i" }}.</p>{% endif %}
       {% if archive_page %}<a class="duty-return" href="{% url 'management_dispatcher_duty' %}">К последним сменам</a>{% endif %}

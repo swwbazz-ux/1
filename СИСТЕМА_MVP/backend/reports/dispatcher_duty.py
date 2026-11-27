@@ -31,8 +31,11 @@ from .views import parse_filter_date
 STATE_LABELS = {'on': 'В пульте', 'out': 'Вне пульта', 'unknown': 'Нет данных', 'future': 'Предстоит'}
 STRIP_STATES = {WindowState.VISIBLE: 'on', WindowState.HIDDEN: 'out', WindowState.CLOSED: 'out',
                 WindowState.SIGNED_OUT: 'out', 'vacant': 'out', 'unknown': 'unknown', 'future': 'future'}
-OVERVIEW_LABELS = {'on': 'На экране', 'background': 'В фоне', 'out': 'Вне пульта',
-                   'unknown': 'Нет данных', 'future': 'Предстоит'}
+WINDOW_LABELS = {'on': 'Пульт на экране', 'background': 'Пульт в фоне', 'out': 'Пульт закрыт',
+                 'no-shift': 'Смены нет', 'unknown': 'Нет данных о пульте', 'future': 'Предстоит'}
+WINDOW_STATES = {**STRIP_STATES, WindowState.HIDDEN: 'background', 'vacant': 'no-shift'}
+SHIFT_LABELS = {'shift-open': 'Смена открыта', 'shift-vacant': 'Вне смены',
+                'unknown': 'Нет данных о смене', 'future': 'Предстоит'}
 OPERATION_BAND_HOURS = 2
 FEED_DAYS = 7
 
@@ -160,6 +163,38 @@ def timeline(start, end, now, tracking, shifts):
     return raw
 
 
+def shift_timeline(start, end, now, tracking, shifts):
+    """Union of recorded open shifts within a scheduled slot, independent of window signals."""
+    cutoff = min(max(now, start), end)
+    observed_from = max(start, min(tracking or cutoff, cutoff))
+    ranges = []
+
+    def append(first, last, state):
+        if first >= last:
+            return
+        if ranges and ranges[-1][2] == state:
+            ranges[-1][1] = last
+        else:
+            ranges.append([first, last, state])
+
+    def gap(first, last):
+        append(first, min(last, observed_from), 'unknown')
+        append(max(first, observed_from), last, 'shift-vacant')
+
+    cursor = start
+    for shift in shifts:  # The report query orders by opening time.
+        first, last = max(start, shift.opened_at), min(cutoff, shift.closed_at or cutoff)
+        if last <= max(first, cursor):
+            continue
+        if cursor < first:
+            gap(cursor, first)
+        append(max(cursor, first), last, 'shift-open')
+        cursor = last
+    gap(cursor, cutoff)
+    append(cutoff, end, 'future')
+    return ranges
+
+
 def journal_event(at, kind, title, person='', detail=''):
     local = business_localtime(at)
     return dict(at=local.isoformat(), time=clock(at), day=local.strftime('%d.%m.%Y'),
@@ -237,6 +272,14 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
     def percent(at):
         return round(100 * (at - start).total_seconds() / seconds, 5)
 
+    def interval(first, last):
+        length = (last - first).total_seconds()
+        rounded = round((last - start).total_seconds()) - round((first - start).total_seconds())
+        return dict(start=clock(first), end=clock(last), width=round(100 * length / seconds, 6),
+                    duration=duration(length), exact_start=business_localtime(first).strftime('%H:%M:%S'),
+                    exact_end=business_localtime(last).strftime('%H:%M:%S'),
+                    exact_duration=duration(rounded, exact=True)), rounded
+
     totals = Counter()
     overview_seconds = Counter()
     parts, events, marks, staff = [], [], [], []
@@ -287,17 +330,12 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
     shift_edges = {value for s in shifts for value in (s.opened_at, s.closed_at) if value}
     for first, last, state, reason, who in timeline(start, end, now, tracking, shifts):
         code = STRIP_STATES[state]
-        length = (last - first).total_seconds()
-        rounded_seconds = round((last - start).total_seconds()) - round((first - start).total_seconds())
-        overview_state = 'background' if state == WindowState.HIDDEN else code
+        part, rounded_seconds = interval(first, last)
+        overview_state = WINDOW_STATES[state]
         totals[code] += rounded_seconds
         overview_seconds[overview_state] += rounded_seconds
-        parts.append(dict(start=clock(first), end=clock(last), state=code, label=STATE_LABELS[code],
-                          width=round(100 * length / seconds, 6), duration=duration(length), reason=reason, person=who,
-                          overview_state=overview_state, overview_label=OVERVIEW_LABELS[overview_state],
-                          exact_start=business_localtime(first).strftime('%H:%M:%S'),
-                          exact_end=business_localtime(last).strftime('%H:%M:%S'),
-                          exact_duration=duration(rounded_seconds, exact=True)))
+        parts.append(dict(part, state=code, label=STATE_LABELS[code], reason=reason, person=who,
+                          overview_state=overview_state, overview_label=WINDOW_LABELS[overview_state]))
         if who and first not in shift_edges and start < first < end and (first, state, who) not in window_changes:
             events.append(journal_event(first, 'connection', reason, who, 'Состояние рабочего окна'))
     band_counts = [0] * (12 // OPERATION_BAND_HOURS)
@@ -308,6 +346,20 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
         marks.append(dict(left=percent(at), time=clock(at), title=event['title'], at=event['at']))
     events.sort(key=lambda e: e['at'])
     live = start <= now < end
+    shift_parts = []
+    for first, last, state in shift_timeline(start, end, now, tracking, shifts):
+        part, _ = interval(first, last)
+        shift_parts.append(dict(part, state=state, label=SHIFT_LABELS[state]))
+    current_duty = None
+    if live:
+        if any(s.opened_at <= now and (s.closed_at is None or s.closed_at > now) for s in shifts):
+            current_duty = ('shift-open', 'Смена открыта')
+        elif any(s.closed_at and s.closed_at <= now for s in shifts):
+            current_duty = ('shift-vacant', 'Смена завершена')
+        elif tracking and tracking <= now:
+            current_duty = ('shift-vacant', 'Смена не открыта')
+        else:
+            current_duty = ('unknown', SHIFT_LABELS['unknown'])
     last_op = marks[-1]['time'] if marks else ''
     last_op_age = ''
     if live and marks:
@@ -321,10 +373,12 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
              for i, count in enumerate(band_counts)]
     return dict(key=shift_type, label='Дневная смена' if shift_type == ShiftType.DAY else 'Ночная смена',
                 start=clock(start), end=clock(end), staff=staff, parts=parts, events=events, marks=marks,
+                shift_parts=shift_parts, current_duty=current_duty,
                 window_marks=sorted(window_marks, key=lambda mark: (mark['left'], mark['id'])),
                 ticks=ticks, count=len(marks), last_op=last_op, last_op_age=last_op_age, live=live, bands=bands,
-                overview_totals=[dict(state=key, label=label, duration=duration(value, exact=value < 60))
-                                 for key, label in OVERVIEW_LABELS.items() if (value := overview_seconds[key]) > 0],
+                overview_totals=[dict(state=key, label=label, duration=duration(value, exact=value < 60),
+                                      exact_duration=duration(value, exact=True))
+                                 for key, label in WINDOW_LABELS.items() if (value := overview_seconds[key]) > 0],
                 marker=percent(now) if live else None,
                 totals=[dict(state=k, label=STATE_LABELS[k], seconds=totals[k], duration=duration(totals[k], exact=True))
                         for k in STATE_LABELS if totals[k] > 0])

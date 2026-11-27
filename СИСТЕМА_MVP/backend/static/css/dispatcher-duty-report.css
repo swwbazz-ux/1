@@ -1,7 +1,11 @@
 .duty-report, .duty-dialog {
     --duty-green: #3ea278;
     --duty-red: #d76c65;
+    --duty-closed-text: #ffaaa4;
     --duty-amber: #cc973c;
+    --duty-background: #db8b52;
+    --duty-window-on: #389f96;
+    --duty-window-closed: #687d8a;
     --duty-link: #76d4ee;
     --duty-live: #83dcb6;
     --duty-secondary: #b5c3c9;
@@ -9,7 +13,6 @@
     font-variant-numeric: tabular-nums;
 }
 .duty-dialog {
-    --duty-background: #db8b52;
     --duty-command: #64badb;
 }
 .dispatcher-day .duty-dialog {
@@ -18,6 +21,7 @@
 .dispatcher-day .duty-report, .dispatcher-day .duty-dialog {
     --duty-link: #125670;
     --duty-live: #185c43;
+    --duty-closed-text: #8f3029;
     --duty-secondary: #40545d;
 }
 .dispatcher-duty-screen { overflow: visible; }
@@ -46,8 +50,12 @@
 .duty-legend, .duty-totals, .duty-staff { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 12px; }
 .duty-legend span, .duty-filter { display: inline-flex; align-items: center; gap: 7px; }
 .duty-legend i { width: 17px; height: 9px; border-radius: 2px; }
-.duty-on { background: var(--duty-green); }
-.duty-out { background: var(--duty-red); }
+.duty-shift-open { background: var(--duty-green); }
+.duty-shift-vacant { background: var(--duty-red); }
+.duty-on { background: var(--duty-window-on); }
+.duty-out { background: var(--duty-window-closed); }
+.duty-background { background: var(--duty-background); }
+.duty-no-shift { background: color-mix(in srgb, var(--gd-line) 34%, var(--gd-panel)); }
 .duty-unknown { background: repeating-linear-gradient(130deg, var(--duty-amber) 0 3px, var(--gd-panel) 3px 6px); }
 .duty-future { background: var(--gd-line); }
 .duty-day { display: grid; gap: 8px; margin: 0 0 22px; }
@@ -57,7 +65,10 @@
 .duty-slot-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .duty-slot-head h4 { font-size: 18px; }
 .duty-slot-head h4 span { white-space: nowrap; font-weight: 500; }
-.duty-current { color: var(--duty-live); font-weight: 700; font-size: 13px; white-space: nowrap; }
+.duty-current { font-weight: 700; font-size: 13px; }
+.duty-current-shift-open { color: var(--duty-live); }
+.duty-current-shift-vacant { color: var(--duty-closed-text); }
+.duty-current-unknown { color: var(--duty-secondary); }
 .duty-report button.duty-journal-link, .duty-report a { color: var(--duty-link); background: transparent; border: 0; }
 .duty-older, .duty-return { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }
 .duty-paging { text-align: center; }
@@ -80,8 +91,13 @@
 .duty-report a.duty-period-link { display: inline-flex; align-items: center; min-height: 40px; padding: 6px 12px; border: 1px solid currentColor; border-radius: 5px; font-weight: 600; text-decoration: none; }
 .duty-staff { margin: 2px 0 10px; font-size: 14px; }
 .duty-report button.duty-plot { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: start; }
+.duty-scale { --duty-label-width: 62px; min-width: 0; }
+.duty-lane { display: grid; grid-template-columns: var(--duty-label-width) minmax(0, 1fr); align-items: center; margin-block: 4px; }
+.duty-lane-label { font-size: 13px; font-weight: 700; }
+.duty-scale .duty-scale-axis { margin-inline-start: var(--duty-label-width); }
 .duty-strip, .duty-marks, .duty-axis, .duty-marker-row { display: block; position: relative; }
-.duty-strip { display: flex; height: 22px; overflow: hidden; border-radius: 3px; }
+.duty-strip { display: flex; height: 18px; overflow: hidden; border-radius: 3px; }
+.duty-strip[data-duty-lane="shift"] { height: 22px; }
 .duty-part { display: block; flex: none; }
 .duty-marks { height: 13px; margin: 0 1px; }
 .duty-window-marks { position: relative; display: block; height: 19px; }
@@ -91,8 +107,8 @@
 .duty-legend .duty-window-hidden, .duty-legend .duty-window-visible,
 .duty-window-marks i::after { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--gd-ink); box-sizing: border-box; }
 .duty-window-marks i::after { content: ""; display: block; margin: 0 auto; }
-.duty-legend .duty-window-hidden, .duty-window-marks .duty-window-hidden::after { background: var(--duty-red); }
-.duty-legend .duty-window-visible, .duty-window-marks .duty-window-visible::after { background: var(--duty-green); }
+.duty-legend .duty-window-hidden, .duty-window-marks .duty-window-hidden::after { background: var(--duty-background); }
+.duty-legend .duty-window-visible, .duty-window-marks .duty-window-visible::after { background: var(--duty-window-on); }
 .duty-marks i { position: absolute; top: 3px; translate: -50% 0; }
 .duty-legend i.duty-diamond, .duty-marks i { width: 7px; height: 7px; background: var(--gd-ink); transform: rotate(45deg); border-radius: 0; }
 .duty-marker-row { height: 19px; }
@@ -124,16 +140,14 @@
 }
 .duty-metric { min-width: 0; padding: 6px 8px; border: 1px solid var(--gd-line); border-block-start: 3px solid var(--duty-metric-color, var(--gd-line)); border-radius: 4px; }
 .duty-metric-operations { --duty-metric-color: var(--duty-command); }
-.duty-metric-on { --duty-metric-color: var(--duty-green); }
+.duty-metric-on { --duty-metric-color: var(--duty-window-on); }
 .duty-metric-background { --duty-metric-color: var(--duty-background); }
-.duty-metric-out { --duty-metric-color: var(--duty-red); }
+.duty-metric-out { --duty-metric-color: var(--duty-window-closed); }
 .duty-metric-unknown { --duty-metric-color: var(--duty-amber); }
 .duty-metric dt { font-size: 12px; color: var(--duty-secondary); }
 .duty-metric dd { margin: 2px 0 0; font-size: clamp(14px, 2vw, 18px); font-weight: 700; overflow-wrap: anywhere; }
 .duty-overview-chart { padding: 10px 12px; border: 1px solid var(--gd-line); border-radius: 6px; }
 .duty-overview-chart h3, .duty-log-heading h3 { margin: 0; font-size: 16px; }
-.duty-overview-track { position: relative; display: flex; min-width: 0; height: 26px; overflow: hidden; border-radius: 3px; }
-.duty-background { background: var(--duty-background); }
 .duty-overview-axis { height: 16px; color: var(--duty-secondary); font-size: 11px; margin-block-start: -4px; }
 .duty-operations-head, .duty-log-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 5px 12px; flex-wrap: wrap; }
 .duty-operations-head p { color: var(--duty-secondary); font-size: 13px; }
@@ -194,6 +208,7 @@
     [data-duty-report] .management-dashboard-header-meta, [data-duty-report] .management-dashboard-header-actions { grid-column: 2; }
 }
 @media (max-width: 650px) {
+    .duty-scale { --duty-label-width: 48px; }
     .duty-slot { padding: 10px; }
     .duty-slot-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
     .duty-slot-title { flex-direction: column; align-items: flex-start; gap: 2px; }

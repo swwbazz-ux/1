@@ -104,11 +104,14 @@ class DispatcherDutyTests(TestCase):
             self.assertEqual([d['date'] for d in page.context['report']['days']], [today, self.start.date()])
             self.assertNotContains(page, 'name="date"')
             self.assertContains(page, 'name="history_from"')
-            self.assertContains(page, 'Идёт сейчас', count=1)
+            self.assertContains(page, '<span class="duty-current duty-current-shift-vacant">Смена не открыта</span>',
+                                count=1, html=True)
+            self.assertContains(page, 'data-duty-lane="shift"')
+            self.assertContains(page, 'data-duty-lane="window"')
             self.assertContains(page, f'href="{path}"')
             history = self.client.get(path, {'before': today, 'partial': '1'})
             self.assertEqual([d['date'] for d in history.context['report']['days']], [self.start.date()])
-            self.assertNotContains(history, 'Идёт сейчас')
+            self.assertNotContains(history, 'class="duty-current ')
             fallback = self.client.get(path, {'before': today})
             self.assertEqual(fallback.context['report']['days'][0]['date'], today)
             archive = self.client.get(path, {'format': 'json', 'date': self.start.date()}).json()
@@ -222,6 +225,33 @@ class DispatcherDutyTests(TestCase):
         self.assertEqual(night['staff'], [])
         self.assertEqual(day['count'], 0)
         self.assertEqual(shift.duty_windows.filter(window_id=first).count(), 3)
+
+    def test_shift_lane_uses_duty_records_even_when_the_window_is_hidden_or_closed(self):
+        at = lambda hours: self.start + timedelta(hours=hours)
+        shift = self.shift(opened=at(1), closed=at(4))
+        window = uuid4()
+        for seq, state, first, last in (
+            (1, WindowState.VISIBLE, at(1), at(2)),
+            (2, WindowState.HIDDEN, at(2), at(3)),
+            (3, WindowState.CLOSED, at(3), at(3)),
+        ):
+            DispatcherDutyWindow.objects.create(
+                shift=shift, session_digest='session', window_id=window, state=state,
+                started_at=first, last_seen_at=last, last_sequence=seq,
+            )
+
+        day, _ = self.report(timedelta(hours=3, minutes=30))
+        self.assertEqual(day['current_duty'], ('shift-open', 'Смена открыта'))
+        self.assertEqual([p['overview_state'] for p in day['parts']], ['no-shift', 'on', 'background', 'out', 'future'])
+
+        day, _ = self.report(timedelta(hours=5))
+        self.assertEqual(day['current_duty'], ('shift-vacant', 'Смена завершена'))
+        self.assertEqual(
+            [(p['start'], p['end'], p['state']) for p in day['shift_parts']],
+            [('07:00', '08:00', 'shift-vacant'), ('08:00', '11:00', 'shift-open'),
+             ('11:00', '12:00', 'shift-vacant'), ('12:00', '19:00', 'future')],
+        )
+        self.assertEqual(day['parts'][-2]['overview_state'], 'no-shift')
 
     def test_existing_page_foreground_signals_expire_and_yield_to_the_detailed_recorder(self):
         shift = self.shift()
@@ -441,6 +471,7 @@ class DispatcherDutyTests(TestCase):
         day, _ = self.report(timedelta(hours=5))
         self.assertEqual(day['count'], 1)
         self.assertFalse(any(p['state'] == 'on' for p in day['parts']))
+        self.assertEqual([p['state'] for p in day['shift_parts']], ['shift-open', 'unknown', 'shift-vacant', 'future'])
         EmployeeAccess.objects.create(employee=self.dispatcher.employee, role=self.admin.role, access_code='444444',
                                       status=EmployeeAccess.Status.ACTIVATED)
         self.assertEqual(self.report(timedelta(hours=5))[0]['count'], 0)

@@ -1,0 +1,23 @@
+{% load l10n %}
+<span class="duty-lane">
+  <span class="duty-lane-label">Смена</span>
+  <span class="duty-strip" data-duty-lane="shift">
+    {% for part in slot.shift_parts %}
+      <span class="duty-part duty-{{ part.state }}" style="width:{{ part.width|unlocalize }}%"
+            {% if interactive %}data-duty-interval="{{ part.exact_start }}–{{ part.exact_end }} · {{ part.label }} · {{ part.exact_duration }}"{% endif %}
+            title="{{ part.exact_start }}–{{ part.exact_end }} · {{ part.label }}"></span>
+    {% endfor %}
+    {% if slot.live %}<i class="duty-marker" style="left:{{ slot.marker|unlocalize }}%" aria-hidden="true"></i>{% endif %}
+  </span>
+</span>
+<span class="duty-lane">
+  <span class="duty-lane-label">Пульт</span>
+  <span class="duty-strip" data-duty-lane="window">
+    {% for part in slot.parts %}
+      <span class="duty-part duty-{{ part.overview_state }}" style="width:{{ part.width|unlocalize }}%"
+            {% if interactive %}data-duty-interval="{{ part.exact_start }}–{{ part.exact_end }} · {{ part.overview_label }} · {{ part.exact_duration }}. {{ part.reason }}{% if part.person %} · {{ part.person }}{% endif %}"{% endif %}
+            title="{{ part.exact_start }}–{{ part.exact_end }} · {{ part.overview_label }}{% if part.person %} · {{ part.person }}{% endif %}"></span>
+    {% endfor %}
+    {% if slot.live %}<i class="duty-marker" style="left:{{ slot.marker|unlocalize }}%" aria-hidden="true"></i>{% endif %}
+  </span>
+</span>

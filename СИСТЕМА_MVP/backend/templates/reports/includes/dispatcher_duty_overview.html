@@ -2,21 +2,17 @@
 <section class="duty-overview" aria-label="Обзор смены">
   <dl class="duty-metrics">
     <div class="duty-metric duty-metric-operations"><dt>Операции</dt><dd>{{ slot.count }}</dd></div>
-    {% for total in slot.overview_totals %}
+    {% for total in slot.overview_totals %}{% if total.state != 'no-shift' %}
       <div class="duty-metric duty-metric-{{ total.state }}"><dt>{{ total.label }}</dt><dd>{{ total.duration }}</dd></div>
-    {% endfor %}
+    {% endif %}{% endfor %}
   </dl>
   <div class="duty-overview-chart">
-    <h3>Состояние пульта</h3>
-    <div class="duty-overview-track" aria-hidden="true">
-      {% for part in slot.parts %}
-        <span class="duty-part duty-{{ part.overview_state }}" style="width:{{ part.width|unlocalize }}%"
-              title="{{ part.exact_start }}–{{ part.exact_end }} · {{ part.reason }}"></span>
-      {% endfor %}
-      {% if slot.live %}<i class="duty-marker" style="left:{{ slot.marker|unlocalize }}%"></i>{% endif %}
-    </div>
-    <div class="duty-axis duty-overview-axis" aria-hidden="true">
-      {% for tick in slot.ticks %}<span style="left:{{ tick.left|unlocalize }}%">{{ tick.label }}</span>{% endfor %}
+    <div class="duty-scale">
+      <h3 class="duty-visually-hidden">Время смены и состояние пульта</h3>
+      {% include "reports/includes/dispatcher_duty_tracks.html" %}
+      <div class="duty-axis duty-scale-axis" aria-hidden="true">
+        {% for tick in slot.ticks %}<span style="left:{{ tick.left|unlocalize }}%">{{ tick.label }}</span>{% endfor %}
+      </div>
     </div>
     <div class="duty-operations-head">
       <h3>Операции по времени</h3>
