@@ -1,9 +1,7 @@
-СИСТЕМА_MVP/backend/settlement/migrations/0029_watch_housing_template.py
-СИСТЕМА_MVP/backend/settlement/models.py
-СИСТЕМА_MVP/backend/settlement/urls.py
-СИСТЕМА_MVP/backend/settlement/views.py
-СИСТЕМА_MVP/backend/settlement/watch_templates.py
-СИСТЕМА_MVP/backend/static/css/settlement-map-header.css
-СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
-СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
-СИСТЕМА_MVP/backend/templates/settlement/watch_template.html
+СИСТЕМА_MVP/backend/assignments/crew_off_equipment_transfer.py
+СИСТЕМА_MVP/backend/assignments/deputy_views.py
+СИСТЕМА_MVP/backend/assignments/off_equipment_views.py
+СИСТЕМА_MVP/backend/assignments/urls.py
+СИСТЕМА_MVP/backend/static/css/deputy-mining-manager-v3.css
+СИСТЕМА_MVP/backend/static/js/deputy-mining-manager-v3.js
+СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_placement.html
