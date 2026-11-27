@@ -37,6 +37,7 @@ from users.models import (
     TemporaryWorkTransfer,
     WorkSchedule,
 )
+from users.work_profiles import employee_has_effective_access_role
 
 from .models import AssignmentStatus, CrewPlan, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
 from .services import (
@@ -411,7 +412,7 @@ class DeputyPlanningViewTests(TestCase):
         ).exists())
         self.assertFalse(EquipmentAssignment.objects.filter(employee=person, role=self.driver_role).exists())
 
-    def test_factual_assignment_distinguishes_missing_specialization_from_position_default(self):
+    def test_deputy_uses_unique_specialization_without_a_saved_value(self):
         specialization = ProductionSpecialization.objects.get(code='haul_truck_driver')
         specialization.access_role = self.driver_role
         specialization.save(update_fields=['access_role'])
@@ -420,31 +421,86 @@ class DeputyPlanningViewTests(TestCase):
             full_name='Водитель из фактической смены', personnel_position=position, status=Employee.Status.ACTIVE,
         )
         plan = self.create_draft()
-        plan.slots.filter(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).update(reported_employee=person)
         url = reverse('deputy_mining_manager_placement')
+        payload = self.client.get(url).context['planning_payload']
+        self.assertIn(person.pk, {item['id'] for item in payload['employees']})
+        self.assertNotIn(person.pk, {item['id'] for item in payload['factual_candidates']})
+        self.assertFalse(employee_has_effective_access_role(person, self.driver_role.code))
 
-        def review():
-            payload = self.client.get(url).context['planning_payload']
-            return next(slot['specialization_review'] for row in payload['rows'] for slot in row['slots']
-                        if slot['reported_name'] == person.full_name)
-
-        missing = review()
-        self.assertEqual(missing['base'], '')
-        self.assertEqual(missing['current'], '')
-        self.assertEqual(missing['suggested'], specialization.name)
-        self.assertTrue(missing['warning'])
-        self.assertFalse(missing['can_assign'])
+        slot = plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1)
+        plan.slots.filter(pk=slot.pk).update(reported_employee=person)
+        payload = self.client.get(url).context['planning_payload']
+        review = next(slot['specialization_review'] for row in payload['rows'] for slot in row['slots']
+                      if slot['reported_name'] == person.full_name)
+        self.assertEqual(review['base'], '')
+        self.assertEqual(review['current'], specialization.name)
+        self.assertFalse(review['warning'])
+        self.assertTrue(review['can_assign'])
         person.refresh_from_db()
         self.assertIsNone(person.base_specialization_id)
 
-        person.base_specialization = specialization
-        person.save(update_fields=['base_specialization'])
-        saved = review()
-        self.assertEqual(saved['base'], specialization.name)
-        self.assertEqual(saved['current'], specialization.name)
-        self.assertEqual(saved['suggested'], '')
-        self.assertFalse(saved['warning'])
-        self.assertTrue(saved['can_assign'])
+        response = self.client.post(reverse('deputy_mining_manager_slot'), {
+            'plan_id': plan.pk, 'expected_version': payload['plan']['version'],
+            'equipment_id': self.truck_2.pk, 'shift_type': WorkShiftType.SHIFT_1, 'employee_id': person.pk,
+        }, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        slot.refresh_from_db()
+        self.assertEqual(slot.employee_id, person.pk)
+        self.assertIsNone(slot.reported_employee_id)
+        person.refresh_from_db()
+        self.assertIsNone(person.base_specialization_id)
+        published = self.client.post(reverse('deputy_mining_manager_publish'), {
+            'plan_id': plan.pk, 'expected_version': response.json()['payload']['plan']['version'],
+        }, content_type='application/json')
+        self.assertEqual(published.status_code, 200, published.content)
+        self.assertTrue(EquipmentAssignment.objects.filter(employee=person, equipment=self.truck_2).exists())
+        self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
+
+    def test_deputy_can_save_a_matching_specialization_with_the_assignment(self):
+        role, _ = Role.objects.get_or_create(code='crew_kdm', defaults={'name': 'КДМ'})
+        equipment_type, _ = EquipmentType.objects.get_or_create(name='КДМ')
+        equipment = Equipment.objects.create(equipment_type=equipment_type, garage_number='055')
+        position = PersonnelPosition.objects.get(name='Водитель автомобиля грузового')
+        person = Employee.objects.create(
+            full_name='Тестовый водитель грузового автомобиля', personnel_position=position, status=Employee.Status.ACTIVE,
+        )
+        correct = ProductionSpecialization.objects.get(code='cargo_kdm_driver')
+        wrong = ProductionSpecialization.objects.get(code='cargo_prm_driver')
+        page = self.client.get(reverse('deputy_mining_manager_placement'), {'role': role.code})
+        payload = page.context['planning_payload']
+        candidate = next(item for item in payload['factual_candidates'] if item['id'] == person.pk)
+        self.assertEqual(candidate['specialization_choices'], [{
+            'id': correct.pk, 'name': correct.name, 'positions': ['primary'],
+        }])
+        slot_url = reverse('deputy_mining_manager_slot')
+        body = {
+            'plan_id': payload['plan']['id'], 'expected_version': payload['plan']['version'],
+            'equipment_id': equipment.pk, 'shift_type': WorkShiftType.SHIFT_1, 'employee_id': person.pk,
+        }
+        response = self.client.post(slot_url, {**body, 'specialization_id': wrong.pk}, content_type='application/json')
+        self.assertEqual(response.json()['code'], 'specialization_choice_changed')
+        person.refresh_from_db()
+        self.assertIsNone(person.base_specialization_id)
+        slot = CrewPlanSlot.objects.get(plan_id=body['plan_id'], equipment=equipment, shift_type=WorkShiftType.SHIFT_1)
+        self.assertIsNone(slot.employee_id)
+
+        response = self.client.post(slot_url, {**body, 'factual': True}, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        slot.refresh_from_db()
+        self.assertEqual(slot.reported_employee_id, person.pk)
+        person.refresh_from_db()
+        self.assertIsNone(person.base_specialization_id)
+
+        body['expected_version'] = response.json()['payload']['plan']['version']
+        response = self.client.post(slot_url, {**body, 'specialization_id': correct.pk}, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        person.refresh_from_db()
+        slot.refresh_from_db()
+        self.assertEqual(person.base_specialization_id, correct.pk)
+        self.assertEqual(slot.employee_id, person.pk)
+        self.assertIsNone(slot.reported_employee_id)
+        self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=person).exists())
 
     def test_reported_truck_driver_has_no_operational_grant(self):
         person = Employee.objects.create(full_name='Тестовый водитель без специализации', status=Employee.Status.ACTIVE)

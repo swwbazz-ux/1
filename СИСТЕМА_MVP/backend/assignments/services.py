@@ -20,10 +20,10 @@ from core.models import bump_operational_state, lock_production_state
 from core.production_time import production_work_date as contract_production_work_date
 from references.models import Equipment
 from shifts.models import EmployeeShift
-from users.models import Employee, EmployeeAccess, Role
+from users.models import AdminActionLog, Employee, EmployeeAccess, Role, TemporaryWorkTransfer
 from users.work_profiles import (
-    effective_specialization, effective_specializations_by_employee_id,
-    eligible_employee_ids_for_work_role, employee_has_effective_access_role,
+    active_specializations_for_positions, effective_specialization, effective_specializations_by_employee_id,
+    eligible_employee_ids_for_work_role, employee_has_effective_access_role, legacy_work_category_for_specialization,
 )
 from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS
 
@@ -186,28 +186,32 @@ def _crew_plan_employee(employee):
         raise ValidationError('Сотрудник не найден.', code='employee_not_found') from error
 
 
-def employee_matches_work_role(employee, role):
+def employee_matches_work_role(employee, role, *, infer_from_position=False):
     category = AUXILIARY_CATEGORIES.get(role.code)
     if category:
-        specialization = effective_specialization(employee)
+        specialization = effective_specialization(employee, infer_from_position=infer_from_position)
         return bool(
             employee.contractor_access_is_valid()
             and specialization
             and specialization.is_active
             and specialization.code == category.specialization
         )
-    return employee_has_effective_access_role(employee, role.code)
+    return employee_has_effective_access_role(
+        employee, role.code, infer_from_position=infer_from_position,
+    )
 
 
 def eligible_crew_employee_ids(role_code):
     category = AUXILIARY_CATEGORIES.get(role_code)
     if not category:
-        return eligible_employee_ids_for_work_role(role_code)
+        return eligible_employee_ids_for_work_role(role_code, infer_from_position=True)
     employees = Employee.objects.filter(
         Employee.work_eligibility_q(), is_active=True, status=Employee.Status.ACTIVE,
     ).select_related('base_specialization')
     return {
-        employee_id for employee_id, spec in effective_specializations_by_employee_id(employees).items()
+        employee_id for employee_id, spec in effective_specializations_by_employee_id(
+            employees, infer_from_position=True,
+        ).items()
         if spec and spec.is_active and spec.code == category.specialization
     }
 
@@ -222,12 +226,68 @@ def is_excavator_assistant_specialization(specialization):
 
 def secondary_employee_matches_work_role(employee, role):
     if role.code == 'driver':
-        return employee_matches_work_role(employee, role)
+        return employee_matches_work_role(employee, role, infer_from_position=True)
     if role.code == 'excavator_operator':
-        return employee_matches_work_role(employee, role) or is_excavator_assistant_specialization(
-            effective_specialization(employee),
+        return employee_matches_work_role(employee, role, infer_from_position=True) or is_excavator_assistant_specialization(
+            effective_specialization(employee, infer_from_position=True),
         )
     return False
+
+
+def crew_specialization_choices(employee, role, choices_by_position):
+    if employee.base_specialization_id or employee.is_protected:
+        return []
+    choices = choices_by_position.get(employee.personnel_position_id, ())
+    if len(choices) < 2:
+        return []
+    category = AUXILIARY_CATEGORIES.get(role.code)
+    result = []
+    for spec in choices:
+        matches_primary = spec.code == category.specialization if category else spec.access_role_id == role.pk
+        if matches_primary:
+            positions = [CREW_SLOT_POSITION_PRIMARY]
+            if role.code in {'driver', 'excavator_operator'}:
+                positions.append(CREW_SLOT_POSITION_SECONDARY)
+        elif role.code == 'excavator_operator' and is_excavator_assistant_specialization(spec):
+            positions = [CREW_SLOT_POSITION_SECONDARY]
+        else:
+            continue
+        result.append({'id': spec.pk, 'name': spec.name, 'positions': positions})
+    return result
+
+
+def _save_crew_specialization(employee, role, position, specialization_id, actor):
+    from users.oup_services import emit_employee_changed, employee_work_category_blockers
+
+    choices_by_position = active_specializations_for_positions({employee.personnel_position_id})
+    offered = crew_specialization_choices(employee, role, choices_by_position)
+    if not any(item['id'] == specialization_id and position in item['positions'] for item in offered):
+        raise ValidationError('Выбор специализации изменился. Обновите данные.', code='specialization_choice_changed')
+    if TemporaryWorkTransfer.objects.filter(
+        employee=employee,
+        status__in=[TemporaryWorkTransfer.Status.REQUESTED, TemporaryWorkTransfer.Status.APPROVED],
+        effective_to__gte=timezone.localdate(),
+    ).exists():
+        raise ValidationError('У сотрудника уже есть временный перевод или запрос на перевод.')
+    blockers = employee_work_category_blockers(employee)
+    if blockers:
+        raise ValidationError('Нельзя сохранить специализацию: ' + ', '.join(blockers) + '.')
+
+    specialization = next(spec for spec in choices_by_position[employee.personnel_position_id] if spec.pk == specialization_id)
+    employee.base_specialization = specialization
+    employee.work_category = legacy_work_category_for_specialization(specialization)
+    employee.save(update_fields=['base_specialization', 'work_category', 'updated_at'])
+    AdminActionLog.objects.create(
+        actor=actor,
+        action='Заместитель начальника: сохранена специализация при назначении',
+        action_code='deputy_crew_specialization_saved',
+        object_type='Employee',
+        object_id=str(employee.pk),
+        object_repr=employee.full_name,
+        old_value='Специализация не указана',
+        new_value=specialization.name,
+    )
+    emit_employee_changed(employee, 'crew_specialization_saved')
 
 
 def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMARY):
@@ -236,7 +296,7 @@ def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMA
     if position not in CREW_SLOT_POSITIONS:
         raise ValidationError('Неизвестная позиция в экипаже.', code='invalid_crew_position')
     matches_position = (
-        employee_matches_work_role(employee, role)
+        employee_matches_work_role(employee, role, infer_from_position=True)
         if position == CREW_SLOT_POSITION_PRIMARY
         else secondary_employee_matches_work_role(employee, role)
     )
@@ -529,7 +589,10 @@ def update_crew_draft_slot(
     allow_factual=False,
     validate_new_employee=None,
     reported_source=None,
+    specialization_id=None,
 ):
+    if specialization_id is not None and (not employee or reported_source is not None):
+        raise ValidationError('Выберите сотрудника для сохранения специализации.')
     locked_plan = _crew_plan_instance(plan, for_update=True)
     role = _crew_plan_role(locked_plan.role)
     if locked_plan.status != CrewPlanStatus.DRAFT:
@@ -569,15 +632,22 @@ def update_crew_draft_slot(
             .select_related('contractor_organization')
             .get(pk=employee.pk)
         )
-        if validate_new_employee is not None and not locked_plan.slots.filter(
-            Q(employee=employee) | Q(secondary_employee=employee) | Q(reported_employee=employee),
-        ).exists():
+        if validate_new_employee is not None and (
+            specialization_id is not None or not locked_plan.slots.filter(
+                Q(employee=employee) | Q(secondary_employee=employee) | Q(reported_employee=employee),
+            ).exists()
+        ):
             validate_new_employee(employee, locked_plan.work_date)
+        if specialization_id is not None:
+            _save_crew_specialization(employee, role, position, specialization_id, actor)
         record_fact = reported_source is not None
         try:
             _validate_crew_employee(employee, role, position=position)
         except ValidationError as error:
-            if not ((allow_factual or record_fact) and position == CREW_SLOT_POSITION_PRIMARY and error.code == 'invalid_work_category'):
+            if specialization_id is not None or not (
+                (allow_factual or record_fact) and position == CREW_SLOT_POSITION_PRIMARY
+                and error.code == 'invalid_work_category'
+            ):
                 raise
             record_fact = True
         validate_employee_equipment_organization(employee, equipment)

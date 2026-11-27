@@ -31,6 +31,7 @@ from users.role_apps import (
 )
 from users.live_monitor import application_presence_by_employee_ids, empty_application_presence
 from users.work_profiles import (
+    active_specializations_for_positions,
     effective_specializations_by_employee_id,
     expire_due_temporary_work_transfers,
     request_temporary_work_transfer,
@@ -56,6 +57,7 @@ from .services import (
     CREW_SLOT_POSITION_PRIMARY,
     CREW_SLOT_POSITION_SECONDARY,
     crew_bookings_on_other_equipment,
+    crew_specialization_choices,
     eligible_crew_employee_ids,
     employee_matches_work_role,
     get_or_create_crew_draft,
@@ -543,7 +545,9 @@ def _secondary_eligible_employee_ids(role_code, primary_employee_ids=None):
     )
     return primary_employee_ids | {
         employee_id
-        for employee_id, specialization in effective_specializations_by_employee_id(employees).items()
+        for employee_id, specialization in effective_specializations_by_employee_id(
+            employees, infer_from_position=True,
+        ).items()
         if is_excavator_assistant_specialization(specialization)
     }
 
@@ -696,6 +700,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
     transfer_candidates = []
     factual_candidates = []
     transfer_specializations = []
+    transfer_pending_employee_ids = set()
     current_watch_periods = []
     if editable or any(slot.reported_employee_id for slot in slots):
         category = AUXILIARY_CATEGORIES.get(plan.role.code)
@@ -776,7 +781,22 @@ def build_crew_plan_payload(plan, *, deputy=None):
     reported_employees = {
         slot.reported_employee_id: slot.reported_employee for slot in slots if slot.reported_employee_id
     }
-    reported_specializations = effective_specializations_by_employee_id(reported_employees.values())
+    reported_specializations = effective_specializations_by_employee_id(
+        reported_employees.values(), infer_from_position=True,
+    )
+    people_needing_specialization = [
+        employee for employee in [*factual_candidates, *reported_employees.values()]
+        if editable and not employee.base_specialization_id and employee.pk not in transfer_pending_employee_ids
+        and _in_deputy_roster(employee, brigades, extensions)
+    ]
+    specialization_options = active_specializations_for_positions({
+        employee.personnel_position_id for employee in people_needing_specialization if employee.personnel_position_id
+    })
+    choices_by_employee = {
+        employee.pk: choices
+        for employee in people_needing_specialization
+        if (choices := crew_specialization_choices(employee, plan.role, specialization_options))
+    }
     required_specialization = ', '.join(spec.name for spec in transfer_specializations) or plan.role.name
     required_specialization_names = {spec.pk: spec.name for spec in transfer_specializations}
 
@@ -870,7 +890,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 secondary_label = (
                     'Стажёр'
                     if slot.secondary_employee_id in eligible_employee_ids
-                    or employee_matches_work_role(slot.secondary_employee, plan.role)
+                    or employee_matches_work_role(slot.secondary_employee, plan.role, infer_from_position=True)
                     else 'Помощник машиниста'
                 )
             specialization_review = None
@@ -896,6 +916,8 @@ def build_crew_plan_payload(plan, *, deputy=None):
                     'issue': review_issue,
                     'warning': review_issue == 'Не соответствует производственной специализации',
                     'can_assign': editable and not review_issue,
+                    'specialization_choices': choices_by_employee.get(reported_employee.pk, [])
+                    if review_issue == 'Не соответствует производственной специализации' else [],
                 }
             row_slots.append({
                 'shift_type': shift_type,
@@ -972,7 +994,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
         })
 
 
-    factual_specializations = effective_specializations_by_employee_id(factual_candidates)
+    factual_specializations = effective_specializations_by_employee_id(factual_candidates, infer_from_position=True)
     return {
         'plan': {
             'id': plan.id,
@@ -1034,6 +1056,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
                     'Специализация отличается' if factual_specializations[employee.pk]
                     else 'Специализация не указана'
                 ),
+                'specialization_choices': choices_by_employee.get(employee.pk, []),
                 'extension_until': extensions[employee.pk].extension_end.strftime('%d.%m.%Y') if employee.pk in extensions else '',
                 'extension_expires_at': (
                     production_day_bounds(extensions[employee.pk].extension_end)[1].isoformat()
@@ -1535,6 +1558,7 @@ def deputy_mining_manager_slot_view(request):
         equipment = get_object_or_404(Equipment, id=payload.get('equipment_id'))
         employee_id = payload.get('employee_id')
         employee = get_object_or_404(Employee, id=employee_id) if employee_id else None
+        specialization_id = payload.get('specialization_id')
         brigades = _deputy_brigades(access.employee)
 
         def validate_new_employee(candidate, work_date):
@@ -1557,6 +1581,7 @@ def deputy_mining_manager_slot_view(request):
             reported_source=(
                 int(payload.get('source_equipment_id')), payload.get('source_shift_type')
             ) if employee and payload.get('move_reported') is True else None,
+            specialization_id=int(specialization_id) if specialization_id is not None else None,
         )
     except (TypeError, ValueError, ValidationError) as error:
         if isinstance(error, ValidationError):

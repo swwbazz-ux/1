@@ -2,11 +2,11 @@
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.utils import timezone
 
 from .protected_cards import protected_writes_allowed
-from .models import Employee, EmployeeAccess, TemporaryWorkTransfer
+from .models import Employee, EmployeeAccess, PersonnelPosition, ProductionSpecialization, TemporaryWorkTransfer
 
 
 PRODUCTION_APP_ROLE_CODES = frozenset({'driver', 'excavator_operator'})
@@ -83,15 +83,33 @@ def active_temporary_work_transfer(employee, *, as_of=None):
     )
 
 
-def effective_specialization(employee, *, as_of=None):
+def active_specializations_for_positions(position_ids):
+    if not position_ids:
+        return {}
+    positions = PersonnelPosition.objects.filter(pk__in=position_ids, is_active=True).prefetch_related(
+        Prefetch(
+            'allowed_specializations',
+            queryset=ProductionSpecialization.objects.filter(is_active=True).select_related('access_role'),
+        ),
+    )
+    return {position.pk: list(position.allowed_specializations.all()) for position in positions}
+
+
+def effective_specialization(employee, *, as_of=None, infer_from_position=False):
     """Return the approved temporary specialization first, then the official base one."""
     transfer = active_temporary_work_transfer(employee, as_of=as_of)
     if transfer:
         return transfer.target_specialization
-    return getattr(employee, 'base_specialization', None)
+    base = getattr(employee, 'base_specialization', None)
+    if base or not infer_from_position or not getattr(employee, 'personnel_position_id', None):
+        return base
+    position_id = employee.personnel_position_id
+    choices = active_specializations_for_positions({position_id}).get(position_id, ())
+    return choices[0] if len(choices) == 1 else None
 
 
-def effective_specializations_by_employee_id(employees, *, as_of=None):
+def effective_specializations_by_employee_id(employees, *, as_of=None, infer_from_position=False):
+    employees = list(employees)
     specializations = {employee.pk: employee.base_specialization for employee in employees}
     if not specializations:
         return specializations
@@ -101,6 +119,13 @@ def effective_specializations_by_employee_id(employees, *, as_of=None):
     ).order_by('employee_id', '-reviewed_at', '-id'):
         transferred.setdefault(transfer.employee_id, transfer.target_specialization)
     specializations.update(transferred)
+    if infer_from_position:
+        unset = [employee for employee in employees if not specializations[employee.pk] and employee.personnel_position_id]
+        choices_by_position = active_specializations_for_positions({employee.personnel_position_id for employee in unset})
+        for employee in unset:
+            choices = choices_by_position.get(employee.personnel_position_id, ())
+            if len(choices) == 1:
+                specializations[employee.pk] = choices[0]
     return specializations
 
 
@@ -119,6 +144,7 @@ def employee_has_effective_access_role(
     *,
     as_of=None,
     allow_pending_access=False,
+    infer_from_position=False,
 ):
     """Whether an employee may use a production app role at this date.
 
@@ -148,10 +174,12 @@ def employee_has_effective_access_role(
             is_active=True,
         ).exists()
 
-    return _specialization_matches_role(effective_specialization(employee, as_of=as_of), role_code)
+    return _specialization_matches_role(effective_specialization(
+        employee, as_of=as_of, infer_from_position=infer_from_position,
+    ), role_code)
 
 
-def eligible_employee_ids_for_work_role(role_code, *, as_of=None):
+def eligible_employee_ids_for_work_role(role_code, *, as_of=None, infer_from_position=False):
     """Evaluate eligibility in one place so deputy planning and admin agree."""
     as_of = as_of or timezone.localdate()
     eligible = Employee.objects.filter(
@@ -180,7 +208,9 @@ def eligible_employee_ids_for_work_role(role_code, *, as_of=None):
     )
     return legacy_ids | {
         employee_id
-        for employee_id, specialization in effective_specializations_by_employee_id(specialized, as_of=as_of).items()
+        for employee_id, specialization in effective_specializations_by_employee_id(
+            specialized, as_of=as_of, infer_from_position=infer_from_position,
+        ).items()
         if _specialization_matches_role(specialization, role_code)
     }
 

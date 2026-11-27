@@ -68,7 +68,7 @@ def placement_people_index(work_date, *, visible_free):
     if current:
         free = list(Employee.objects.filter(Employee.work_eligibility_q(), is_active=True, status=Employee.Status.ACTIVE)
                     .exclude(pk__in=locations).select_related('base_specialization'))
-        specs = effective_specializations_by_employee_id(free)
+        specs = effective_specializations_by_employee_id(free, infer_from_position=True)
         for role in roles.intersection({'driver', 'excavator_operator'}):
             for person in eligible_crew_employee_ids(role):
                 eligible[person].add(role)

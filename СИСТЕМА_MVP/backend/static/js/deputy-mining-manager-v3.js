@@ -766,9 +766,9 @@
         openDialog(recordDialog);
     }
 
-    function addReviewAction(label, callback) {
+    function addReviewAction(label, callback, primary) {
         if (!recordActions) return;
-        var action = createElement("button", "admin-button admin-button-secondary", label);
+        var action = createElement("button", "admin-button " + (primary ? "admin-button-primary" : "admin-button-secondary"), label);
         action.type = "button";
         action.setAttribute("data-review-action", "");
         action.addEventListener("click", function () {
@@ -779,8 +779,37 @@
         recordActions.insertBefore(action, recordActions.lastElementChild);
     }
 
+    function choicesForCrewPosition(employee, position) {
+        return (employee.specialization_choices || []).filter(function (choice) {
+            return choice.positions.indexOf(position) !== -1;
+        });
+    }
+
+    function openSpecializationChoice(employee, target, choices) {
+        var context = [target.row.equipment.label, target.slot.label].join(" · ");
+        if (!prepareRecordDialog("Специализация", employeeName(employee), context)) return;
+        recordDialog.classList.add("is-specialization");
+        recordVisual.appendChild(createAvatar(employee, false));
+        appendRecordField("Кадровая должность", employee.position_label);
+        appendRecordField("Производственная специализация", "Выбранная специализация сохранится в карточке сотрудника для следующих смен.", "is-summary");
+        choices.forEach(function (choice) {
+            addReviewAction("Сохранить «" + choice.name + "» и назначить", function () {
+                setActiveEquipmentRow(target.row);
+                saveSlot(target.row, target.slot, employee.id, null, target.position, false, choice.id);
+            }, choices.length === 1);
+        });
+        if (target.position === "primary") {
+            addReviewAction("Назначить на смену без сохранения специализации", function () {
+                setActiveEquipmentRow(target.row);
+                saveSlot(target.row, target.slot, employee.id, null, target.position, true);
+            });
+        }
+        openDialog(recordDialog);
+    }
+
     function openSpecializationReview(row, slot) {
         var review = slot.specialization_review || {};
+        var choices = choicesForCrewPosition(review, "primary");
         var equipment = row.equipment || {};
         var context = [equipment.type_label, equipment.label, slot.label].filter(Boolean).join(" · ");
         if (!prepareRecordDialog("Специализация", slot.reported_name, context)) return;
@@ -806,13 +835,21 @@
         if (review.suggested) appendRecordField("По умолчанию для должности", review.suggested);
         if (!review.warning) appendRecordField("Требуется для техники", required);
         if (review.warning) {
-            appendRecordField("Что делать", "Если сотрудник действительно работает на этой машине, оставьте его в смене. "
-                + "Расстановку с этой пометкой можно сохранить и опубликовать. Чтобы убрать пометку, попросите ОУП проверить карточку и указать подходящую специализацию.", "is-summary");
+            var help = choices.length
+                ? "Если это постоянная работа сотрудника, сохраните специализацию в его карточке. Для подмены можно оставить текущее назначение."
+                : "Если сотрудник действительно работает на этой машине, оставьте его в смене. Расстановку с этой пометкой можно сохранить и опубликовать. Чтобы убрать пометку, попросите ОУП проверить карточку и указать подходящую специализацию.";
+            appendRecordField("Что делать", help, "is-summary");
         }
         if (planEditable()) {
             if (review.can_assign) {
                 addReviewAction("Назначить сотрудника", function () {
                     saveSlot(row, slot, review.employee_id, null, "primary");
+                });
+            } else if (choices.length) {
+                choices.forEach(function (choice) {
+                    addReviewAction("Сохранить «" + choice.name + "» и назначить", function () {
+                        saveSlot(row, slot, review.employee_id, null, "primary", false, choice.id);
+                    }, choices.length === 1);
                 });
             } else if (canRequestTemporaryTransfer() && temporaryTransferData().candidates.some(function (employee) {
                 return employee.id === review.employee_id;
@@ -1306,7 +1343,10 @@
         if (!candidateList || !currentSlot) return;
         var query = normalizeSearch(candidateSearchInput && candidateSearchInput.value);
         var showFactual = currentSlot.position === "primary" && factualCandidates && factualCandidates.checked;
-        var candidatesForPosition = showFactual ? state.factual_candidates : candidateEmployees;
+        var candidatesWithChoices = state.factual_candidates.filter(function (employee) {
+            return choicesForCrewPosition(employee, currentSlot.position).length;
+        });
+        var candidatesForPosition = showFactual ? state.factual_candidates : candidateEmployees.concat(candidatesWithChoices);
         function visibleInPicker(employee) {
             if (employee.source_equipment_id) {
                 return currentBrigade === "all" || currentBrigade === "watch" || employee.brigade_code === currentBrigade;
@@ -1318,7 +1358,9 @@
             return match.employee;
         });
         if (query && !showFactual && currentSlot.position === "primary") {
-            var otherSpecializations = state.factual_candidates.filter(visibleInPicker);
+            var otherSpecializations = state.factual_candidates.filter(function (employee) {
+                return !choicesForCrewPosition(employee, currentSlot.position).length && visibleInPicker(employee);
+            });
             candidates = candidates.concat(rankedEmployeeMatches(otherSpecializations, query).map(function (match) {
                 return Object.assign({}, match.employee, {disabled: true});
             }));
@@ -1339,19 +1381,26 @@
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
             appendExtensionBadge(main, activeRosterExtensionUntil(employee));
-            if (employee.specialization_issue) {
+            var choices = choicesForCrewPosition(employee, currentSlot.position);
+            if (choices.length) {
+                main.appendChild(createElement("small", "", "Можно сохранить специализацию при назначении"));
+            } else if (employee.specialization_issue) {
                 main.appendChild(createElement("small", "", employee.specialization_issue));
             }
             button.appendChild(main);
-            if (showFactual) {
+            if (showFactual && !choices.length) {
                 main.appendChild(createElement("small", "", "Фактический состав с предупреждением"));
-            } else {
+            } else if (!choices.length) {
                 button.appendChild(createPresenceBadge(employee));
             }
             button.addEventListener("click", function () {
                 if (button.disabled || !currentSlot) return;
                 var source = sourceForEmployee(employee);
                 var target = currentSlot;
+                if (choices.length) {
+                    openSpecializationChoice(employee, target, choices);
+                    return;
+                }
                 closeDialog(candidateDialog, { preserveEquipmentActive: true });
                 setActiveEquipmentRow(target.row);
                 saveSlot(target.row, target.slot, employee.id, source, target.position, showFactual);
@@ -1814,7 +1863,7 @@
         renderAll(reuseNodes && sameBoard);
     }
 
-    async function saveSlot(row, slot, employeeId, source, position, allowFactual) {
+    async function saveSlot(row, slot, employeeId, source, position, allowFactual, specializationId) {
         if (
             saving
             || !mutationAllowed()
@@ -1833,6 +1882,7 @@
             position: position === "secondary" ? "secondary" : "primary"
         };
         if (allowFactual) body.factual = true;
+        if (specializationId) body.specialization_id = specializationId;
         if (source && source.move_reported) body.move_reported = true;
         if (source && source.source_equipment_id) body.source_equipment_id = source.source_equipment_id;
         if (source && source.source_shift_type) body.source_shift_type = source.source_shift_type;
@@ -1842,10 +1892,11 @@
             hideNotice();
             var savedLabel = state.plan.updated_at_label ? "Сохранено · " + state.plan.updated_at_label : "Все изменения сохранены";
             updateAutosave("saved", savedLabel);
+            if (specializationId) showToast("Специализация сохранена. Сотрудник назначен.", false);
         } catch (error) {
             if (error.payload) applyPayload(error.payload);
             updateAutosave("error", "Не сохранено");
-            var shouldReload = ["stale_version", "stale_baseline", "plan_work_date_closed"].indexOf(error.code) !== -1;
+            var shouldReload = ["stale_version", "stale_baseline", "plan_work_date_closed", "specialization_choice_changed"].indexOf(error.code) !== -1;
             var title = error.code === "plan_work_date_closed"
                 ? "Производственные сутки завершены"
                 : (shouldReload ? "Данные изменились" : "Назначение не изменено");
