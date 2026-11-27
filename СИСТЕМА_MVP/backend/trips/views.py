@@ -60,7 +60,7 @@ from references.equipment_states import DEFAULT_EQUIPMENT_STATES
 from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
 from references.rock_catalog import CANONICAL_ROCK_NAMES
 from shifts.models import EmployeeShift, EquipmentPlanGroup, ShiftClientAction
-from shifts.models import PlanAssignmentStatus, PlanCalculationMode
+from shifts.models import PlanAssignmentStatus, PlanCalculationMode, ShiftType
 from shifts.services import (
     ExcavatorShiftCloseConfirmationRequired,
     ExcavatorShiftError,
@@ -6766,8 +6766,8 @@ WORKPLACE_SHIFT_SCHEDULE = {
 def workplace_shift_period_end(shift):
     """Конец смены роли со своим расписанием (диспетчер, горный мастер).
 
-    Окно определяем по времени открытия: смена, начатая днём, кончается вечером,
-    начатая вечером — утром следующего дня, начатая ночью — этим же утром.
+    Для диспетчера период выбирается так же, как при открытии пульта.
+    Для горного мастера он определяется по часам его рабочего графика.
     Для техники вернётся None: у неё производственные часы.
     """
     from datetime import datetime as _datetime, time as _time, timedelta as _timedelta
@@ -6778,6 +6778,14 @@ def workplace_shift_period_end(shift):
         return None
     day_hour, night_hour = schedule
     local = business_localtime(shift.opened_at)
+    if shift.workplace_code == 'dispatcher':
+        # Диспетчер может принять смену с 07:00 или 19:00. Отсечка сдачи
+        # предыдущей смены не должна закрывать принятую сменщиком.
+        context = production_shift_context(local)
+        if context.shift_type == ShiftType.DAY:
+            return _datetime.combine(context.production_date, _time(night_hour), tzinfo=BUSINESS_TIME_ZONE)
+        return _datetime.combine(context.production_date + _timedelta(days=1), _time(day_hour), tzinfo=BUSINESS_TIME_ZONE)
+
     opened_time = local.time().replace(tzinfo=None)
     day_start = _time(day_hour, 0)
     night_start = _time(night_hour, 0)
