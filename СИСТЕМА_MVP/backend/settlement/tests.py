@@ -8049,6 +8049,46 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertIsNotNone(replacement.shift_official_assignment_id)
         self.assertEqual(replacement.ends_at, imported.ends_at)
 
+    def test_excel_resident_card_matches_map_after_assignment_changes_mid_watch(self):
+        moment = timezone.now()
+        self.worker_position.requires_equipment = True
+        self.worker_position.save(update_fields=['requires_equipment'])
+        imported = self._excel_placement(moment)
+        self.authenticate(self.client, self.clerk_access)
+        assignment = EquipmentAssignment.objects.get(
+            employee=self.second_candidate, ended_at__isnull=True,
+        )
+        equipment = Equipment.objects.create(
+            equipment_type=assignment.equipment.equipment_type, garage_number='SET-NEW',
+        )
+        plan = CrewPlan.objects.create(work_date=production_work_date(moment), role=assignment.role)
+        CrewPlanSlot.objects.create(
+            plan=plan, equipment=equipment, employee=self.second_candidate, shift_type=WorkShiftType.SHIFT_1,
+        )
+
+        def assert_work(shift, tooltip, expected_equipment):
+            snapshot = self.client.get(reverse('settlement_map_assignments')).json()['beds'][str(imported.pk)]
+            response = self.client.get(reverse('settlement_resident_detail', args=[imported.resident_id]))
+            self.assertEqual(response.status_code, 200)
+            card = response.json()['resident']['work_assignment']
+            self.assertEqual(card['shift_label'], shift)
+            self.assertEqual(card['tooltip_shift_label'], tooltip)
+            self.assertEqual(card['work_label'], str(expected_equipment))
+            self.assertEqual(card['assignment_warning'], '')
+            self.assertEqual(card['shift_label'], snapshot['shiftLabel'])
+            self.assertEqual(card['tooltip_shift_label'], snapshot['tooltipShiftLabel'])
+            self.assertEqual(card['work_label'], snapshot['workLabel'])
+
+        assert_work('Ночь', 'Ночь · по расстановке, в Excel — день', assignment.equipment)
+        plan.status = CrewPlanStatus.PUBLISHED
+        plan.save(update_fields=['status'])
+        assert_work('День', 'День · по расстановке', equipment)
+        self.assertContains(self.client.get(reverse('settlement_map')), f'Техника: {equipment}')
+        imported.refresh_from_db()
+        self.assertEqual(imported.work_shift, WorkShiftType.SHIFT_1)
+        self.assertIsNone(imported.shift_official_assignment_id)
+        self.assertIsNone(imported.terminated_at)
+
     def test_excel_relocation_keeps_recorded_shift_without_matching_watch(self):
         from .models import SettlementPlacementEvent
 

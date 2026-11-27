@@ -130,7 +130,7 @@ from .saved_previews import (
 )
 from .services import (
     MANUAL_CATEGORY_EXCEPTION_LABEL,
-    current_housing_official_assignments,
+    current_housing_excel_occupancy_ids,
     current_roster_resolution,
     build_auto_settlement_preview,
     can_edit_stay,
@@ -901,6 +901,7 @@ def _employee_profiles(employees, *, settlement_date=None):
     employee_ids = [employee.pk for employee in employees]
     equipment_by_employee = {}
     equipment_labels_by_shift = defaultdict(dict)
+    published_assignments = defaultdict(list)
     shift_by_employee = {}
 
     if employee_ids:
@@ -918,7 +919,7 @@ def _employee_profiles(employees, *, settlement_date=None):
                 'equipment',
                 'equipment__equipment_type',
                 'equipment__model',
-                'source_crew_plan_slot__plan',
+                'source_crew_plan_slot__plan__role',
             )
             .order_by('employee_id', '-assigned_at', '-id')
         )
@@ -927,6 +928,10 @@ def _employee_profiles(employees, *, settlement_date=None):
             equipment_labels_by_shift[assignment.employee_id].setdefault(
                 assignment.shift_type, str(assignment.equipment),
             )
+            if settlement_date and assignment.source_kind == EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN:
+                plan = assignment.source_crew_plan_slot.plan
+                if plan.status == CrewPlanStatus.PUBLISHED and plan.work_date < settlement_date:
+                    published_assignments[assignment.employee_id].append(assignment)
 
         open_shifts = (
             EmployeeShift.objects
@@ -970,13 +975,12 @@ def _employee_profiles(employees, *, settlement_date=None):
             needs_equipment = work_category in PRODUCTION_APP_ROLE_CODES and (not specialization or specialization.is_active)
         assignment = equipment_by_employee.get(employee.pk)
         slots = published_slots.get(employee.pk, [])
-        has_plan = (needs_equipment and work_category in published_roles) or bool(slots)
-        if settlement_date and not has_plan and assignment and (
-            assignment.source_kind == EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN
-            and assignment.source_crew_plan_slot.plan.work_date < settlement_date
-        ):
-            slots = [assignment]
-            has_plan = True
+        if not slots:
+            slots = [
+                prior for prior in published_assignments[employee.pk]
+                if prior.source_crew_plan_slot.plan.role.code not in published_roles
+            ]
+        has_plan = bool(slots) or (needs_equipment and work_category in published_roles)
         shift = shift_by_employee.get(employee.pk)
         shift_type = (
             assignment.shift_type
@@ -1037,38 +1041,36 @@ def _unsettled_employee_cards(moment):
     ]
 
 
-def _bed_assignment_display(occupancy, profile, official, *, from_excel):
-    recorded = DAY_NIGHT_LABELS.get(occupancy.work_shift)
+def _resident_work_display(resident, occupancy, profile, *, from_excel):
+    work_shift = occupancy.work_shift if occupancy else None
+    recorded = DAY_NIGHT_LABELS.get(work_shift)
     shift = recorded or (profile['shift_label'] if profile else UNKNOWN_LABEL)
     tooltip_shift = shift
-    if from_excel:
-        shift = DAY_NIGHT_LABELS[official.shift_type] if official else recorded or UNKNOWN_LABEL
-        tooltip_shift = shift
-        if official:
-            tooltip_shift += ' · по расстановке'
-            if recorded and recorded != shift:
-                tooltip_shift += f', в Excel — {recorded.lower()}'
-        elif recorded:
-            tooltip_shift += ' · по Excel'
-
     published = profile and profile['has_published_assignment_data']
+    slots = profile['published_slots'] if published else []
     if published:
-        slots = profile['published_slots']
-        official = slots[0] if len(slots) == 1 else None
         shifts = {slot.shift_type for slot in slots}
         shift = DAY_NIGHT_LABELS.get(next(iter(shifts)), UNKNOWN_LABEL) if len(shifts) == 1 else UNKNOWN_LABEL
-        tooltip_shift = shift + ' · по расстановке'
-    work = profile['work_label'] if profile else occupancy.resident.organization or UNKNOWN_LABEL
-    tooltip_work = occupancy.resident.organization
+        tooltip_shift = shift
+        if shift != UNKNOWN_LABEL:
+            tooltip_shift += ' · по расстановке'
+            if from_excel and recorded and recorded != shift:
+                tooltip_shift += f', в Excel — {recorded.lower()}'
+    elif from_excel:
+        shift = recorded or UNKNOWN_LABEL
+        tooltip_shift = f'{shift} · по Excel' if recorded else shift
+
+    work = profile['work_label'] if profile else resident.organization or UNKNOWN_LABEL
+    tooltip_work = resident.organization
     missing_equipment = False
     caption = 'Организация'
     if profile:
         caption = 'Техника' if profile['requires_equipment'] else 'Должность'
         if profile['requires_equipment']:
-            equipment = str(official.equipment) if official else ''
+            equipment = str(slots[0].equipment) if len(slots) == 1 else ''
             if not equipment and not from_excel and not published:
-                equipment = (profile['equipment_by_shift'].get(occupancy.work_shift)
-                             if occupancy.work_shift else profile['equipment_label'])
+                equipment = (profile['equipment_by_shift'].get(work_shift)
+                             if work_shift else profile['equipment_label'])
             missing_equipment = not equipment
             work = equipment or UNKNOWN_LABEL
             tooltip_work = f"Техника: {equipment or ('проверьте расстановку' if from_excel else 'не назначена')}"
@@ -1077,7 +1079,9 @@ def _bed_assignment_display(occupancy, profile, official, *, from_excel):
             tooltip_work = f'Должность: {work}'
     missing_shift = bool(profile) and shift == UNKNOWN_LABEL
     warning = ''
-    if missing_equipment and missing_shift:
+    if len(slots) > 1 and (missing_equipment or missing_shift):
+        warning = 'Найдено несколько назначений'
+    elif missing_equipment and missing_shift:
         warning = 'Не назначены техника и смена'
     elif missing_equipment:
         warning = 'Не назначена техника'
@@ -1088,6 +1092,23 @@ def _bed_assignment_display(occupancy, profile, official, *, from_excel):
         'shift_label': shift, 'tooltip_shift_label': tooltip_shift,
         'work_label': work, 'work_caption': caption, 'tooltip_work_label': tooltip_work,
         'assignment_warning': warning,
+    }
+
+
+def _housing_work_by_resident(residents, occupancies, moment):
+    """Use the current assignment for both views, retaining the recorded stay shift as a fallback."""
+    profiles = _employee_profiles(
+        (resident.employee for resident in residents if resident.employee_id),
+        settlement_date=production_work_date(moment),
+    )
+    by_resident = {occupancy.resident_id: occupancy for occupancy in occupancies}
+    imported_ids = current_housing_excel_occupancy_ids(occupancies)
+    return {
+        resident.pk: _resident_work_display(
+            resident, by_resident.get(resident.pk), profiles.get(resident.employee_id),
+            from_excel=resident.pk in by_resident and by_resident[resident.pk].pk in imported_ids,
+        )
+        for resident in residents
     }
 
 
@@ -1110,13 +1131,12 @@ def _bed_stay_period(occupancy):
 
 def _attach_occupancy_view(rooms, moment):
     occupancies = _clerk_map_occupancies(rooms)
-    profiles = _employee_profiles(
-        (occupancy.resident.employee for occupancy in occupancies if occupancy.resident.employee_id),
-        settlement_date=production_work_date(moment),
+    residents = [occupancy.resident for occupancy in occupancies]
+    work_by_resident = _housing_work_by_resident(residents, occupancies, moment)
+    extensions = approved_watch_extensions_on(
+        production_work_date(moment), employee_ids={resident.employee_id for resident in residents if resident.employee_id},
     )
-    extensions = approved_watch_extensions_on(production_work_date(moment), employee_ids=profiles)
 
-    imported_ids, published = current_housing_official_assignments(occupancies, moment)
     exception_ids = occupancies_with_manual_category_exception(occupancy.pk for occupancy in occupancies)
 
     for room in rooms:
@@ -1143,11 +1163,8 @@ def _attach_occupancy_view(rooms, moment):
             bed.personnel_number = resident.personnel_number
             bed.category_exception = MANUAL_CATEGORY_EXCEPTION_LABEL if str(occupancy.pk) in exception_ids else ''
             bed.occupant_initials = _person_initials(bed.occupant_name)
-            profile = profiles.get(resident.employee_id)
-            bed.occupant_photo_url = profile['photo_url'] if profile else _resident_photo_url(resident)
-            from_excel = occupancy.pk in imported_ids
-            official = published.get(resident.employee_id) if from_excel else occupancy.shift_official_assignment
-            for field, value in _bed_assignment_display(occupancy, profile, official, from_excel=from_excel).items():
+            bed.occupant_photo_url = _resident_photo_url(resident)
+            for field, value in work_by_resident[resident.pk].items():
                 setattr(bed, field, value)
             bed.assignment_type_label = occupancy.get_assignment_type_display()
         room.free_bed_count = len(room.beds.all()) - room.occupied_bed_count
@@ -1381,8 +1398,6 @@ def _clerk_map_rooms(moment):
                                     'resident__employee',
                                     'resident__employee__personnel_position',
                                     'resident__employee__base_specialization__access_role',
-                                    'shift_official_assignment__equipment__equipment_type',
-                                    'shift_official_assignment__equipment__model',
                                 )
                             ),
                             to_attr='active_occupancies',
@@ -1648,18 +1663,24 @@ def settlement_employee_detail_view(request, employee_id):
 
     return JsonResponse({
         'ok': True,
-        'employee': {**_employee_card_fields(employee), **_resident_stay_fields(resident__employee=employee)},
+        'employee': {
+            **_employee_card_fields(employee),
+            **_resident_stay_fields(_resident_current_occupancy(timezone.now(), resident__employee=employee)),
+        },
     })
 
 
-def _resident_stay_fields(*, editable=False, **subject):
-    occupancy = (
+def _resident_current_occupancy(moment, **subject):
+    return (
         EmployeeBedOccupancy.objects
-        .filter(effective_occupancy_at_q(timezone.now()), **subject)
+        .filter(effective_occupancy_at_q(moment), **subject)
         .select_related('physical_bed__room__dormitory')
         .order_by('pk')
         .first()
     )
+
+
+def _resident_stay_fields(occupancy, *, editable=False):
     residence = 'Фактическое место проживания не назначено.'
     if occupancy is not None:
         bed = occupancy.physical_bed
@@ -1712,9 +1733,13 @@ def _employee_card_fields(employee):
 def _resident_card_payload(resident):
     fields = _external_resident_payload(resident) if resident.is_external else _employee_card_fields(resident.employee)
     editable = resident.status == SettlementResident.Status.ACTIVE
+    moment = timezone.now()
+    occupancy = _resident_current_occupancy(moment, resident=resident)
+    work = _housing_work_by_resident([resident], [occupancy] if occupancy else [], moment)[resident.pk]
     return {
         **fields,
-        **_resident_stay_fields(resident=resident, editable=editable),
+        **_resident_stay_fields(occupancy, editable=editable),
+        'work_assignment': work,
         'id': resident.pk,
         'personnel_number': resident.personnel_number,
         'is_external': resident.is_external,
@@ -2621,13 +2646,7 @@ def settlement_control_release_view(request):
 def _occupancy_response(occupancy):
     resident = occupancy.resident
     moment = timezone.now()
-    profile = None
-    if resident.employee_id:
-        profile = _employee_profiles([resident.employee], settlement_date=production_work_date(moment))[resident.employee_id]
-    photo_url = profile['photo_url'] if profile else _resident_photo_url(resident)
-    imported_ids, published = current_housing_official_assignments([occupancy], moment)
-    from_excel = occupancy.pk in imported_ids
-    official = published.get(resident.employee_id) if from_excel else occupancy.shift_official_assignment
+    work = _housing_work_by_resident([resident], [occupancy], moment)[resident.pk]
     bed = occupancy.physical_bed
     room = bed.room
     on_extension = (
@@ -2658,8 +2677,8 @@ def _occupancy_response(occupancy):
             'bed_stable_id': bed.stable_id,
             'occupant_name': resident.display_name,
             'personnel_number': resident.personnel_number,
-            'photo_url': photo_url,
-            **_bed_assignment_display(occupancy, profile, official, from_excel=from_excel),
+            'photo_url': _resident_photo_url(resident),
+            **work,
             'on_extension': on_extension,
             'stay_period': _bed_stay_period(occupancy),
             'assignment_type': occupancy.assignment_type,

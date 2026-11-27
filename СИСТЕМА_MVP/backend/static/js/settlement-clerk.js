@@ -1962,6 +1962,19 @@
         return input;
     }
 
+    function updateResidentWorkFields(assignment = {}) {
+        var values = {
+            shift: assignment.tooltip_shift_label,
+            equipment: assignment.work_caption === "Техника" ? assignment.work_label : "",
+            warning: assignment.assignment_warning
+        };
+        employeePanelBody.querySelectorAll("[data-resident-work]").forEach(function (field) {
+            var value = values[field.dataset.residentWork];
+            field.textContent = value || "";
+            field.hidden = field.previousElementSibling.hidden = !value;
+        });
+    }
+
     function renderResidentPanel(resident, editing = false) {
         if (!employeePanelBody || !employeePanelTitle) return;
         employeePanelTitle.textContent = resident.full_name;
@@ -1974,6 +1987,11 @@
         }
         fields.push(["Табельный номер", resident.personnel_number || "Не указан",
             externalEdit && residentInput("external_personnel_number", resident.personnel_number, {maxLength: 64})]);
+        fields.push(
+            ["Смена", "", null, "", "shift"],
+            ["Техника", "", null, "", "equipment"],
+            ["Уточнить расстановку", "", null, "", "warning"]
+        );
         if (resident.is_external) {
             var sex;
             if (externalEdit) {
@@ -2027,7 +2045,7 @@
         }
         fields.push(["Заметка по проживанию", resident.housing_note || "Нет заметки", note, "settlement-resident-card-note"]);
         fields.forEach(function (row) {
-            var [label, value, input, cssClass] = row;
+            var [label, value, input, cssClass, workField] = row;
             var term = element("dt", "");
             var definition = element("dd", cssClass || "");
             if (input) {
@@ -2043,9 +2061,11 @@
                 term.textContent = label;
                 definition.textContent = value;
             }
+            if (workField) definition.dataset.residentWork = workField;
             details.append(term, definition);
         });
         employeePanelBody.appendChild(details);
+        updateResidentWorkFields(resident.work_assignment);
         residentCardActions.hidden = !editing;
         residentEditButton.hidden = editing || !resident.editable;
     }
@@ -2991,6 +3011,15 @@
                     changedRooms.add(bed.closest("[data-room-card]"));
                     Object.assign(bed.dataset, fields);
                     renderMapBed(bed);
+                }
+                if (openedResident && String(openedResident.id) === bed.dataset.residentId) {
+                    openedResident.work_assignment = {
+                        tooltip_shift_label: fields.tooltipShiftLabel,
+                        work_caption: fields.workCaption,
+                        work_label: fields.workLabel,
+                        assignment_warning: fields.assignmentWarning
+                    };
+                    updateResidentWorkFields(openedResident.work_assignment);
                 }
             });
             updateShiftConflicts(previous);

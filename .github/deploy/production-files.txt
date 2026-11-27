@@ -1,6 +1,4 @@
-СИСТЕМА_MVP/backend/assignments/crew_search.py
-СИСТЕМА_MVP/backend/assignments/deputy_views.py
-СИСТЕМА_MVP/backend/assignments/services.py
-СИСТЕМА_MVP/backend/static/js/deputy-mining-manager-v3.js
-СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_placement.html
-СИСТЕМА_MVP/backend/users/work_profiles.py
+СИСТЕМА_MVP/backend/settlement/services.py
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
+СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html

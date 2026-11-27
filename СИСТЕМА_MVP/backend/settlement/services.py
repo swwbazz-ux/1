@@ -30,8 +30,6 @@ from .models import (
     SettlementResident,
 )
 from .cohorts import (
-    eligible_official_assignments,
-    official_assignment_matches_period,
     resolve_internal_official_shift_source,
 )
 from .personnel_categories import (
@@ -869,36 +867,13 @@ def _current_import_watch_periods(composition_ids, moment, *, using=None):
     ).order_by('pk')
 
 
-def current_housing_official_assignments(occupancies, moment):
-    """Read the unambiguous published assignments for imported residents in bulk."""
+def current_housing_excel_occupancy_ids(occupancies):
+    """Identify the placements whose recorded shifts came from the housing workbook."""
     placements = {
         occupancy.pk: (occupancy.resident_id, occupancy.physical_bed_id)
         for occupancy in occupancies if occupancy.watch_period_id is None and occupancy.resident.employee_id
     }
-    imported_ids = set(_current_housing_import_sources(placements))
-    employees_by_composition = defaultdict(set)
-    for occupancy in occupancies:
-        if occupancy.pk in imported_ids:
-            employee = occupancy.resident.employee
-            employees_by_composition[employee.watch_composition_id].add(employee.pk)
-    periods_by_composition = defaultdict(list)
-    for period in _current_import_watch_periods(employees_by_composition, moment):
-        periods_by_composition[period.watch_composition_id].append(period)
-    assignments_by_employee = defaultdict(list)
-    for composition_id, periods in periods_by_composition.items():
-        if len(periods) != 1:
-            continue
-        period = periods[0]
-        for assignment in eligible_official_assignments(
-            employee_ids=employees_by_composition[composition_id], period=period,
-        ):
-            assignments_by_employee[assignment.employee_id].append((assignment, period))
-    verified = {
-        employee_id: entries[0][0]
-        for employee_id, entries in assignments_by_employee.items()
-        if len(entries) == 1 and official_assignment_matches_period(*entries[0])
-    }
-    return imported_ids, verified
+    return set(_current_housing_import_sources(placements))
 
 
 def _lock_import_relocation_shift(resident, moment, *, using):

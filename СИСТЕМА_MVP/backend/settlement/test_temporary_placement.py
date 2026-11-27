@@ -625,7 +625,12 @@ class BedCheckinTests(TemporaryPlacementBase):
         url = reverse('settlement_map_assignments')
 
         def snapshot():
-            return self.client.get(url).json()['beds'][str(placement.pk)]
+            fields = self.client.get(url).json()['beds'][str(placement.pk)]
+            card = self.client.get(reverse('settlement_resident_detail', args=[placement.resident_id]))
+            work = card.json()['resident']['work_assignment']
+            self.assertEqual(work['shift_label'], fields['shiftLabel'])
+            self.assertEqual(work['work_label'], fields['workLabel'])
+            return fields
 
         self.assertNotEqual(snapshot()['shiftLabel'], 'Ночь')
         plan.status = CrewPlanStatus.PUBLISHED
@@ -675,6 +680,11 @@ class BedCheckinTests(TemporaryPlacementBase):
                 self.assertEqual(payload['work_caption'], 'Техника' if requires_equipment else 'Должность')
                 if not requires_equipment:
                     self.assertEqual(payload['work_label'], employee.personnel_position.name)
+                card = self.client.get(reverse('settlement_resident_detail', args=[occupancy.resident_id]))
+                self.assertEqual(card.status_code, 200)
+                work = card.json()['resident']['work_assignment']
+                for field in ('shift_label', 'work_caption', 'work_label', 'assignment_warning'):
+                    self.assertEqual(work[field], payload[field])
                 page = self.client.get(reverse('settlement_map'))
                 self.assertContains(page, f'data-assignment-warning="{expected}"')
                 if not expected:
