@@ -1,8 +1,6 @@
-СИСТЕМА_MVP/backend/static/js/dispatcher-board-layout-v1.js
-СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html
-СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_board.html
-СИСТЕМА_MVP/backend/trips/dispatcher_pwa.py
-СИСТЕМА_MVP/backend/trips/dispatcher_read_model.py
-СИСТЕМА_MVP/backend/trips/views.py
-СИСТЕМА_MVP/backend/users/role_apps.py
-СИСТЕМА_MVP/backend/templates/reports/dispatcher_shift_report.html
+СИСТЕМА_MVP/backend/assignments/crew_search.py
+СИСТЕМА_MVP/backend/assignments/deputy_views.py
+СИСТЕМА_MVP/backend/assignments/services.py
+СИСТЕМА_MVP/backend/static/js/deputy-mining-manager-v3.js
+СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_placement.html
+СИСТЕМА_MVP/backend/users/work_profiles.py
