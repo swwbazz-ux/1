@@ -742,6 +742,46 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(categories['excavator_operator']['revision'], excavator_plan.revision)
         self.assertEqual(categories['excavator_operator']['published_at_label'], '')
 
+    def test_dispatcher_card_shows_only_current_published_factual_crew(self):
+        person = Employee.objects.create(full_name='Водитель из фактического состава', status=Employee.Status.ACTIVE)
+        dispatcher_role, _ = Role.objects.get_or_create(code='dispatcher', defaults={'name': 'Горный диспетчер'})
+        _, dispatcher_access = self.create_employee_with_access(
+            'Тестовый диспетчер', dispatcher_role, phone='+79000000073', access_code='217773',
+        )
+
+        def read_card(board_name, detail_name):
+            page = self.client.get(reverse(board_name))
+            detail = reverse(detail_name, args=('equipment', self.truck_2.pk))
+            response = self.client.get(detail, {'state_version': page.context['operational_state_version']})
+            self.assertEqual(response.status_code, 200)
+            return response.json()['card']
+
+        day = datetime(2026, 11, 27, 11, 0, tzinfo=ZoneInfo('Asia/Vladivostok'))
+        with patch('core.production_time.timezone.now', return_value=day):
+            plan = self.create_draft()
+            plan.slots.filter(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).update(reported_employee=person)
+            board, detail = 'deputy_dispatcher_control', 'deputy_dispatcher_equipment_detail'
+            self.assertIsNone(read_card(board, detail)['employee'])
+            published = self.client.post(
+                reverse('deputy_mining_manager_publish'),
+                {'plan_id': plan.pk, 'expected_version': plan.version},
+                content_type='application/json',
+            )
+            self.assertEqual(published.status_code, 200, published.content)
+            card = read_card(board, detail)
+            self.assertEqual(card['employee']['name'], person.full_name)
+            self.assertIn('По опубликованной расстановке', card['employee']['presence_label'])
+            self.assertIsNone(card['shift'])
+            self.assertFalse((card['manual_trip'] or {}).get('can_add'))
+            self.authenticate(self.client, dispatcher_access)
+            dispatcher_card = read_card('dispatcher_control', 'dispatcher_equipment_detail')
+            self.assertEqual(dispatcher_card['employee'], card['employee'])
+
+            with patch('core.production_time.timezone.now', return_value=day + timedelta(hours=9)):
+                self.assertIsNone(read_card('dispatcher_control', 'dispatcher_equipment_detail')['employee'])
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=person).exists())
+        self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
+
     def test_dispatcher_board_is_live_and_read_only_for_deputy(self):
         board = reverse('deputy_dispatcher_control')
         detail = reverse('deputy_dispatcher_equipment_detail', args=('equipment', self.truck_1.pk))

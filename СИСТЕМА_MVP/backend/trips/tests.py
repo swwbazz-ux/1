@@ -1372,6 +1372,10 @@ class DispatcherGarageCurrentStateTests(TestCase):
             created_at=self.FIXED_DAY_SHIFT_OPENED_AT + timedelta(minutes=5),
             completed_at=self.FIXED_DAY_SHIFT_OPENED_AT + timedelta(minutes=10),
         )
+        yesterday_trip = self.create_completed_trip(truck=self.assigned_truck, excavator=self.excavator)
+        Trip.objects.filter(pk=yesterday_trip.pk).update(loaded_at=self.FIXED_DAY_SHIFT_OPENED_AT - timedelta(days=1))
+        cancelled_trip = self.create_completed_trip(truck=self.assigned_truck, excavator=self.excavator)
+        Trip.objects.filter(pk=cancelled_trip.pk).update(status=TripStatus.CANCELLED, loaded_at=self.FIXED_DAY_SHIFT_OPENED_AT)
 
         with patch(
             'core.production_time.timezone.now',
@@ -1401,6 +1405,10 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(assigned_tile['plan_fact_value'], '1')
         self.assertEqual(assigned_tile['percent'], 25)
         self.assertTrue(assigned_tile['plan_inactive_fill'])
+        card = dashboard['equipment_cards'][str(self.assigned_truck.pk)]
+        metrics = {row['label']: row['value'] for row in card['shift_report']['metrics']}
+        self.assertEqual(metrics['Рейсы'], '1')
+        self.assertEqual(metrics['Завершены'], '1')
 
     def test_dispatcher_dashboard_returns_excavator_snapshot_plan_progress(self):
         self.create_plan_group(
