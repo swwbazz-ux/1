@@ -1676,42 +1676,272 @@ button.deputy-avatar {
     flex-wrap: wrap;
 }
 
+.deputy-record-dialog {
+    --record-gutter: clamp(16px, 3vw, 28px);
+}
+
+.deputy-record-dialog.is-employee,
+.deputy-record-form {
+    font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.is-employee .deputy-record-head {
+    padding: 24px 62px 20px var(--record-gutter);
+    grid-template-columns: 60px minmax(0, 1fr);
+    border: 0;
+}
+
+.is-employee .deputy-record-visual {
+    width: 60px;
+    height: 60px;
+    border-radius: 12px;
+}
+
+.is-employee .deputy-record-visual .deputy-avatar {
+    font-size: 23px;
+    text-transform: uppercase;
+}
+
+.is-employee .deputy-record-head h2 {
+    font-size: clamp(20px, 2.4vw, 26px);
+    line-height: 1.18;
+}
+
 .is-employee .deputy-record-head p {
-    font-size: 14px;
-    line-height: 1.45;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.4;
 }
 
-.deputy-record-duty {
+.deputy-record-assignment,
+.deputy-record-dialog.is-employee .deputy-record-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 14px 24px;
+    margin: 0 var(--record-gutter);
+}
+
+.deputy-record-assignment {
     padding: 12px 16px;
-    border-bottom: 1px solid var(--admin-line-soft);
+    border-inline-start: 3px solid var(--admin-green);
+    border-radius: 5px;
+    background: var(--admin-green-soft);
+    color: var(--admin-ink);
 }
 
-.deputy-record-duty summary {
-    cursor: pointer;
-    font-weight: 800;
-    color: var(--admin-green);
-}
-
-.deputy-record-duty > p {
-    margin: .65rem 0 0;
+.deputy-record-assignment dt,
+.deputy-record-dialog.is-employee .deputy-record-field dt {
     color: var(--admin-muted);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: none;
 }
 
-.deputy-record-duty .deputy-duty-form {
-    margin-top: .75rem;
+.deputy-record-assignment time {
+    margin-inline-start: .35em;
+    font-variant-numeric: tabular-nums;
 }
 
-.deputy-record-duty-error {
-    flex-basis: 100%;
-    margin: 0;
-    color: var(--admin-red, #a22319);
+.deputy-record-assignment dd {
+    margin: 3px 0 0;
+    font-size: 17px;
+    font-weight: 750;
     overflow-wrap: anywhere;
 }
 
-@media (max-width: 540px) {
-    .deputy-record-dialog.is-employee .deputy-record-fields {
-        grid-template-columns: minmax(0, 1fr);
-    }
+.deputy-record-dialog.is-employee .deputy-record-fields {
+    padding: 16px 0 20px;
+    background: transparent;
+}
+
+.deputy-record-dialog.is-employee .deputy-record-field {
+    padding: 0;
+    background: transparent;
+}
+
+.is-employee .deputy-record-field a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--admin-line);
+    text-underline-offset: 3px;
+}
+
+.deputy-record-clients {
+    display: block;
+    color: var(--admin-muted);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.is-employee .deputy-dialog-actions,
+.deputy-record-dialog [hidden] {
+    display: none;
+}
+
+.deputy-record-duty {
+    margin: 0 var(--record-gutter) 18px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+}
+
+.deputy-record-duty summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font-size: 16px;
+    font-weight: 750;
+    cursor: pointer;
+    list-style: none;
+}
+
+.deputy-record-duty summary::-webkit-details-marker { display: none; }
+.deputy-record-duty summary::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    margin: 0 3px;
+    border: solid var(--admin-muted);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.deputy-record-duty[open] summary::after { transform: rotate(225deg); }
+.deputy-record-duty[open] summary { border-radius: 7px 7px 0 0; }
+
+.deputy-record-form { display: block; padding: 14px 16px; }
+.deputy-duty-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+    border: 0;
+}
+
+.deputy-duty-options legend {
+    padding: 0 0 8px;
+    color: var(--admin-muted);
+    font-size: 14px;
+}
+
+.deputy-duty-options label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.deputy-duty-options label:has(:checked) {
+    border-color: var(--admin-green);
+    background: var(--admin-green-soft);
+}
+
+.deputy-duty-options input[type=radio] {
+    flex: 0 0 16px;
+    width: 16px;
+    min-height: 0;
+    height: 16px;
+    margin: 2px 0 0;
+    accent-color: var(--admin-green);
+}
+
+.deputy-duty-options strong { font-size: 15px; }
+.deputy-duty-options small,
+.deputy-record-duty-inputs small {
+    color: var(--admin-muted);
+    font-size: 13px;
+    font-weight: 500;
+}
+.deputy-duty-options small { display: block; margin-top: 3px; }
+
+.deputy-record-duty-inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 14px;
+    margin-top: 16px;
+}
+
+.deputy-record-duty-inputs label {
+    display: grid;
+    align-content: end;
+    min-width: 0;
+    gap: 5px;
+    font-weight: 650;
+}
+
+.deputy-record-duty-inputs small { margin-inline-start: .25em; }
+.deputy-record-duty-inputs :is(input, select) {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    padding: 7px 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    color: var(--admin-ink);
+    background: var(--admin-panel);
+    font: inherit;
+    font-weight: 500;
+}
+
+.deputy-record-duty-confirm {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+    border-top: 1px solid var(--admin-line-soft);
+    padding-top: 12px;
+}
+.deputy-record-duty-confirm p {
+    flex: 1 1 15em;
+    margin: 0;
+    color: var(--admin-muted);
+}
+.deputy-record-duty-confirm .admin-button-primary {
+    width: auto;
+    padding: 0 16px;
+    min-height: 42px;
+    border: 0;
+    background: #147448;
+    color: #fff;
+    font: 650 15px/1.25 "Segoe UI", system-ui, sans-serif;
+    letter-spacing: normal;
+    text-transform: none;
+    white-space: normal;
+}
+.deputy-record-duty-confirm .admin-button-primary:hover { background: #105e3a; }
+.deputy-record-duty-confirm .admin-button-primary:disabled { opacity: .6; }
+.deputy-record-form :is(input, select, button):focus-visible,
+.deputy-record-duty summary:focus-visible {
+    outline: 2px solid var(--admin-green);
+    outline-offset: 2px;
+}
+.deputy-record-duty-error {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--admin-red);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 620px) {
+    .deputy-duty-options, .deputy-record-duty-inputs { grid-template-columns: minmax(0, 1fr); }
+    .deputy-duty-options label { align-items: center; }
+    .deputy-duty-options small { display: inline; margin-inline-start: .5em; }
+    .deputy-record-duty-confirm .admin-button-primary { width: 100%; }
+    .deputy-record-assignment,
+    .deputy-record-dialog.is-employee .deputy-record-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    .is-employee .deputy-record-head { grid-template-columns: 46px minmax(0, 1fr); gap: 10px; padding-top: 16px; }
+    .is-employee .deputy-record-visual { width: 46px; height: 46px; }
 }
 
 .deputy-toast {

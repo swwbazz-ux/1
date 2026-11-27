@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261127-employee-record">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261127-employee-duty-layout">
 {% endblock %}
 
 {% block body %}
@@ -194,31 +194,37 @@
             <p data-record-subtitle></p>
         </div>
     </div>
+    <dl class="deputy-record-assignment" data-record-assignment hidden>
+        <div><dt>Назначение на <time></time></dt><dd data-record-posting></dd></div>
+        <div><dt>Бригада</dt><dd data-record-brigade></dd></div>
+    </dl>
     <dl class="deputy-record-fields" data-record-fields></dl>
     <details class="deputy-record-duty" data-record-duty hidden>
-        <summary>Перевести во вкладку «Без техники»</summary>
-        <p data-record-duty-removal hidden>При публикации сотрудник будет снят с машины.</p>
-        <form class="deputy-duty-form" data-record-duty-form>
-            <label>Состояние в расстановке
-                <select name="status" required>
-                    <option value="" disabled selected>Выберите состояние</option>
-                    <option value="reserve">Резерв</option>
-                    <option value="other_work">Работа без техники</option>
-                    <option value="suspended">Отстранён от управления техникой</option>
-                </select>
-            </label>
-            <label>Смена
-                <select name="shift_type">
-                    <option value="">Требует уточнения</option>
-                    <option value="day">Первая смена</option>
-                    <option value="night">Вторая смена</option>
-                </select>
-            </label>
-            <label>Где и чем занят
-                <input name="location" maxlength="180" placeholder="Например, площадка сборки">
-            </label>
-            <button type="submit" class="admin-button admin-button-primary">Перевести и опубликовать</button>
-            <p class="deputy-record-duty-error" data-record-duty-error role="alert" hidden></p>
+        <summary>Перевод в раздел «Без техники»</summary>
+        <form class="deputy-record-form" data-record-duty-form>
+            <fieldset class="deputy-duty-options">
+                <legend>Выберите состояние</legend>
+                <label><input type="radio" name="status" value="reserve" required><span><strong>Резерв</strong><small>На выбранную смену</small></span></label>
+                <label><input type="radio" name="status" value="other_work" required><span><strong>Работа без техники</strong><small>На производственные сутки</small></span></label>
+                <label><input type="radio" name="status" value="suspended" required><span><strong>Отстранён от управления</strong><small>До подтверждения возврата</small></span></label>
+            </fieldset>
+            <div class="deputy-record-duty-inputs" data-record-duty-inputs hidden>
+                <label><span>Смена <small data-duty-shift-hint></small></span>
+                    <select name="shift_type">
+                        <option value="">Требует уточнения</option>
+                        <option value="day">Первая смена</option>
+                        <option value="night">Вторая смена</option>
+                    </select>
+                </label>
+                <label><span>Где и чем занят <small data-duty-location-hint></small></span>
+                    <input name="location" maxlength="180" placeholder="Например, помогает слесарям на сборке">
+                </label>
+                <div class="deputy-record-duty-confirm">
+                    <p data-record-duty-removal hidden>При публикации сотрудник будет снят с машины.</p>
+                    <button type="submit" class="admin-button admin-button-primary">Перевести и опубликовать</button>
+                </div>
+                <p class="deputy-record-duty-error" data-record-duty-error role="alert" hidden></p>
+            </div>
         </form>
     </details>
     <div class="deputy-dialog-actions" data-record-actions>
@@ -301,6 +307,6 @@
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
 <script src="{% static 'js/deputy-people-search.js' %}?v=3" defer></script>
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261127-employee-record" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261127-employee-duty-layout" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

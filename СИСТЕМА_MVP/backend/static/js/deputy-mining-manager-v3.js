@@ -112,6 +112,7 @@
     var recordTitle = document.querySelector("[data-record-title]");
     var recordSubtitle = document.querySelector("[data-record-subtitle]");
     var recordVisual = document.querySelector("[data-record-visual]");
+    var recordAssignment = document.querySelector("[data-record-assignment]");
     var recordFields = document.querySelector("[data-record-fields]");
     var recordActions = document.querySelector("[data-record-actions]");
     var recordDuty = document.querySelector("[data-record-duty]");
@@ -727,6 +728,7 @@
         item.appendChild(createElement("dt", "", label));
         item.appendChild(createElement("dd", "", value));
         recordFields.appendChild(item);
+        return item.lastElementChild;
     }
 
     function prepareRecordDialog(kicker, title, subtitle) {
@@ -734,6 +736,7 @@
         closeDialog(candidateDialog);
         closeDialog(photoDialog);
         recordDialog.classList.remove("is-specialization", "is-employee");
+        recordAssignment.hidden = true;
         if (recordDuty) {
             recordDuty.hidden = true;
             recordDuty.open = false;
@@ -749,6 +752,17 @@
         return true;
     }
 
+    function updateRecordDutyFields() {
+        var fields = recordDutyForm.elements;
+        var status = fields.status.value;
+        recordDutyForm.querySelector("[data-record-duty-inputs]").hidden = !status;
+        fields.shift_type.required = status === "reserve";
+        fields.location.required = status === "other_work";
+        recordDutyForm.querySelector("[data-duty-shift-hint]").textContent = fields.shift_type.required ? "обязательно" : "можно уточнить позже";
+        recordDutyForm.querySelector("[data-duty-location-hint]").textContent = fields.location.required ? "обязательно" : "по желанию";
+        recordDutyError.hidden = true;
+    }
+
     function prepareRecordDuty(employeeId, shiftType) {
         if (!recordDutyForm || !employeeId || !planEditable() || !state.endpoints.off_equipment_transfer) return;
         recordDutyForm.reset();
@@ -758,7 +772,7 @@
         recordDutyForm.dataset.workDate = state.plan.work_date;
         recordDutyForm.elements.shift_type.value = shiftType || "";
         recordDutyRemoval.hidden = !shiftType;
-        recordDutyError.hidden = true;
+        updateRecordDutyFields();
         recordDuty.hidden = false;
     }
 
@@ -766,24 +780,31 @@
         if (!employee || !prepareRecordDialog("Карточка сотрудника", employeeName(employee), employeeMeta(employee))) return;
         recordDialog.classList.add("is-employee");
         recordVisual.appendChild(createAvatar(employee, false));
-        appendRecordField("Телефон", employee.phone || "Не указан");
-        appendRecordField("Бригада", employee.brigade_label || "Не указана");
+        recordAssignment.hidden = false;
+        var date = recordAssignment.querySelector("time");
+        date.dateTime = state.plan.work_date;
+        date.textContent = state.plan.work_date_label || state.plan.work_date;
+        recordAssignment.querySelector("[data-record-posting]").textContent = assignmentLabel || "Свободен";
+        recordAssignment.querySelector("[data-record-brigade]").textContent = employee.brigade_label || "Не указана";
         var rotation = textValue(employee.rotation_label).trim();
-        if (rotation && rotation.toLocaleLowerCase("ru") !== textValue(employee.brigade_label).toLocaleLowerCase("ru")) {
-            appendRecordField("График работы", rotation);
+        if (rotation.toLocaleLowerCase("ru") === textValue(employee.brigade_label).trim().toLocaleLowerCase("ru")) rotation = "";
+        appendRecordField("График работы", rotation || "Не указан");
+        var phone = appendRecordField("Телефон", employee.phone || "Не указан");
+        if (employee.phone && /\d/.test(employee.phone)) {
+            var link = createElement("a", "", employee.phone);
+            link.href = "tel:" + employee.phone.replace(/[^\d+]/g, "");
+            phone.replaceChildren(link);
         }
-        appendRecordField("Назначение", assignmentLabel || "Свободен");
         appendRecordField("Кадровый статус", employee.status_label || "Активен");
         var presence = employeePresence(employee);
-        appendRecordField("Связь с приложением", presence.label);
+        var connection = appendRecordField("Связь с приложением", presence.label);
         if (presence.clientBadges.length) {
-            appendRecordField(
-                "Вариант приложения",
+            connection.appendChild(createElement("small", "deputy-record-clients",
                 presence.clientBadges.map(function (client) {
                     return (textValue(client.label) || "Приложение")
                         + (client.version ? " · " + textValue(client.version) : "");
                 }).join(", ")
-            );
+            ));
         }
         if (employee.can_change_off_equipment && inDeputyRoster(employee)) prepareRecordDuty(employee.id, shiftType);
         openDialog(recordDialog);
@@ -1210,12 +1231,12 @@
         bindDragSource(card, employee);
         card.addEventListener("dblclick", function (event) {
             event.preventDefault();
-            openEmployeeRecord(employee, "Свободен");
+            openEmployeeRecord(employee);
         });
         card.addEventListener("keydown", function (event) {
             if (event.key !== "Enter") return;
             event.preventDefault();
-            openEmployeeRecord(employee, "Свободен");
+            openEmployeeRecord(employee);
         });
         return card;
     }
@@ -1629,7 +1650,8 @@
                 }));
             }
             if (employee) {
-                var assignmentLabel = [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · ");
+                var equipmentLabel = [row.equipment.type_label, row.equipment.label].filter(Boolean).join(" ");
+                var assignmentLabel = [equipmentLabel, slot.label, positionLabel].filter(Boolean).join(" · ");
                 button.title = person.title = "Двойной клик — открыть карточку сотрудника";
                 person.addEventListener("click", function (event) {
                     if (event.detail === 0) {
@@ -2277,7 +2299,12 @@
     Array.prototype.slice.call(document.querySelectorAll("[data-record-close]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(recordDialog); });
     });
-    if (recordDutyForm) recordDutyForm.addEventListener("submit", submitRecordDuty);
+    if (recordDutyForm) {
+        recordDutyForm.addEventListener("change", function (event) {
+            if (event.target.name === "status") updateRecordDutyFields();
+        });
+        recordDutyForm.addEventListener("submit", submitRecordDuty);
+    }
     Array.prototype.slice.call(document.querySelectorAll("[data-publish-cancel]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(publishDialog); });
     });
