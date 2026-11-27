@@ -16,7 +16,7 @@ from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.production_time import business_localtime
+from core.production_time import business_localtime, production_work_date
 from references.models import Dormitory
 from shifts.models import WatchPeriod
 from users.models import (
@@ -56,9 +56,10 @@ from .models import (
     SettlementResident,
     SettlementRevision,
     SettlementSource,
+    SettlementWatchTemplate,
 )
 from .residents import get_or_create_employee_resident
-from .services import release_resident_from_bed
+from .services import MANUAL_CATEGORY_EXCEPTION_ACTION, release_resident_from_bed
 from .temporary_placement import (
     cancel_bed_preparation,
     clear_bed_reserve,
@@ -403,6 +404,83 @@ class TemporaryPlacementBase(TemporaryPlacementFixtures, TestCase):
             SettlementResident.ResidentType.EXTERNAL_OTHER,
             suffix,
         )
+
+
+class WatchHousingTemplateTests(TemporaryPlacementBase):
+    def setUp(self):
+        self.authenticate()
+        self.work_date = production_work_date()
+        self.url = reverse('settlement_watch_templates')
+
+    def save_template(self, period_id=None, **fields):
+        return self.client.post(self.url, {
+            'name': 'Проверенная раскладка', 'work_date': self.work_date.isoformat(),
+            'period_id': period_id, **fields,
+        }, content_type='application/json')
+
+    def test_saves_conflicts_with_factual_beds_and_preserves_previous_snapshot(self):
+        composition = WatchComposition.objects.create(code='watch-template', name='Бригада шаблона')
+        period = WatchPeriod.objects.create(
+            name='Проверяемая вахта', watch_composition=composition,
+            starts_on=self.work_date - timedelta(days=1), ends_on=self.work_date + timedelta(days=1),
+        )
+        self.worker_position.requires_equipment = True
+        self.worker_position.save(update_fields=['requires_equipment'])
+        beds = list(self.beds[0].room.beds.filter(block=self.beds[0].block).order_by('position'))
+        residents = [self.candidate_resident, self.second_candidate_resident, self.female_candidate_resident]
+        now = timezone.now()
+        for bed, resident in zip(beds, residents, strict=True):
+            occupancy = EmployeeBedOccupancy.objects.create(
+                resident=resident, physical_bed=bed, assignment_type='permanent', settled_by=self.clerk,
+                starts_at=now - timedelta(hours=1), work_shift='day', shift_source_kind='clerk_selected',
+                shift_source_fingerprint='fixture', shift_selected_at=now,
+                shift_selected_by_access=self.clerk_access, shift_selection_basis='Проверка снимка',
+            )
+        AdminActionLog.objects.create(
+            action='Ручное заселение с исключением', action_code=MANUAL_CATEGORY_EXCEPTION_ACTION,
+            object_type='EmployeeBedOccupancy', object_id=str(occupancy.pk),
+        )
+        context = self.client.get(self.url).json()
+        self.assertEqual(context['default_name'], period.name)
+        self.assertEqual(context['periods'], [{'id': period.pk, 'name': period.name}])
+        response = self.save_template(period.pk)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()['occupied_beds'], 3)
+        self.assertEqual(response.json()['marked_beds'], 3)
+        template = SettlementWatchTemplate.objects.get()
+        self.assertEqual(template.watch_period, period)
+        self.assertEqual(template.saved_by, self.clerk_access)
+        archived_beds = [
+            bed for room in template.snapshot['rooms'] for bed in room['beds'] if bed['resident']
+        ]
+        self.assertEqual([bed['bed_id'] for bed in archived_beds], [bed.stable_id for bed in beds])
+        self.assertEqual([bed['resident']['id'] for bed in archived_beds], [resident.pk for resident in residents])
+        self.assertTrue(all('3 в дневную смену' in bed['flags']['shift_conflict'] for bed in archived_beds))
+        self.assertEqual(archived_beds[0]['flags']['assignment_warning'], 'Не назначена техника')
+        self.assertIn('category_exception', archived_beds[-1]['flags'])
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 3)
+        self.assertEqual(self.save_template(period.pk).status_code, 200)
+        self.assertEqual(SettlementWatchTemplate.objects.count(), 1)
+
+        self.create_occupancy(resident=self.unknown_sex_candidate_resident, bed=self.beds[1])
+        self.assertEqual(self.save_template(period.pk).status_code, 201)
+        template.refresh_from_db()
+        self.assertEqual(template.snapshot['occupied_beds'], 3)
+        detail = self.client.get(response.json()['template']['url'])
+        self.assertContains(detail, residents[0].display_name)
+        self.assertContains(detail, '3 в дневную смену')
+        self.assertNotContains(detail, self.unknown_sex_candidate_resident.display_name)
+
+    def test_saves_without_a_calendar_period_and_rejects_stale_inputs(self):
+        self.assertEqual(self.client.get(self.url).json()['periods'], [])
+        self.assertEqual(self.save_template(work_date='2000-01-01').status_code, 409)
+        self.assertEqual(self.save_template(period_id=999999).status_code, 409)
+        self.assertEqual(self.save_template(name='  ').status_code, 400)
+        self.assertEqual(self.save_template().status_code, 201)
+        self.assertIsNone(SettlementWatchTemplate.objects.get().watch_period_id)
+        self.assertEqual(Client().get(self.url).status_code, 403)
+        self.authenticate(access=self.driver_access)
+        self.assertEqual(self.save_template().status_code, 403)
 
 
 class BedCheckinTests(TemporaryPlacementBase):

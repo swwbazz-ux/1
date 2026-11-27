@@ -12,7 +12,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
 from django.http import FileResponse, HttpResponse, HttpResponseNotAllowed, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -51,6 +51,7 @@ from .control import (
     acquire_control_lease,
     clear_control_session_credentials,
     control_session_credentials_from_session,
+    ensure_control_lease,
     heartbeat_control_lease,
     lock_settlement_write_lease,
     release_control_lease,
@@ -75,6 +76,7 @@ from .resolver import resolve_ready_arrivals
 from .cohort_readiness import build_arrival_roster_cohort_overview, build_arrival_roster_cohort_readiness
 from .current_housing_draft import CurrentHousingDraft, CurrentHousingDraftStorage
 from .current_housing_export import build_current_housing_export
+from .watch_templates import active_template_periods, save_watch_template
 from .current_housing_import import (
     MANUAL_BED_BLOCKERS,
     MAX_FILE_SIZE,
@@ -109,6 +111,7 @@ from .models import (
     SettlementPreviewCorrection,
     SettlementPreviewRun,
     SettlementResident,
+    SettlementWatchTemplate,
 )
 from .personnel_categories import (
     MISSING_CATEGORY,
@@ -1512,6 +1515,78 @@ def settlement_current_housing_export_view(request):
         as_attachment=True,
         filename=f'Текущее расселение {business_localtime(moment):%Y-%m-%d}.xlsx',
     )
+
+
+def _watch_template_link(template):
+    return {
+        'name': template.name,
+        'saved_at': business_localtime(template.saved_at).strftime('%d.%m.%Y %H:%M'),
+        'url': reverse('settlement_watch_template_detail', args=[template.pk]),
+    }
+
+
+@require_http_methods(['GET', 'POST'])
+@never_cache
+def settlement_watch_templates_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return JsonResponse({'error': 'Нет доступа к расселению.'}, status=403)
+    if request.method == 'GET':
+        work_date = production_work_date(timezone.now())
+        periods = list(active_template_periods(work_date))
+        return JsonResponse({
+            'work_date': work_date.isoformat(),
+            'default_name': periods[0].name if len(periods) == 1 else f'Вахта {work_date:%d.%m.%Y}',
+            'periods': [{'id': period.pk, 'name': period.name} for period in periods],
+            'recent': [_watch_template_link(template) for template in
+                       SettlementWatchTemplate.objects.defer('snapshot')[:8]],
+        })
+
+    try:
+        payload = json.loads(request.body)
+        if not isinstance(payload, dict) or not isinstance(payload.get('name'), str):
+            raise ValueError
+        name = forms.CharField(max_length=128).clean(payload['name'])
+        period_id = payload.get('period_id')
+        if period_id is not None and (type(period_id) is not int or period_id <= 0):
+            raise ValueError
+    except (ValueError, ValidationError):
+        return JsonResponse({'error': 'Укажите название шаблона длиной до 128 символов.'}, status=400)
+
+    with transaction.atomic():
+        # Use the same shared lock as assignments to physical beds. Saving a
+        # copy is available to clerks and admins even outside an open work session.
+        ensure_control_lease()
+        moment = timezone.now()
+        work_date = production_work_date(moment)
+        period = active_template_periods(work_date).filter(pk=period_id).first() if period_id else None
+        if payload.get('work_date') != work_date.isoformat() or (period_id and period is None):
+            return JsonResponse({'error': 'Вахта или рабочая дата изменилась. Откройте окно заново.'}, status=409)
+        rooms = list(_clerk_map_rooms(moment))
+        _attach_occupancy_view(rooms, moment)
+        template, created = save_watch_template(
+            rooms=rooms, moment=moment, name=name, watch_period=period, access=access,
+        )
+    return JsonResponse({
+        'template': _watch_template_link(template),
+        'occupied_beds': template.snapshot['occupied_beds'],
+        'marked_beds': template.snapshot['marked_beds'],
+        'created': created,
+    }, status=201 if created else 200)
+
+
+@require_GET
+@never_cache
+def settlement_watch_template_detail_view(request, template_id):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return redirect(f'{reverse("clerk_login")}?{urlencode({"next": request.path})}')
+    template = get_object_or_404(SettlementWatchTemplate.objects.select_related('watch_period'), pk=template_id)
+    return render(request, 'settlement/watch_template.html', {
+        'access': access,
+        'watch_template': template,
+        'captured_at': business_localtime(template.saved_at),
+    })
 
 
 @require_GET

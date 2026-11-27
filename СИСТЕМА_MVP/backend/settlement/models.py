@@ -3885,6 +3885,28 @@ class SettlementPreviewApplication(StableIdentifierModel):
         _raise_apply_write_forbidden()
 
 
+class SettlementWatchTemplate(models.Model):
+    """Saved factual housing map, independent of a proposed arrival plan."""
+
+    name = models.CharField('Название шаблона', max_length=128)
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='housing_templates',
+    )
+    work_date = models.DateField('Рабочая дата карты')
+    saved_at = models.DateTimeField('Сохранён', default=timezone.now)
+    saved_by = models.ForeignKey(
+        'users.EmployeeAccess', on_delete=models.PROTECT, related_name='saved_housing_templates',
+    )
+    fingerprint = models.CharField(max_length=64, unique=True)
+    snapshot = models.JSONField('Снимок фактического расселения')
+
+    class Meta:
+        verbose_name = 'Шаблон расселения вахты'
+        verbose_name_plural = 'Шаблоны расселения вахт'
+        ordering = ['-saved_at', '-pk']
+
+
 class EmployeeBedOccupancyQuerySet(models.QuerySet):
     MASS_WRITE_FORBIDDEN_CODE = 'employee_bed_occupancy_mass_write_forbidden'
     MASS_WRITE_FORBIDDEN_MESSAGE = (

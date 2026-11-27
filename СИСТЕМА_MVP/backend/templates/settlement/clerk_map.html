@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-toolbar-v2-swap-picker-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-map-header.css' %}?v={{ static_asset_release }}-map-header-v1-relocate-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-map-header.css' %}?v={{ static_asset_release }}-map-header-v1-watch-template">
 <link rel="stylesheet" href="{% static 'css/settlement-floor-heading.css' %}?v={{ static_asset_release }}-floor-heading-v1">
 {% endblock %}
 
@@ -70,6 +70,10 @@
                     <span>Скачать в Excel</span>
                 </a>
             </div>
+            <button type="button" class="settlement-template-trigger" data-watch-template-open
+                    aria-haspopup="dialog" aria-controls="settlement-watch-template-dialog">
+                Сохранить как шаблон вахты
+            </button>
             <section class="settlement-control-panel"
                      data-control-panel
                      data-control-state="free"
@@ -953,6 +957,32 @@
         </div>
     </aside>
 
+    <dialog class="settlement-swap-dialog settlement-watch-template-dialog" id="settlement-watch-template-dialog"
+            data-watch-template-dialog aria-labelledby="settlement-watch-template-title">
+        <header class="settlement-swap-heading">
+            <h2 id="settlement-watch-template-title">Сохранить как шаблон вахты</h2>
+            <button type="button" class="settlement-swap-close" data-watch-template-close aria-label="Закрыть">×</button>
+        </header>
+        <form class="settlement-watch-template-form" action="{% url 'settlement_watch_templates' %}" method="post">
+            {% csrf_token %}
+            <p>В шаблон попадут фактические койки КИС-5 и КИС-6 и отметки на карте.</p>
+            <label data-watch-template-period hidden>
+                Вахта по календарю
+                <select name="period_id"></select>
+            </label>
+            <label>
+                Название шаблона
+                <input name="name" maxlength="128" required autocomplete="off" autofocus>
+            </label>
+            <button type="submit" class="settlement-place-button" disabled>Сохранить шаблон</button>
+        </form>
+        <p role="status" data-watch-template-result></p>
+        <section data-watch-template-history aria-label="Последние шаблоны" hidden>
+            <h3>Последние шаблоны</h3>
+            <ul></ul>
+        </section>
+    </dialog>
+
     <dialog class="settlement-swap-dialog" data-swap-dialog aria-labelledby="settlement-swap-title">
         <header class="settlement-swap-heading">
             <h2 id="settlement-swap-title">Поменять жильцов местами?</h2>
@@ -1024,7 +1054,7 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v6-room-preview"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-current-assignment-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-watch-template-v1"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>

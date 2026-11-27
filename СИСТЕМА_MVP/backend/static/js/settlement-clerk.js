@@ -100,6 +100,7 @@
     var autoShiftButtons = Array.from(root.querySelectorAll("[data-auto-apply-shift]"));
     var mapModeButtons = Array.from(root.querySelectorAll("[data-map-mode]"));
     var mapModePanels = Array.from(root.querySelectorAll("[data-map-mode-panel]"));
+    var watchTemplateButton = root.querySelector("[data-watch-template-open]");
     var planMap = root.querySelector("[data-plan-map]");
     var planStatus = root.querySelector("[data-plan-status]");
     var planLists = root.querySelector("[data-plan-lists]");
@@ -1512,6 +1513,7 @@
     function setMapMode(mode) {
         activeMapMode = mode === "next" ? "next" : "current";
         if (watchExtensionDetails) watchExtensionDetails.hidden = activeMapMode === "next";
+        if (watchTemplateButton) watchTemplateButton.hidden = activeMapMode === "next";
         mapModeButtons.forEach(function (button) {
             var active = button.dataset.mapMode === activeMapMode;
             button.classList.toggle("is-active", active);
@@ -1527,6 +1529,86 @@
             cancelBedSwap();
             loadAutoState(autoCohort && autoCohort.value, 0);
         }
+    }
+
+    if (watchTemplateButton) {
+        const dialog = root.querySelector("[data-watch-template-dialog]");
+        const form = dialog.querySelector("form");
+        const name = form.elements.namedItem("name");
+        const period = form.elements.namedItem("period_id");
+        const save = form.querySelector("button[type='submit']");
+        const close = dialog.querySelector("[data-watch-template-close]");
+        const result = dialog.querySelector("[data-watch-template-result]");
+        const history = dialog.querySelector("[data-watch-template-history]");
+        const list = history.querySelector("ul");
+        let workDate;
+        let loading = 0;
+
+        function templateLink(template) {
+            const link = element("a", "", template.name + " · " + template.saved_at);
+            link.href = template.url;
+            return link;
+        }
+
+        watchTemplateButton.addEventListener("click", async function () {
+            const request = ++loading;
+            save.disabled = true;
+            history.hidden = true;
+            period.parentElement.hidden = true;
+            name.value = "";
+            result.textContent = "Загружаем…";
+            dialog.showModal();
+            try {
+                const response = await fetch(form.action, {cache: "no-store"});
+                if (!response.ok) throw new Error("Не удалось загрузить шаблоны. Откройте окно заново.");
+                const data = await response.json();
+                if (request !== loading || !dialog.open) return;
+                workDate = data.work_date;
+                name.value = data.default_name;
+                period.replaceChildren(new Option("Без привязки к календарю", ""));
+                data.periods.forEach(item => period.add(new Option(item.name, item.id)));
+                if (data.periods.length === 1) period.selectedIndex = 1;
+                period.parentElement.hidden = data.periods.length === 0;
+                list.replaceChildren(...data.recent.map(function (item) {
+                    const row = element("li", "");
+                    row.append(templateLink(item));
+                    return row;
+                }));
+                history.hidden = data.recent.length === 0;
+                result.textContent = "";
+                save.disabled = false;
+            } catch (error) {
+                if (request === loading) result.textContent = error.message;
+            }
+        });
+        close.addEventListener("click", () => dialog.close());
+        dialog.addEventListener("cancel", event => { if (close.disabled) event.preventDefault(); });
+        form.addEventListener("submit", async function (event) {
+            event.preventDefault();
+            if (save.disabled) return;
+            save.disabled = close.disabled = true;
+            result.textContent = "Сохраняем шаблон…";
+            try {
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json", "X-CSRFToken": csrfToken()},
+                    body: JSON.stringify({
+                        name: name.value, period_id: period.value ? Number(period.value) : null, work_date: workDate
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || "Не удалось сохранить шаблон.");
+                result.textContent = (data.created ? "Шаблон сохранён. " : "Шаблон уже сохранён. ") +
+                    "Занятых коек " + data.occupied_beds + " · с отметками " + data.marked_beds + ". ";
+                const link = templateLink(data.template);
+                link.textContent = "Открыть шаблон";
+                result.append(link);
+            } catch (error) {
+                result.textContent = error.message || "Не удалось сохранить шаблон.";
+            } finally {
+                save.disabled = close.disabled = false;
+            }
+        });
     }
 
     function planResidentCard(row) {

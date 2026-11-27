@@ -114,6 +114,7 @@
 .settlement-map-entry .settlement-map-modes { box-shadow: none; }
 .settlement-map-entry .settlement-map-modes button,
 .settlement-map-entry .settlement-map-entry__excel a,
+.settlement-map-entry .settlement-template-trigger,
 .settlement-map-entry .settlement-control-actions button,
 .settlement-map-entry .settlement-clerk-shift-actions button {
     min-height: var(--bar-control-size);
@@ -128,6 +129,34 @@
 }
 
 .settlement-map-entry__excel svg { width: 20px; height: 20px; }
+
+.settlement-template-trigger {
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    cursor: pointer;
+}
+
+.settlement-watch-template-form {
+    display: grid;
+    gap: 10px;
+}
+
+.settlement-watch-template-form p { margin: 0; }
+.settlement-watch-template-form label { display: grid; gap: 5px; font-weight: 600; }
+.settlement-watch-template-form input,
+.settlement-watch-template-form select {
+    min-width: 0;
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+}
+.settlement-watch-template-dialog [data-watch-template-result]:empty { display: none; }
+.settlement-watch-template-dialog ul { padding-inline-start: 1.3em; }
 
 .settlement-map-entry .settlement-control-panel {
     display: flex;
