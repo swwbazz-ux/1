@@ -245,7 +245,7 @@
                 option.hidden = Boolean(position.value) && !isAllowed && !preserveSelection;
                 option.disabled = option.hidden;
                 if (option.selected && isAllowed) selectedAllowed = true;
-                if (isAllowed && option.value === String(config.default)) defaultOption = option;
+                if (isAllowed && allowed.length === 1) defaultOption = option;
             });
 
             if ((!position.value || !hasOptions) && (applyDefault || !specialization.value)) {

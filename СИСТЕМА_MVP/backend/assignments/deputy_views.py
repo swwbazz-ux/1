@@ -725,7 +725,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 status=Employee.Status.ACTIVE,
             )
             .exclude(id__in=eligible_employee_ids)
-            .select_related('personnel_position', 'work_schedule', 'contractor_organization')
+            .select_related('personnel_position', 'work_schedule', 'contractor_organization', 'base_specialization')
             .order_by('full_name')
         )
         transfer_candidates = [
@@ -972,6 +972,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
         })
 
 
+    factual_specializations = effective_specializations_by_employee_id(factual_candidates)
     return {
         'plan': {
             'id': plan.id,
@@ -1029,6 +1030,10 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 'full_name': employee.full_name,
                 'brigade_code': _employee_brigade_code(employee),
                 'position_label': employee.personnel_position.name if employee.personnel_position_id else employee.position,
+                'specialization_issue': (
+                    'Специализация отличается' if factual_specializations[employee.pk]
+                    else 'Специализация не указана'
+                ),
                 'extension_until': extensions[employee.pk].extension_end.strftime('%d.%m.%Y') if employee.pk in extensions else '',
                 'extension_expires_at': (
                     production_day_bounds(extensions[employee.pk].extension_end)[1].isoformat()

@@ -4,17 +4,20 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from core.models import bump_operational_state
-from users.models import Employee, PersonnelDepartment, WatchComposition, WorkSchedule
+from users.models import Employee, PersonnelDepartment, PersonnelPosition, ProductionSpecialization, WatchComposition, WorkSchedule
 from users.oup_services import (
     employee_audit_snapshot,
     employee_work_category_blockers,
     format_employee_changes,
+    lock_current_crew_drafts,
     log_oup_action,
 )
+from users.work_profiles import legacy_work_category_for_specialization, resolve_base_specialization
 from users.oup_undo import (
     OUP_ACTION_BULK_EMPLOYEE_CREATED,
     OUP_ACTION_BULK_EMPLOYEE_UPDATED,
@@ -47,6 +50,8 @@ EXISTING_EMPLOYEE_UPDATE_FIELDS = (
     'full_name',
     'personnel_number',
     'position',
+    'personnel_position',
+    'base_specialization',
     'department',
     'personnel_department',
     'work_category',
@@ -99,7 +104,10 @@ def build_legacy_rotation(work_schedule, brigade_number):
 
 
 class Command(BaseCommand):
-    help = 'Безопасно импортирует кадровые карточки ОУП из нормализованного CSV; без --commit работает как dry-run.'
+    help = (
+        'Импортирует кадровые карточки ОУП из CSV. base_specialization — необязательная колонка '
+        'с кодом или названием специализации. Без --commit проверяет строки.'
+    )
 
     def add_arguments(self, parser):
         parser.add_argument('csv_path')
@@ -121,6 +129,12 @@ class Command(BaseCommand):
         self.departments_by_name = catalogue_index(PersonnelDepartment.objects.all())
         self.schedules_by_name = catalogue_index(WorkSchedule.objects.all())
         self.watch_compositions_by_name = catalogue_index(WatchComposition.objects.all())
+        self.positions_by_name = catalogue_index(
+            PersonnelPosition.objects.prefetch_related('allowed_specializations'),
+        )
+        specializations = list(ProductionSpecialization.objects.select_related('access_role'))
+        self.specializations_by_name = catalogue_index(specializations)
+        self.specializations_by_code = {specialization.code: specialization for specialization in specializations}
 
         prepared = []
         skipped = []
@@ -141,10 +155,12 @@ class Command(BaseCommand):
             'unchanged': 0,
             'skipped': len(skipped),
             'category_preserved': 0,
+            'work_profile_preserved_rows': [],
             'skip_reasons': {},
         }
 
         with transaction.atomic():
+            lock_current_crew_drafts()
             changed_employee_ids = []
             for item in prepared:
                 outcome, employee_id, reason = self._import_item(
@@ -161,6 +177,7 @@ class Command(BaseCommand):
                         changed_employee_ids.append(employee_id)
                 if reason == 'category_preserved':
                     summary['category_preserved'] += 1
+                    summary['work_profile_preserved_rows'].append(item['row_number'])
 
             if options['commit'] and changed_employee_ids:
                 bump_operational_state(
@@ -178,6 +195,7 @@ class Command(BaseCommand):
         for item in skipped:
             reason = item['reason']
             summary['skip_reasons'][reason] = summary['skip_reasons'].get(reason, 0) + 1
+        summary['skipped_rows'] = sorted(skipped, key=lambda item: item['row'])
 
         self.stdout.write(json.dumps(summary, ensure_ascii=False, sort_keys=True))
 
@@ -247,6 +265,7 @@ class Command(BaseCommand):
             'full_name': ' '.join(values['full_name'].split()),
             'personnel_number': values['personnel_number'],
             'position': values['position'],
+            'requested_specialization': (row.get('base_specialization') or '').strip(),
             'department': values['department'],
             'personnel_department': personnel_department,
             'work_category': values['work_category'],
@@ -304,6 +323,29 @@ class Command(BaseCommand):
             return 'сформированное значение графика длиннее допустимого'
         return ''
 
+    def _resolve_work_profile(self, item, employee):
+        position = self.positions_by_name.get(normalized_catalogue_name(item['position']))
+        requested = normalized_catalogue_name(item['requested_specialization'])
+        if position and not position.is_active:
+            raise ValidationError('Кадровая должность отключена в справочнике.')
+        if not position:
+            if requested or item['work_category'] != Employee.WorkCategory.OTHER or (employee and employee.personnel_position_id):
+                raise ValidationError('Сопоставьте должность с действующей записью справочника должностей.')
+            item.update(personnel_position=None, base_specialization=None)
+            return
+        selected = self.specializations_by_code.get(requested) or self.specializations_by_name.get(requested)
+        if requested and not selected:
+            raise ValidationError('Специализация из файла отсутствует в справочнике.')
+        specialization = resolve_base_specialization(
+            personnel_position=position, selected=selected,
+            previous=employee.base_specialization if employee else None,
+        )
+        category = legacy_work_category_for_specialization(specialization)
+        if item['work_category'] not in {Employee.WorkCategory.OTHER, category}:
+            raise ValidationError('Рабочая категория в файле не соответствует специализации.')
+        item.update(position=position.name, personnel_position=position, base_specialization=specialization,
+                    work_category=category)
+
     def _import_item(self, item, *, commit, source_label):
         employee, conflict = self._find_employee(item)
         if conflict:
@@ -318,6 +360,11 @@ class Command(BaseCommand):
         # пропускаем её молча, а не роняем на ней весь импорт.
         if employee and employee.is_protected:
             return 'skipped', None, 'карточка защищена от изменений'
+
+        try:
+            self._resolve_work_profile(item, employee)
+        except ValidationError as error:
+            return 'skipped', None, error.messages[0]
 
         if employee is None:
             profile_error = self._new_profile_error(item)
@@ -363,21 +410,28 @@ class Command(BaseCommand):
             )
 
         before = employee_audit_snapshot(employee)
-        category_preserved = False
+        work_profile_changed = (
+            employee.personnel_position != item['personnel_position']
+            or employee.base_specialization != item['base_specialization']
+            or employee.work_category != item['work_category']
+        )
+        category_preserved = work_profile_changed and bool(employee_work_category_blockers(employee))
+        preserved_fields = {'position', 'personnel_position', 'base_specialization', 'work_category'} if category_preserved else set()
+        changed_fields = []
         for field_name in EXISTING_EMPLOYEE_UPDATE_FIELDS:
+            if field_name in preserved_fields:
+                continue
             value = item[field_name]
-            if field_name == 'work_category' and employee.work_category != value:
-                if employee_work_category_blockers(employee):
-                    category_preserved = True
-                    continue
-            setattr(employee, field_name, value)
+            if getattr(employee, field_name) != value:
+                setattr(employee, field_name, value)
+                changed_fields.append(field_name)
         after = employee_audit_snapshot(employee)
         changes = format_employee_changes(before, after)
-        if changes == 'Данные без изменений':
+        if not changed_fields:
             return 'unchanged', None, 'category_preserved' if category_preserved else ''
         if not commit:
             return 'updated', None, 'category_preserved' if category_preserved else ''
-        employee.save(update_fields=[*EXISTING_EMPLOYEE_UPDATE_FIELDS, 'updated_at'])
+        employee.save(update_fields=[*changed_fields, 'updated_at'])
         log_oup_action(
             None,
             'обновлена карточка массовым импортом',

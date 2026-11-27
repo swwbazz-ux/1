@@ -34,7 +34,7 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
-from .work_profiles import legacy_work_category_for_specialization, validate_base_specialization
+from .work_profiles import legacy_work_category_for_specialization, resolve_base_specialization
 
 
 DRIVER_SHIFT_READING_NAMES = (
@@ -364,8 +364,7 @@ class EmployeeCardForm(forms.ModelForm):
         self._position_catalog = {}
         for position in self.fields['personnel_position'].queryset:
             self._position_catalog[str(position.id)] = {
-                'allowed': list(position.allowed_specializations.values_list('id', flat=True)),
-                'default': position.default_specialization_id,
+                'allowed': [spec.pk for spec in position.allowed_specializations.all() if spec.is_active],
                 'required': position.requires_specialization,
                 'settlement_category_label': position.settlement_category_label,
             }
@@ -525,18 +524,16 @@ class EmployeeCardForm(forms.ModelForm):
             and 'personnel_position' not in self.errors
         ):
             self.add_error('personnel_position', 'Выберите кадровую должность.')
-        if personnel_position and not specialization and personnel_position.default_specialization_id:
-            specialization = personnel_position.default_specialization
-            cleaned_data['base_specialization'] = specialization
         if personnel_position:
             try:
-                validate_base_specialization(
+                specialization = resolve_base_specialization(
                     personnel_position=personnel_position,
-                    specialization=specialization,
+                    selected=specialization,
                 )
             except ValidationError as error:
                 self.add_error('base_specialization', error)
             else:
+                cleaned_data['base_specialization'] = specialization
                 cleaned_data['position'] = personnel_position.name
                 cleaned_data['work_category'] = legacy_work_category_for_specialization(specialization)
 

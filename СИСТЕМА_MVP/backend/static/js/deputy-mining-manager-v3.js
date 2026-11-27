@@ -1307,19 +1307,26 @@
         var query = normalizeSearch(candidateSearchInput && candidateSearchInput.value);
         var showFactual = currentSlot.position === "primary" && factualCandidates && factualCandidates.checked;
         var candidatesForPosition = showFactual ? state.factual_candidates : candidateEmployees;
-        var visibleEmployees = candidatesForPosition.filter(function (employee) {
+        function visibleInPicker(employee) {
             if (employee.source_equipment_id) {
                 return currentBrigade === "all" || currentBrigade === "watch" || employee.brigade_code === currentBrigade;
             }
             return inDeputyRoster(employee) && employeeMatchesBrigade(employee);
-        });
+        }
+        var visibleEmployees = candidatesForPosition.filter(visibleInPicker);
         var candidates = rankedEmployeeMatches(visibleEmployees, query).map(function (match) {
             return match.employee;
         });
+        if (query && !showFactual && currentSlot.position === "primary") {
+            var otherSpecializations = state.factual_candidates.filter(visibleInPicker);
+            candidates = candidates.concat(rankedEmployeeMatches(otherSpecializations, query).map(function (match) {
+                return Object.assign({}, match.employee, {disabled: true});
+            }));
+        }
         candidateList.replaceChildren();
         if (candidateCount) {
             candidateCount.textContent = query
-                ? "Найдено: " + candidates.length + " из " + visibleEmployees.length
+                ? "Найдено: " + candidates.length
                 : "Кандидатов: " + visibleEmployees.length;
         }
         if (candidateSearchClear) candidateSearchClear.hidden = !query;
@@ -1332,6 +1339,9 @@
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
             appendExtensionBadge(main, activeRosterExtensionUntil(employee));
+            if (employee.specialization_issue) {
+                main.appendChild(createElement("small", "", employee.specialization_issue));
+            }
             button.appendChild(main);
             if (showFactual) {
                 main.appendChild(createElement("small", "", "Фактический состав с предупреждением"));
@@ -1339,6 +1349,7 @@
                 button.appendChild(createPresenceBadge(employee));
             }
             button.addEventListener("click", function () {
+                if (button.disabled || !currentSlot) return;
                 var source = sourceForEmployee(employee);
                 var target = currentSlot;
                 closeDialog(candidateDialog, { preserveEquipmentActive: true });

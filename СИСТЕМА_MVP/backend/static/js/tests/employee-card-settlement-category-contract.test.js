@@ -48,10 +48,10 @@ test("карточка сотрудника показывает категор�
 test("версия скрипта карточки поднята", () => {
     assert.match(
         CARD_TEMPLATE,
-        /js\/employee-card-unified\.js[\s\S]{0,40}20261127-saved-specialization/
+        /js\/employee-card-unified\.js[\s\S]{0,40}20261127-specialization-rules/
     );
     assert.equal(
-        CARD_TEMPLATE.split("20261127-saved-specialization").length - 1,
+        CARD_TEMPLATE.split("20261127-specialization-rules").length - 1,
         1
     );
 });

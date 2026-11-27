@@ -336,6 +336,24 @@ def validate_base_specialization(*, personnel_position, specialization):
         raise ValidationError('Эта специализация не разрешена для выбранной кадровой должности.')
 
 
+def resolve_base_specialization(*, personnel_position, selected=None, previous=None):
+    """Use an explicit choice, a compatible saved value, or the only active option."""
+    if selected:
+        validate_base_specialization(personnel_position=personnel_position, specialization=selected)
+        return selected
+    allowed = list(personnel_position.allowed_specializations.all())
+    active = [specialization for specialization in allowed if specialization.is_active]
+    if previous in active:
+        return previous
+    if len(active) == 1:
+        return active[0]
+    if len(active) > 1:
+        raise ValidationError('Выберите производственную специализацию для этой должности.')
+    if allowed or personnel_position.default_specialization_id or personnel_position.requires_specialization:
+        raise ValidationError('У должности нет действующей производственной специализации. Проверьте справочник должностей.')
+    return None
+
+
 @transaction.atomic
 def request_temporary_work_transfer(*, employee, target_specialization, watch_period, requested_by, reason=''):
     today = timezone.localdate()
