@@ -1,11 +1,7 @@
-СИСТЕМА_MVP/backend/assignments/deputy_views.py
-СИСТЕМА_MVP/backend/static/js/deputy-mining-manager-v3.js
-СИСТЕМА_MVP/backend/static/js/employee-card-unified.js
-СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_placement.html
-СИСТЕМА_MVP/backend/templates/users/employee_card.html
-СИСТЕМА_MVP/backend/trips/dispatcher_dashboard_projection.py
+СИСТЕМА_MVP/backend/static/js/dispatcher-board-layout-v1.js
+СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html
+СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_board.html
+СИСТЕМА_MVP/backend/trips/dispatcher_pwa.py
+СИСТЕМА_MVP/backend/trips/dispatcher_read_model.py
 СИСТЕМА_MVP/backend/trips/views.py
-СИСТЕМА_MVP/backend/users/forms.py
-СИСТЕМА_MVP/backend/users/management/commands/import_oup_employees.py
-СИСТЕМА_MVP/backend/users/management/commands/reconcile_employee_specializations.py
-СИСТЕМА_MVP/backend/users/work_profiles.py
+СИСТЕМА_MVP/backend/users/role_apps.py
