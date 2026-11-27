@@ -503,6 +503,7 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None, exten
         'photo_url': photo_url,
         'initials': initials,
         'status_label': employee.get_status_display(),
+        'can_change_off_equipment': employee.is_active and employee.status == Employee.Status.ACTIVE and not employee.is_protected,
         'employment_type': employee.employment_type,
         'employment_label': employee.get_employment_type_display(),
         'contractor_label': contractor_label,
@@ -919,6 +920,10 @@ def build_crew_plan_payload(plan, *, deputy=None):
                     'issue': review_issue,
                     'warning': review_issue == 'Не соответствует производственной специализации',
                     'can_assign': editable and not review_issue,
+                    'can_change_off_equipment': (
+                        editable and reported_employee.is_active and reported_employee.status == Employee.Status.ACTIVE
+                        and not reported_employee.is_protected and _in_deputy_roster(reported_employee, brigades, extensions)
+                    ),
                     'specialization_choices': choices_by_employee.get(reported_employee.pk, [])
                     if review_issue == 'Не соответствует производственной специализации' else [],
                 }
@@ -1021,6 +1026,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
         'endpoints': {
             'slot': reverse('deputy_mining_manager_slot'),
             'publish': reverse('deputy_mining_manager_publish'),
+            'off_equipment_transfer': reverse('deputy_off_equipment_transfer'),
             'export': reverse('deputy_mining_manager_export', args=[plan.id]),
             'temporary_transfer_request': reverse('deputy_mining_manager_temporary_transfer_request'),
         },

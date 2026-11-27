@@ -114,6 +114,10 @@
     var recordVisual = document.querySelector("[data-record-visual]");
     var recordFields = document.querySelector("[data-record-fields]");
     var recordActions = document.querySelector("[data-record-actions]");
+    var recordDuty = document.querySelector("[data-record-duty]");
+    var recordDutyForm = document.querySelector("[data-record-duty-form]");
+    var recordDutyRemoval = document.querySelector("[data-record-duty-removal]");
+    var recordDutyError = document.querySelector("[data-record-duty-error]");
     var publishDialog = document.querySelector("[data-publish-dialog]");
     var publishSummary = document.querySelector("[data-publish-summary]");
     var publishConfirm = document.querySelector("[data-publish-confirm]");
@@ -729,7 +733,11 @@
         if (!recordDialog || !recordFields || !recordVisual) return false;
         closeDialog(candidateDialog);
         closeDialog(photoDialog);
-        recordDialog.classList.remove("is-specialization");
+        recordDialog.classList.remove("is-specialization", "is-employee");
+        if (recordDuty) {
+            recordDuty.hidden = true;
+            recordDuty.open = false;
+        }
         recordVisual.replaceChildren();
         recordFields.replaceChildren();
         if (recordActions) {
@@ -741,8 +749,22 @@
         return true;
     }
 
-    function openEmployeeRecord(employee, assignmentLabel) {
+    function prepareRecordDuty(employeeId, shiftType) {
+        if (!recordDutyForm || !employeeId || !planEditable() || !state.endpoints.off_equipment_transfer) return;
+        recordDutyForm.reset();
+        recordDutyForm.dataset.employeeId = employeeId;
+        recordDutyForm.dataset.planId = state.plan.id;
+        recordDutyForm.dataset.planVersion = state.plan.version;
+        recordDutyForm.dataset.workDate = state.plan.work_date;
+        recordDutyForm.elements.shift_type.value = shiftType || "";
+        recordDutyRemoval.hidden = !shiftType;
+        recordDutyError.hidden = true;
+        recordDuty.hidden = false;
+    }
+
+    function openEmployeeRecord(employee, assignmentLabel, shiftType) {
         if (!employee || !prepareRecordDialog("Карточка сотрудника", employeeName(employee), employeeMeta(employee))) return;
+        recordDialog.classList.add("is-employee");
         recordVisual.appendChild(createAvatar(employee, false));
         appendRecordField("Телефон", employee.phone || "Не указан");
         appendRecordField("Бригада", employee.brigade_label || "Не указана");
@@ -751,7 +773,7 @@
             appendRecordField("График работы", rotation);
         }
         appendRecordField("Назначение", assignmentLabel || "Свободен");
-        appendRecordField("Статус", employee.status_label || "Активен");
+        appendRecordField("Кадровый статус", employee.status_label || "Активен");
         var presence = employeePresence(employee);
         appendRecordField("Связь с приложением", presence.label);
         if (presence.clientBadges.length) {
@@ -763,6 +785,7 @@
                 }).join(", ")
             );
         }
+        if (employee.can_change_off_equipment && inDeputyRoster(employee)) prepareRecordDuty(employee.id, shiftType);
         openDialog(recordDialog);
     }
 
@@ -866,6 +889,7 @@
                 openCandidatePicker(row, slot, "primary");
             });
         }
+        if (review.can_change_off_equipment) prepareRecordDuty(review.employee_id, slot.shift_type);
         openDialog(recordDialog);
     }
 
@@ -1605,20 +1629,21 @@
                 }));
             }
             if (employee) {
+                var assignmentLabel = [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · ");
                 button.title = person.title = "Двойной клик — открыть карточку сотрудника";
                 person.addEventListener("click", function (event) {
                     if (event.detail === 0) {
-                        openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
+                        openEmployeeRecord(employee, assignmentLabel, slot.shift_type);
                     }
                 });
                 person.addEventListener("dblclick", function (event) {
                     event.preventDefault();
                     event.stopPropagation();
-                    openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
+                    openEmployeeRecord(employee, assignmentLabel, slot.shift_type);
                 });
                 button.addEventListener("dblclick", function (event) {
                     event.preventDefault();
-                    openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
+                    openEmployeeRecord(employee, assignmentLabel, slot.shift_type);
                 });
             }
             if (planEditable()) {
@@ -1920,6 +1945,42 @@
         }
     }
 
+    async function submitRecordDuty(event) {
+        event.preventDefault();
+        if (saving || !planEditable() || recordDuty.hidden) return;
+        var fields = new FormData(recordDutyForm);
+        var selection = recordDutyForm.dataset;
+        var submit = recordDutyForm.querySelector("button[type=submit]");
+        saving = true;
+        submit.disabled = true;
+        recordDutyError.hidden = true;
+        updateAutosave("saving", "Публикую статус…");
+        updatePublishButton();
+        try {
+            var payload = await postJson(state.endpoints.off_equipment_transfer, {
+                plan_id: Number(selection.planId),
+                expected_plan_version: Number(selection.planVersion),
+                work_date: selection.workDate,
+                employee_id: Number(selection.employeeId),
+                status: fields.get("status"),
+                shift_type: fields.get("shift_type"),
+                location: fields.get("location")
+            });
+            closeDialog(recordDialog);
+            applyPayload(payload, true);
+            updateAutosave("saved", "Статус опубликован");
+            showToast("Сотрудник переведён во вкладку «Без техники».", false);
+        } catch (error) {
+            recordDutyError.textContent = error.message;
+            recordDutyError.hidden = false;
+            updateAutosave("error", "Статус не опубликован");
+        } finally {
+            saving = false;
+            submit.disabled = false;
+            updatePublishButton();
+        }
+    }
+
     function openPublishConfirmation() {
         if (
             !publishDialog
@@ -2216,6 +2277,7 @@
     Array.prototype.slice.call(document.querySelectorAll("[data-record-close]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(recordDialog); });
     });
+    if (recordDutyForm) recordDutyForm.addEventListener("submit", submitRecordDuty);
     Array.prototype.slice.call(document.querySelectorAll("[data-publish-cancel]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(publishDialog); });
     });

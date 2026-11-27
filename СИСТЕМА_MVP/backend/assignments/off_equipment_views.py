@@ -1,19 +1,25 @@
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 
 from rotations.services import approved_watch_extensions_on
 from settlement.models import EmployeeBedOccupancy
 from settlement.services import effective_occupancy_at_q, unsettled_current_roster_employees
-from users.models import Employee
+from users.models import Employee, EmployeeAccess
+from users.work_profiles import PRODUCTION_APP_ROLE_CODES
 
-from .deputy_views import _crew_category_navigation, _deputy_brigades, _in_deputy_roster, deputy_access_from_request
+from .crew_off_equipment_transfer import transfer_off_equipment
+from .deputy_views import (
+    _crew_category_navigation, _deputy_brigades, _in_deputy_roster, _json_payload, _validation_response,
+    build_crew_plan_payload, deputy_access_from_request,
+)
 from .models import OffEquipmentStatus, WorkShiftType
 from .off_equipment import booked_on_equipment_ids, off_equipment_on, publish_off_equipment
 from .services import production_work_date
@@ -39,15 +45,69 @@ class OffEquipmentForm(forms.Form):
         return data
 
 
-def _workers(work_date, entry_ids):
+class OffEquipmentTransferForm(OffEquipmentForm):
+    plan_id = forms.IntegerField(min_value=1)
+    expected_plan_version = forms.IntegerField(min_value=1)
+    status = forms.ChoiceField(choices=[
+        (key, label) for key, label in OffEquipmentStatus.choices if key != OffEquipmentStatus.CLEARED
+    ])
+
+
+def _workers(work_date, entry_ids, *, assigned_employee_id=None):
+    legacy_production_access = EmployeeAccess.objects.filter(
+        employee_id=OuterRef('pk'), role__code__in=PRODUCTION_APP_ROLE_CODES,
+        role__is_active=True, is_active=True, status=EmployeeAccess.Status.ACTIVATED,
+    )
     return Employee.objects.filter(
         Employee.work_eligibility_q(work_date), is_active=True, status=Employee.Status.ACTIVE,
     ).filter(
         Q(personnel_position__requires_equipment=True)
         | Q(base_specialization__equipment_type__isnull=False)
         | Q(work_category__in=[Employee.WorkCategory.DRIVER, Employee.WorkCategory.EXCAVATOR_OPERATOR])
-        | Q(pk__in=entry_ids),
+        | (Q(personnel_position__isnull=True) & Exists(legacy_production_access))
+        | Q(pk__in=entry_ids)
+        | Q(pk=assigned_employee_id),
     )
+
+
+def _validate_worker(employee, workers, brigades, extensions):
+    if (
+        employee.is_protected or not workers.filter(pk=employee.pk).exists()
+        or not _in_deputy_roster(employee, brigades, extensions)
+    ):
+        raise ValidationError('Сотрудник недоступен для изменения в вашей вахте.')
+
+
+@never_cache
+@require_POST
+def deputy_off_equipment_transfer_view(request):
+    access = deputy_access_from_request(request)
+    if not access:
+        return JsonResponse({'ok': False, 'error': 'Недостаточно прав.'}, status=403)
+    try:
+        payload = _json_payload(request)
+        if not isinstance(payload, dict):
+            raise ValidationError('Переданы некорректные данные.')
+        form = OffEquipmentTransferForm(payload)
+        if not form.is_valid():
+            raise ValidationError(next(iter(form.errors.values()))[0])
+        data = form.cleaned_data
+        data.pop('expected_version')
+        date = data['work_date']
+        employee_id = data['employee_id']
+        brigades = _deputy_brigades(access.employee)
+        extensions = approved_watch_extensions_on(date, employee_ids=[employee_id])
+        entries = off_equipment_on(date, employee_ids=[employee_id]).values('employee_id')
+        def validate_worker(employee, belongs_to_crew):
+            # Older cards can still be present in the actual crew through a
+            # legacy assignment even before their кадровая должность is filled.
+            workers = _workers(date, entries, assigned_employee_id=employee.pk if belongs_to_crew else None)
+            _validate_worker(employee, workers, brigades, extensions)
+
+        plan = transfer_off_equipment(**data, actor_access=access, validate_employee=validate_worker)
+    except ValidationError as error:
+        return _validation_response(error)
+    return JsonResponse({'ok': True, 'payload': build_crew_plan_payload(plan, deputy=access.employee)})
 
 
 @never_cache
@@ -73,11 +133,7 @@ def deputy_off_equipment_view(request):
     if request.method == 'POST':
         if form.is_valid() and form.cleaned_data['work_date'] == work_date:
             def validate_worker(employee):
-                if (
-                    employee.is_protected or not workers.filter(pk=employee.pk).exists()
-                    or not _in_deputy_roster(employee, brigades, extensions)
-                ):
-                    raise ValidationError('Сотрудник недоступен для изменения в вашей вахте.')
+                _validate_worker(employee, workers, brigades, extensions)
 
             try:
                 publish_off_equipment(

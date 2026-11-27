@@ -53,6 +53,71 @@ from .services import (
 
 
 class DeputyPlanningViewTests(TestCase):
+    def test_employee_card_transfer_publishes_only_the_removal_and_preserves_other_draft_edits(self):
+        original = self.create_draft()
+        self.publish(original)
+        other = Employee.objects.create(
+            full_name='Резервов Проверочный Водитель', status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        draft = self.create_draft()
+        edited = self.client.post(reverse('deputy_mining_manager_slot'), {
+            'plan_id': draft.pk, 'expected_version': draft.version, 'equipment_id': self.truck_2.pk,
+            'shift_type': WorkShiftType.SHIFT_2, 'employee_id': other.pk,
+        }, content_type='application/json')
+        self.assertEqual(edited.status_code, 200, edited.content)
+        draft.refresh_from_db()
+        response = self.client.post(reverse('deputy_off_equipment_transfer'), {
+            'plan_id': draft.pk, 'expected_plan_version': draft.version, 'work_date': draft.work_date.isoformat(),
+            'employee_id': self.driver.pk, 'status': OffEquipmentStatus.SUSPENDED,
+            'shift_type': WorkShiftType.SHIFT_1, 'location': 'Площадка сборки',
+        }, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        original.refresh_from_db()
+        self.assertEqual(original.status, CrewPlanStatus.SUPERSEDED)
+        self.assertTrue(original.slots.filter(employee=self.driver).exists())
+        live = CrewPlan.objects.get(role=self.driver_role, work_date=draft.work_date, status=CrewPlanStatus.PUBLISHED)
+        self.assertFalse(live.slots.filter(employee_id__in=[self.driver.pk, other.pk]).exists())
+        next_draft = CrewPlan.objects.get(pk=response.json()['payload']['plan']['id'])
+        self.assertTrue(next_draft.slots.filter(equipment=self.truck_2, employee=other, baseline_employee=None).exists())
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=self.driver, ended_at__isnull=True).exists())
+        duty = CrewOffEquipment.objects.get(employee=self.driver, work_date=draft.work_date)
+        self.assertEqual((duty.status, duty.location), (OffEquipmentStatus.SUSPENDED, 'Площадка сборки'))
+        self.assertContains(self.client.get(reverse('deputy_off_equipment')), self.driver.full_name)
+
+    def test_employee_card_transfer_checks_draft_version_and_open_shift(self):
+        plan = self.create_draft()
+        body = {
+            'plan_id': plan.pk, 'expected_plan_version': plan.version, 'work_date': plan.work_date.isoformat(),
+            'employee_id': self.driver.pk, 'status': OffEquipmentStatus.RESERVE, 'shift_type': WorkShiftType.SHIFT_1,
+        }
+        url = reverse('deputy_off_equipment_transfer')
+        stale = self.client.post(url, {**body, 'expected_plan_version': plan.version + 1}, content_type='application/json')
+        self.assertEqual(stale.status_code, 409, stale.content)
+        EmployeeShift.objects.create(
+            employee=self.driver, equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_1,
+            opened_at=timezone.now(), opened_by=self.driver,
+        )
+        opened = self.client.post(url, body, content_type='application/json')
+        self.assertEqual(opened.status_code, 400)
+        self.assertIn('открыта смена', opened.json()['error'])
+        self.assertTrue(plan.slots.filter(equipment=self.truck_1, employee=self.driver).exists())
+        self.assertFalse(CrewOffEquipment.objects.filter(employee=self.driver).exists())
+
+    def test_employee_card_can_move_a_free_legacy_driver_into_reserve(self):
+        worker, _access = self.create_employee_with_access(
+            'Проверкин Свободный Водитель', self.driver_role, phone='+79000000972', access_code='219972',
+        )
+        plan = self.create_draft()
+        response = self.client.post(reverse('deputy_off_equipment_transfer'), {
+            'plan_id': plan.pk, 'expected_plan_version': plan.version, 'work_date': plan.work_date.isoformat(),
+            'employee_id': worker.pk, 'status': OffEquipmentStatus.RESERVE, 'shift_type': WorkShiftType.SHIFT_2,
+        }, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['payload']['plan']['id'], plan.pk)
+        self.assertEqual(CrewOffEquipment.objects.get(employee=worker).status, OffEquipmentStatus.RESERVE)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+
     def test_off_equipment_publication_is_read_by_settlement_and_blocks_equipment_until_return(self):
         from types import SimpleNamespace
 

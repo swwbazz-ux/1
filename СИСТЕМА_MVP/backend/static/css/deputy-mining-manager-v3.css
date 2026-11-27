@@ -1631,38 +1631,35 @@ button.deputy-avatar {
     white-space: nowrap;
 }
 
-.deputy-record-dialog.is-specialization {
+.deputy-record-dialog:is(.is-specialization, .is-employee) {
     width: min(840px, calc(100% - 28px));
     max-height: calc(100dvh - 28px);
     overflow-y: auto;
 }
 
-.is-specialization .deputy-record-head h2,
-.is-specialization .deputy-record-head p,
-.is-specialization .deputy-record-field dd,
-.is-specialization .deputy-dialog-actions button {
+.deputy-record-dialog:is(.is-specialization, .is-employee) :is(.deputy-record-head h2, .deputy-record-head p, .deputy-record-field dd, .deputy-dialog-actions button) {
     white-space: normal;
     overflow-wrap: anywhere;
     overflow: visible;
     text-overflow: clip;
 }
 
-.is-specialization .deputy-record-fields {
+.deputy-record-dialog:is(.is-specialization, .is-employee) .deputy-record-fields {
     max-height: none;
     overflow: visible;
 }
 
-.is-specialization .deputy-record-field {
+.deputy-record-dialog:is(.is-specialization, .is-employee) .deputy-record-field {
     padding: 12px 16px;
 }
 
-.is-specialization .deputy-record-field dd {
+.deputy-record-dialog:is(.is-specialization, .is-employee) .deputy-record-field dd {
     font-size: 16px;
     font-weight: 600;
     line-height: 1.45;
 }
 
-.is-specialization .deputy-record-field dt {
+.deputy-record-dialog:is(.is-specialization, .is-employee) .deputy-record-field dt {
     font-size: 12px;
 }
 
@@ -1677,6 +1674,44 @@ button.deputy-avatar {
 
 .is-specialization .deputy-dialog-actions {
     flex-wrap: wrap;
+}
+
+.is-employee .deputy-record-head p {
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.deputy-record-duty {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--admin-line-soft);
+}
+
+.deputy-record-duty summary {
+    cursor: pointer;
+    font-weight: 800;
+    color: var(--admin-green);
+}
+
+.deputy-record-duty > p {
+    margin: .65rem 0 0;
+    color: var(--admin-muted);
+}
+
+.deputy-record-duty .deputy-duty-form {
+    margin-top: .75rem;
+}
+
+.deputy-record-duty-error {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--admin-red, #a22319);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 540px) {
+    .deputy-record-dialog.is-employee .deputy-record-fields {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 .deputy-toast {
