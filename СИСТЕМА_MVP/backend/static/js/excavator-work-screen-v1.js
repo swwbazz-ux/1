@@ -1541,7 +1541,7 @@ window.initExcavatorWorkShell = function () {
         if (select !== false) selectTruck(card);
     }
 
-    function postTruckLoaded(card, dumpTarget) {
+    function postTruckLoaded(card, dumpTarget, confirmedPrevious) {
         if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
             return;
         }
@@ -1560,7 +1560,8 @@ window.initExcavatorWorkShell = function () {
             showExcavatorNotice("Локальное сохранение недоступно. Погрузка не сохранена — обновите экран и повторите.");
             return;
         }
-        if (!canTruckLoad(card)) {
+        if (!canTruckLoad(card) && !(confirmedPrevious && card.isConnected
+            && card.dataset.eoManualAvailable === "1" && !card.classList.contains("is-pending"))) {
             playExcavatorSound("action_error");
             showExcavatorNotice(truckLoadBlockReason(card));
             return;
@@ -1575,6 +1576,7 @@ window.initExcavatorWorkShell = function () {
         var freeBucketAcceptanceLocalId = card.dataset.eoFreeBucketAcceptanceLocalId || "";
         var freeBucketAcceptanceReference = freeBucketAcceptanceId || freeBucketAcceptanceLocalId;
         var isFreeBucketLoad = card.dataset.eoFreeBucket === "1" && Boolean(freeBucketAcceptanceReference);
+        var markedAt = new Date().toISOString();
         var payload = {
             assignment_id: isFreeBucketLoad ? "" : (card.dataset.assignmentId || ""),
             // Свободный ковш определяет фактический экскаватор, но не отключает
@@ -1602,12 +1604,39 @@ window.initExcavatorWorkShell = function () {
         fieldOutbox.pending().then(function (events) {
             var previous = events.filter(function (event) {
                 return (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
+                    && (isFreeBucketLoad || (event.event_type === "excavator.trip.loaded"
+                        && String(event.shift_id) === shell.dataset.nativeShiftId
+                        && String(event.equipment_id) === shell.dataset.eoCurrentExcavatorId))
                     && String(event.payload && event.payload.truck_id || "") === String(truckId)
                     && ["conflict", "invalid", "auth_required"].indexOf(event.sync_state) < 0;
             }).sort(function (left, right) { return Number(right.sequence || 0) - Number(left.sequence || 0); })[0];
             if (previous && previous.local_trip_id) {
                 payload.expected_open_trip_id = "";
                 payload.expected_open_trip_local_id = previous.local_trip_id;
+            }
+            if (!isFreeBucketLoad) {
+                var previousReference = payload.expected_open_trip_local_id || payload.expected_open_trip_id;
+                if (confirmedPrevious && previousReference !== confirmedPrevious) {
+                    card.classList.remove("is-pending");
+                    showExcavatorNotice("Предыдущий рейс изменился. Проверьте карточку и повторите погрузку.");
+                    return null;
+                }
+                if (previousReference && !confirmedPrevious) {
+                    card.classList.remove("is-pending");
+                    window.openAppConfirmDialog(
+                        "У самосвала №" + truckNumber + " уже записана погрузка. Если он вернулся и загружен снова, оформите новый рейс.",
+                        function () {
+                            if (!card.isConnected || !dumpTarget.isConnected) {
+                                showExcavatorNotice("Карточка обновилась. Проверьте её и повторите погрузку.");
+                                return;
+                            }
+                            postTruckLoaded(card, dumpTarget, previousReference);
+                        },
+                        0, "Оформить новую погрузку"
+                    );
+                    return null;
+                }
+                payload.load_intent = confirmedPrevious ? "new_cycle" : "standard";
             }
             var acceptanceEvent = isFreeBucketLoad ? events.find(function (event) {
                 return event.event_id === freeBucketAcceptanceLocalId;
@@ -1628,7 +1657,7 @@ window.initExcavatorWorkShell = function () {
                 equipment_id: Number(shell.dataset.eoCurrentExcavatorId || 0),
                 trip_id: null,
                 local_trip_id: localTripId,
-                occurred_at: new Date().toISOString(),
+                occurred_at: markedAt,
                 sequence: sequence,
                 depends_on: [
                     isFreeBucketLoad
@@ -1643,6 +1672,7 @@ window.initExcavatorWorkShell = function () {
                 return fieldOutbox.queue(event).then(function () { return event; });
             });
         }).then(function (event) {
+            if (!event) return;
             invalidateExcavatorWorkRefresh();
             rememberTruckLoadProjection(card, event.event_id, snapshot);
             applyTruckPending(card, dumpTarget);
@@ -1795,6 +1825,9 @@ window.initExcavatorWorkShell = function () {
                 }
             }
             var confirmedCard = cardByTruckId(event.payload && event.payload.truck_id);
+            if (result && result.load_already_recorded) {
+                showExcavatorNotice("Эта погрузка уже сохранена.");
+            }
             if (confirmedCard && tripId && (
                 !confirmedCard.dataset.eoOfflineEventId || confirmedCard.dataset.eoOfflineEventId === event.event_id
             )) {

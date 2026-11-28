@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import timedelta
 
-from django.db.models import Exists, OuterRef, Subquery
+from django.db.models import Exists, OuterRef, Q, Subquery
 from django.utils import formats, timezone
 
 from core.models import OfflineFieldEvent, OfflineFieldEventStatus
@@ -76,6 +76,9 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
         event_type='excavator.trip.loaded',
         status=OfflineFieldEventStatus.ACCEPTED,
     ).filter(Exists(load_actions)).order_by('occurred_at', 'id').values('occurred_at')
+    possible_repeat_marks = load_marks.filter(
+        Q(payload__load_intent__isnull=True) | ~Q(payload__load_intent='new_cycle'),
+    )
     trips = (
         Trip.objects
         .filter(
@@ -86,7 +89,7 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
         .exclude(status=TripStatus.CANCELLED)
         .select_related('assigned_dump_point', 'truck__equipment_type', 'truck__model', 'superseded_trip')
         .annotate(
-            load_mark_at=Subquery(load_marks.filter(trip_id=OuterRef('pk'))[:1]),
+            load_mark_at=Subquery(possible_repeat_marks.filter(trip_id=OuterRef('pk'))[:1]),
             previous_load_mark_at=Subquery(load_marks.filter(trip_id=OuterRef('superseded_trip__pk'))[:1]),
         )
         .order_by('loaded_at', 'id')

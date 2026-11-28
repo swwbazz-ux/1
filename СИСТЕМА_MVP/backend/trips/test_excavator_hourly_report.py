@@ -234,6 +234,11 @@ class ExcavatorHourlyReportTests(TestCase):
         self.assertEqual(report['hours'][0]['totals']['belaz'], 2)
 
         OfflineFieldEvent.objects.filter(trip=first).update(occurred_at=first_at)
+        with self.subTest('explicitly confirmed new cycle'):
+            OfflineFieldEvent.objects.filter(trip=second).update(payload={'load_intent': 'new_cycle'})
+            report = build_excavator_hourly_report(self.excavator, captured_at=second_at + timedelta(minutes=15))
+            self.assertEqual(report['hours'][0]['totals']['belaz'], 2)
+            OfflineFieldEvent.objects.filter(trip=second).update(payload={})
         with self.subTest('different assigned destination'):
             Trip.objects.filter(pk=second.pk).update(assigned_dump_point=self.point_a)
             report = build_excavator_hourly_report(self.excavator, captured_at=second_at + timedelta(minutes=15))

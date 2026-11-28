@@ -2040,6 +2040,52 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(claim_conflict.json()['results'][0]['code'], 'event_id_reused')
         self.assertEqual(OfflineFieldEventConflict.objects.count(), 2)
 
+    def test_standard_load_reuses_known_trip_and_keeps_ambiguous_event_for_review(self):
+        initial = self.load_event('guarded-initial', 1)
+        initial['payload']['load_intent'] = 'standard'
+        accepted = self.sync([initial]).json()['results'][0]
+        self.assertEqual(accepted['status'], 'accepted', accepted)
+        trip_id = accepted['server_ids']['trip_id']
+
+        repeat = self.load_event('guarded-repeat', 2)
+        repeat['payload'].update(load_intent='standard', expected_open_trip_id=trip_id)
+        result = self.sync([repeat]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['load_already_recorded'])
+        self.assertEqual(result['server_ids']['trip_id'], trip_id)
+
+        unseen = self.load_event('guarded-unseen', 3)
+        unseen['payload']['load_intent'] = 'standard'
+        result = self.sync([unseen]).json()['results'][0]
+        self.assertEqual(result['code'], 'new_load_confirmation_required')
+        self.assertEqual(OfflineFieldEvent.objects.get(event_id=unseen['event_id']).status,
+                         OfflineFieldEventStatus.CONFLICT)
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertEqual(TripClientAction.objects.filter(action_type='truck_loaded').count(), 1)
+
+    def test_confirmed_offline_cycle_links_to_pending_load_and_keeps_device_time(self):
+        opened_at = timezone.now() - timedelta(minutes=12)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(opened_at=opened_at)
+        HaulAssignment.objects.filter(pk=self.assignment.pk).update(assigned_at=opened_at)
+        initial = self.load_event('guarded-offline-first', 1, occurred_at=opened_at + timedelta(minutes=1))
+        initial['payload']['load_intent'] = 'standard'
+        next_at = opened_at + timedelta(minutes=8)
+        second = self.load_event('guarded-offline-new', 2, occurred_at=next_at)
+        second['depends_on'] = [initial['event_id']]
+        second['payload'].update(load_intent='new_cycle', expected_open_trip_local_id=initial['local_trip_id'])
+        results = self.sync([initial, second]).json()['results']
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        old, new = Trip.objects.order_by('id')
+        self.assertEqual(old.superseded_by_id, new.pk)
+        self.assertEqual(new.loaded_at, next_at)
+        self.assertEqual(new.status, TripStatus.LOADED_WAITING_UNLOAD)
+
+        stale = self.load_event('guarded-offline-stale', 3)
+        stale['payload'].update(load_intent='new_cycle', expected_open_trip_id=old.pk)
+        result = self.sync([stale]).json()['results'][0]
+        self.assertEqual(result['code'], 'new_load_confirmation_outdated')
+        self.assertEqual(Trip.objects.count(), 2)
+
     def test_partial_batch_and_dependency_local_trip_mapping(self):
         first = self.load_event('load-chain-1', 10)
         second = self.load_event('load-chain-2', 11)

@@ -1348,6 +1348,60 @@ def _automatic_load_receipt(trip, *, acceptance=None):
     )
 
 
+def _guard_excavator_load_intent(access, normalized, *, truck, shift, open_trip, expected_id):
+    """Resolve a guarded ordinary load before it can replace an unconfirmed trip."""
+    from trips.models import Trip, TripStatus
+
+    payload = normalized['payload']
+    intent = payload.get('load_intent')
+    if intent is None:
+        return None  # Keep the existing contract for receipts saved by older shells.
+    if intent not in ('standard', 'new_cycle'):
+        _invalid('invalid_load_intent', 'Неизвестный вид погрузки.')
+    expected_id = _positive_int(expected_id, field='expected_open_trip_id', required=False)
+
+    occurred_at = normalized['occurred_at']
+    if open_trip and open_trip.loaded_at and open_trip.loaded_at <= occurred_at:
+        previous = open_trip
+    else:
+        previous = (
+            Trip.objects.select_for_update(of=('self',))
+            .filter(truck=truck, loaded_at__lte=occurred_at)
+            .exclude(status=TripStatus.CANCELLED)
+            .filter(Q(completed_at__isnull=True) | Q(completed_at__gt=occurred_at))
+            .filter(Q(operationally_closed_at__isnull=True) | Q(operationally_closed_at__gt=occurred_at))
+            .order_by('-loaded_at', '-pk').first()
+        )
+
+    if intent == 'new_cycle':
+        expected = previous or (
+            Trip.objects.filter(truck=truck, loaded_at__lte=occurred_at)
+            .exclude(status=TripStatus.CANCELLED)
+            .order_by('-loaded_at', '-pk').first()
+        )
+        if (
+            expected is None
+            or expected.pk != expected_id
+            or (open_trip and open_trip.pk != expected.pk)
+            or (open_trip and open_trip.loaded_at and open_trip.loaded_at > occurred_at)
+        ):
+            _conflict('new_load_confirmation_outdated',
+                      'Предыдущий рейс изменился. Сверьте отметку перед новой погрузкой.')
+        return None
+
+    if previous is None:
+        return None
+    if (
+        previous.pk == expected_id
+        and previous.loading_shift_id == shift.id
+        and previous.excavator_operator_id == access.employee_id
+        and _manual_load_matches_trip(previous, {**payload, 'truck_id': truck.id, 'excavator_id': shift.equipment_id})
+    ):
+        return previous
+    _conflict('new_load_confirmation_required',
+              'Погрузка сохранена для сверки: на момент отметки у самосвала уже был рейс.')
+
+
 def _automatic_load_authority_matches(receipt, *, assignment=None, acceptance=None):
     if acceptance is not None:
         return bool(receipt)
@@ -2323,7 +2377,17 @@ def _process_excavator_loaded(access, normalized):
                 action_type='truck_loaded',
             ).exists()
         )
-        if not merge_driver_trip:
+    if not merge_driver_trip:
+        repeated_trip = _guard_excavator_load_intent(
+            access, normalized, truck=truck, shift=shift, open_trip=open_trip, expected_id=expected_id,
+        )
+        if repeated_trip:
+            return {
+                'server_ids': {'trip_id': repeated_trip.id, 'shift_id': shift.id},
+                'load_already_recorded': True,
+                'version': _current_operational_version(),
+            }, {'trip': repeated_trip, 'shift': shift, 'equipment': truck}
+        if open_trip:
             trip_mismatch = str(expected_id or '') != str(open_trip.id)
             prior_is_own_offline_event = bool(linked_previous and linked_previous.id == open_trip.id)
             replace_blocked = not prior_is_own_offline_event and not may_replace_open_trip(open_trip, participation)
