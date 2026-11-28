@@ -1344,6 +1344,12 @@ def _pull(ticket, event, key, op, csrf_secret):
             return _queue_receipts(access, event, key)
         if op == "archive_closed_queue":
             return _archive_closed_queue(access, event, key)
+        if op == "board":
+            shift_id = event.get("shift_id")
+            if (type(shift_id) is not int or shift_id <= 0
+                or event.get("actor_id") != access.employee_id or event.get("actor_access_id") != access.pk):
+                raise FieldProblem("shift_scope_changed", "Смена мастера изменилась.", status="auth")
+            return field_commands.render_board_fragment(access, shift_id, csrf_secret)
         if op == "report":
             return field_reports.render_report(access, event.get("path"), csrf_secret)
         if op == "snapshot":
@@ -1406,7 +1412,7 @@ def field_sync_view(request):
                     request, data.get("device_id", ""), v2=True, enroll_key=data["public_key"]
                 )
             event, key, digest = field_signing.checked_event(data)
-            if data.get("op") in {"snapshot", "report", "portrait", "queue_receipts", "archive_closed_queue"}:
+            if data.get("op") in {"snapshot", "board", "report", "portrait", "queue_receipts", "archive_closed_queue"}:
                 return _pull(
                     data.get("ticket"), event, key, data["op"], request.META.get("CSRF_COOKIE")
                 )

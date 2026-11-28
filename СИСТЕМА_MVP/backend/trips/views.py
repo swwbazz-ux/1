@@ -6673,9 +6673,10 @@ def dispatcher_control_view(
     context_overrides=None,
     equipment_detail=None,
     deputy_viewer=False,
+    signed_board_read=False,
 ):
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
-    if not deputy_viewer:
+    if not (deputy_viewer or signed_board_read):
         reconcile_due_haul_assignments()
         reconcile_expired_free_bucket_acceptances()
         reconcile_expired_manual_trips()
@@ -6781,7 +6782,8 @@ def dispatcher_control_view(
     if context_overrides:
         context.update(context_overrides)
 
-    response = render(request, 'trips/dispatcher_control.html', context)
+    template = 'trips/includes/dispatcher_board.html' if signed_board_read else 'trips/dispatcher_control.html'
+    response = render(request, template, context)
     if requested_fragment in {'dispatcher', 'mining_master'}:
         selector = '.dispatcher-board' if requested_fragment == 'dispatcher' else '.mm-mobile-shell'
         fragment_extra = {}

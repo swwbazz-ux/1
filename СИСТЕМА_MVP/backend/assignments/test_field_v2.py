@@ -813,6 +813,67 @@ class MasterFieldV2Tests(TestCase):
         self.assertEqual(result.json()["code"], "actor_mismatch")
         self.assertNotIn("snapshot", result.json())
 
+    def test_signed_board_fragment_shows_free_bucket_and_keeps_the_primary_assignment(self):
+        from django.test import Client
+        from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+        from .models import AssignmentStatus
+
+        self.open()
+        master_shift = EmployeeShift.objects.get(employee=self.employee, workplace_code="mining_master")
+        source = Equipment.objects.create(equipment_type=self.exc.equipment_type, garage_number="8")
+        for excavator in (source, self.exc):
+            ExcavatorPlacement.objects.update_or_create(
+                excavator=excavator, defaults={"zone": ExcavatorPlacement.Zone.ACTIVE}
+            )
+        assignment = HaulAssignment.objects.create(
+            truck=self.truck, excavator=source, status=AssignmentStatus.ACCEPTED,
+        )
+        driver = Employee.objects.create(full_name="Водитель свободного ковша")
+        driver_shift = EmployeeShift.objects.create(
+            employee=driver, opened_by=driver, equipment=self.truck, workplace_code="driver",
+            shift_type=master_shift.shift_type, opened_at=master_shift.opened_at,
+        )
+        acceptance = FreeBucketAcceptance.objects.create(
+            client_acceptance_id=str(uuid4()), truck=self.truck, excavator=self.exc,
+            occurred_at=timezone.now(), requested_by=driver, requesting_shift=driver_shift,
+            primary_assignment=assignment,
+            status=FreeBucketAcceptanceStatus.REQUESTED,
+        )
+        client = Client(enforce_csrf_checks=True)
+
+        def read_board(shift_id):
+            gate = client.get(self.url, {"device_id": self.device, "protocol": PROTOCOL, "challenge": "1"}).json()
+            event = self.event("board.read", 2)
+            event.update(shift_id=shift_id, challenge=gate["challenge"], occurred_at=gate["server_time"])
+            return client.post(
+                self.url, {**self.envelope(event), "op": "board"},
+                content_type="application/json", HTTP_X_CSRFTOKEN=gate["csrf_token"],
+            )
+
+        signed = read_board(master_shift.pk)
+        self.assertEqual(signed.status_code, 200, signed.content[:500])
+        self.assertEqual(signed["X-Operational-Fragment"], "operational-fragment-v1")
+        self.assertEqual(signed.json()["screen"], "dispatcher")
+        html = signed.json()["html"]
+        self.assertIn("is-free-bucket-away", html)
+        self.assertIn("is-free-bucket-temporary", html)
+        self.assertIn("Ожидает приёма", html)
+        self.assertNotIn("sessionid", client.cookies)
+        self.assertEqual(read_board(master_shift.pk + 1).status_code, 403)
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.excavator_id, source.pk)
+        self.assertIsNone(assignment.ended_at)
+
+        acceptance.status = FreeBucketAcceptanceStatus.CANCELLED
+        acceptance.cancelled_at = timezone.now()
+        acceptance.save(update_fields=["status", "cancelled_at"])
+        after = read_board(master_shift.pk)
+        self.assertEqual(after.status_code, 200, after.content[:500])
+        self.assertNotIn("is-free-bucket-temporary", after.json()["html"])
+        self.assertNotIn("is-free-bucket-away", after.json()["html"])
+        master_shift.refresh_from_db()
+        self.assertIsNone(master_shift.closed_at)
+
     def report_read(self, path, client=None, event_patch=None):
         client = client or self.client
         gate = client.get(

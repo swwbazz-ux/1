@@ -9,9 +9,10 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
 from django.contrib import messages
+from django.contrib.auth.models import AnonymousUser
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.serializers.json import DjangoJSONEncoder
-from django.http import HttpRequest, QueryDict
+from django.http import HttpRequest, JsonResponse, QueryDict
 from django.db.models import Q
 from django.urls import get_urlconf, set_urlconf
 
@@ -125,6 +126,31 @@ def actual_cards(access, version):
             "card": readonly(card),
         }
     return cards
+
+
+def render_board_fragment(access, shift_id, csrf_secret):
+    from trips.views import dispatcher_control_view
+    from .tablet_views import build_tablet_context, build_tablet_header
+
+    req = trusted_request(access)
+    req.GET = QueryDict("_operational_fragment=dispatcher")
+    req.user = AnonymousUser()
+    req.META.update(SERVER_NAME="localhost", SERVER_PORT="80")
+    if csrf_secret:
+        req.META["CSRF_COOKIE"] = csrf_secret
+    previous_urlconf = get_urlconf()
+    try:
+        set_urlconf(req.urlconf)
+        header = build_tablet_header(req, access)
+        if getattr(header["active_shift"], "pk", None) != shift_id:
+            return JsonResponse({"code": "shift_scope_changed"}, status=403)
+        return dispatcher_control_view(
+            req, access_override=access, enforce_dispatcher_access=False,
+            dispatcher_header_override=header, context_overrides=build_tablet_context(req, access),
+            signed_board_read=True,
+        )
+    finally:
+        set_urlconf(previous_urlconf)
 
 
 def worker_open_trips(shift):
