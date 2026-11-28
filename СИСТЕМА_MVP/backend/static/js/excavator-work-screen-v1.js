@@ -1906,6 +1906,7 @@ window.initExcavatorWorkShell = function () {
             && state.started
             && state.card
             && state.card.dataset.eoFreeBucket === "1"
+            && state.card.dataset.eoFreeBucketDriverSelected !== "1"
             && state.card.dataset.eoFreeBucketUsed !== "1"
             && state.card.dataset.eoFreeBucketCancelPending !== "1"
             && deltaY <= -56

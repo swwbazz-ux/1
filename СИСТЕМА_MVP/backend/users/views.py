@@ -290,7 +290,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v384'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v385'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -5512,9 +5512,7 @@ def driver_shift_view(request):
         driver_dial_note = (
             'ПОГРУЖЕН'
             if driver_free_bucket_acceptance.status == 'used'
-            else 'ПРИНЯТ МАШИНИСТОМ'
-            if driver_free_bucket_acceptance.status == 'accepted'
-            else 'ОЖИДАНИЕ ПРИЁМА'
+            else 'ПОД СВОБОДНЫЙ КОВШ'
         )
     elif driver_loading_wait_active:
         # Во время ожидания сохраняем полезный ориентир погрузки в крупной

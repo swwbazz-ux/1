@@ -288,11 +288,17 @@
             return card.dataset.eoFreeBucketUsed !== "1";
         });
         if (!cards.length) return 0;
-        results.appendChild(make("h3", "eo-free-bucket__active-title", "Уже приняты"));
+        results.appendChild(make("h3", "eo-free-bucket__active-title", "Под свободным ковшом"));
         cards.forEach(function (card) {
             var row = make("div", "eo-free-bucket__active-item");
             var copy = make("div");
             copy.appendChild(make("strong", "", "№ " + text(card.dataset.eoTruckNumber)));
+            if (card.dataset.eoFreeBucketDriverSelected === "1") {
+                copy.appendChild(make("span", "", "Под свободным ковшом"));
+                row.appendChild(copy);
+                results.appendChild(row);
+                return;
+            }
             copy.appendChild(make("span", "", card.classList.contains("is-saved-on-device")
                 ? "Сохранено на телефоне" : "Подтверждено сервером"));
             var remove = make("button", "eo-free-bucket__remove", "Убрать");
@@ -706,7 +712,8 @@
     }
 
     function cancelAcceptedCard(card) {
-        if (!queueEvent || !card || card.dataset.eoFreeBucket !== "1") return Promise.resolve(false);
+        if (!queueEvent || !card || card.dataset.eoFreeBucket !== "1"
+                || card.dataset.eoFreeBucketDriverSelected === "1") return Promise.resolve(false);
         if (card.dataset.eoFreeBucketCancelPending === "1" || card.dataset.eoFreeBucketUsed === "1") {
             return Promise.resolve(false);
         }
@@ -776,6 +783,7 @@
             var card = renderLocalCard(cardItem, event, false);
             if (card) {
                 card.classList.remove("is-saved-on-device");
+                card.dataset.eoFreeBucketDriverSelected = item.driver_selected ? "1" : "0";
                 card.dataset.eoFreeBucketAcceptanceId = text(item.id || item.free_bucket_acceptance_id);
                 card.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
             }

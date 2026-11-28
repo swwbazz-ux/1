@@ -302,7 +302,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(self.assignment.ended_at)
 
-    def test_excavator_directory_allows_promoting_driver_request_for_same_excavator(self):
+    def test_driver_selection_appears_on_target_and_loads_without_a_separate_acceptance(self):
         other_client, identity = self.other_excavator_identity()
         selected = self.select_event(excavator=self.other_excavator)
         selected_result = self.sync_driver([selected]).json()['results'][0]
@@ -318,8 +318,47 @@ class FreeBucketServerIntegrationTests(TestCase):
             if item['id'] == self.truck.id
         )
 
-        self.assertTrue(directory_item['can_accept_free_bucket'])
-        self.assertEqual(directory_item['availability_label'], 'Запрошен водителем')
+        self.assertFalse(directory_item['can_accept_free_bucket'])
+        self.assertEqual(directory_item['availability_label'], 'Под свободным ковшом здесь')
+        selection_id = selected_result['server_ids']['free_bucket_acceptance_id']
+        cards = payload['free_bucket_cards']
+        self.assertEqual([card['id'] for card in cards], [selection_id])
+        self.assertTrue(cards[0]['driver_selected'])
+        self.assertFalse(self.client.get(reverse('excavator_work')).context['free_bucket_cards'])
+        self.assertFalse(Trip.objects.exists())
+
+        driver_screen = self.driver_client.get(reverse('driver_shift'))
+        self.assertEqual(driver_screen.context['driver_dial_note'], 'ПОД СВОБОДНЫЙ КОВШ')
+        self.assertEqual(
+            driver_screen.context['driver_dial_label'],
+            driver_screen.context['driver_free_bucket_state']['selection']['label'],
+        )
+        loaded = self.event(
+            'driver-selected-excavator-swipe', 'excavator.free_bucket.loaded', 1,
+            local_trip_id='direct-bucket-trip',
+            payload={
+                'free_bucket_acceptance_id': selection_id,
+                'truck_id': self.truck.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type_id': self.rock.id,
+            },
+            **identity,
+        )
+        result = self.sync(
+            [loaded], client=other_client, actor=identity['actor'], access=identity['access'],
+            device_id='driver-selected-excavator-swipe',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.excavator_id, self.other_excavator.id)
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.id)
+        selection = FreeBucketAcceptance.objects.get(pk=selection_id)
+        self.assertEqual(selection.used_trip_id, trip.id)
+        self.assertEqual(selection.loading_shift_id, identity['shift'].id)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.excavator_id, self.excavator.id)
+        self.assertIsNone(self.assignment.ended_at)
+        self.assertFalse(other_client.get(reverse('excavator_work')).context['free_bucket_cards'])
 
     def test_excavator_then_driver_maps_same_row_without_moving_acceptance_time(self):
         other_client, identity = self.other_excavator_identity()
