@@ -1,92 +1,24 @@
 {% extends "base.html" %}
 {% load static %}
-
 {% block title %}Без техники{% endblock %}
-{% block body_class %}deputy-mining-manager-screen deputy-reports-screen{% endblock %}
+{% block body_class %}deputy-mining-manager-screen deputy-reports-screen deputy-duty-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261127-off-equipment">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261128-duty-overview">
+<link rel="stylesheet" href="{% static 'css/deputy-duty-overview.css' %}?v=1">
 {% endblock %}
 
 {% block body %}
 <div class="admin-shell admin-exports-shell deputy-shell admin-day" data-admin-theme>
-    {% include "includes/deputy_mining_manager_header.html" with active_section="placement" screen_title="Без техники" screen_subtitle="Сотрудники в резерве и на работах вне техники." %}
-    <main class="admin-console-page deputy-reports-page deputy-duty-page">
+    {% include "includes/deputy_mining_manager_header.html" with active_section="placement" screen_title="Без техники" screen_subtitle="Состояние сотрудников на производственные сутки." %}
+    <main class="admin-console-page deputy-duty-page">
         <nav class="deputy-category-nav" aria-label="Категории расстановки">
             {% for category in categories %}<a href="{{ category.url }}"><strong>{{ category.label }}</strong></a>{% endfor %}
             <a href="{% url 'deputy_off_equipment' %}" class="is-active" aria-current="page"><strong>Без техники</strong></a>
         </nav>
-        <section class="deputy-publications-card" aria-labelledby="deputy-duty-title">
-            <header>
-                <div>
-                    <h2 id="deputy-duty-title">Сотрудники без техники</h2>
-                    <p>{{ work_date|date:"d.m.Y" }} · производственные сутки</p>
-                </div>
-            </header>
-            <form method="get" class="deputy-duty-filters">
-                <label>Сотрудник <input type="search" name="q" value="{{ query }}" placeholder="Фамилия или табельный номер"></label>
-                <label>Статус
-                    <select name="status">
-                        {% for value,label in filters %}<option value="{{ value }}"{% if value == active_filter %} selected{% endif %}>{{ label }}</option>{% endfor %}
-                    </select>
-                </label>
-                <button class="admin-button admin-button-secondary" type="submit">Показать</button>
-            </form>
-            {% if error %}<p class="deputy-duty-feedback" role="alert">{{ error }}</p>{% endif %}
-            {% for message in messages %}<p class="deputy-duty-feedback" role="status">{{ message }}</p>{% endfor %}
-            <div class="deputy-publications-list">
-                {% for row in rows %}
-                <article class="deputy-duty-row">
-                    <div class="deputy-duty-summary">
-                        <div><strong>{{ row.employee.full_name }}</strong>
-                            <small>{{ row.employee.personnel_position.name|default:row.employee.position }}</small></div>
-                        <span class="deputy-duty-status is-{{ row.status }}">{{ row.label }}</span>
-                        <span>{{ row.shift_label }}</span>
-                        {% if row.entry.location %}<span>{{ row.entry.location }}</span>{% endif %}
-                    </div>
-                    {% if row.editable %}
-                    <details{% if row.employee.pk|stringformat:"s" == editing_employee_id %} open{% endif %}>
-                        <summary>{% if row.entry %}Изменить статус{% else %}Указать статус{% endif %}</summary>
-                        <form method="post" class="deputy-duty-form">
-                            {% csrf_token %}
-                            <input type="hidden" name="employee_id" value="{{ row.employee.pk }}">
-                            <input type="hidden" name="expected_version" value="{{ row.version }}">
-                            <input type="hidden" name="work_date" value="{{ work_date|date:'Y-m-d' }}">
-                            <label>Статус
-                                <select name="status" required>
-                                    {% for value,label in row.choices %}<option value="{{ value }}"{% if value == row.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
-                                </select>
-                            </label>
-                            <label>Смена
-                                <select name="shift_type">
-                                    <option value="">Требует уточнения</option>
-                                    {% for value,label in shift_choices %}<option value="{{ value }}"{% if value == row.shift %} selected{% endif %}>{{ label }}</option>{% endfor %}
-                                </select>
-                            </label>
-                            <label>Где и чем занят
-                                <input name="location" value="{{ row.entry.location }}" maxlength="180" placeholder="Например, площадка сборки">
-                            </label>
-                            <button type="submit" class="admin-button admin-button-primary">Опубликовать статус</button>
-                        </form>
-                        {% if row.entry %}
-                        <form method="post" class="deputy-duty-clear">
-                            {% csrf_token %}
-                            <input type="hidden" name="employee_id" value="{{ row.employee.pk }}">
-                            <input type="hidden" name="expected_version" value="{{ row.version }}">
-                            <input type="hidden" name="work_date" value="{{ work_date|date:'Y-m-d' }}">
-                            <button type="submit" name="status" value="cleared" class="admin-button admin-button-secondary">
-                                {% if row.status == 'suspended' %}Подтвердить возврат к управлению{% else %}Снять отметку{% endif %}
-                            </button>
-                        </form>
-                        {% endif %}
-                    </details>
-                    {% endif %}
-                </article>
-                {% empty %}
-                <p class="deputy-empty-state">В этом списке сотрудников нет.</p>
-                {% endfor %}
-            </div>
-        </section>
+        {% include 'assignments/includes/deputy_duty_overview.html' %}
     </main>
 </div>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261128-employee-duty" defer></script>
+<script src="{% static 'js/deputy-duty-overview.js' %}?v=1" defer></script>
 {% endblock %}

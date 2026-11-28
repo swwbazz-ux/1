@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.staticfiles import finders
@@ -27,6 +28,7 @@ from references.models import (
 from rotations.models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
 from shifts.models import EmployeeShift, WatchPeriod
 from users.active_role import ACTIVE_ROLE_GENERATION_SESSION_KEY
+from users.live_monitor import create_observer_token
 from users.models import (
     DriverPrimaryRegistration,
     Employee,
@@ -1169,6 +1171,50 @@ class DeputyPlanningViewTests(TestCase):
             self.assertContains(response, 'name="apple-mobile-web-app-capable" content="yes"')
             self.assertContains(response, 'deputy-mining-manager-180.png')
             self.assertContains(response, 'deputy-mining-manager-pwa-v1.js')
+
+    def test_deputy_header_identity_uses_own_active_admin_profile_and_photo(self):
+        admin_access = EmployeeAccess.objects.create(
+            employee=self.deputy, role=Role.objects.create(code='admin', name='Администратор'),
+            access_code='110098', status=EmployeeAccess.Status.ACTIVATED,
+        )
+        with TemporaryDirectory() as directory, override_settings(MEDIA_ROOT=directory):
+            buffer = BytesIO()
+            Image.new('RGB', (1, 1)).save(buffer, format='PNG')
+            self.deputy.photo.save('avatar.png', SimpleUploadedFile('avatar.png', buffer.getvalue()))
+            for route in (
+                'deputy_off_equipment', 'deputy_mining_manager_placement',
+                'deputy_mining_manager_import', 'deputy_mining_manager_reports',
+                'deputy_mining_manager_arrival_roster_routing',
+            ):
+                with self.subTest(route=route):
+                    response = self.client.get(reverse(route))
+                    self.assertContains(response, '<em title="Администратор">Администратор</em>', html=True)
+                    self.assertContains(response, f'src="{self.deputy.photo.url}"')
+                    self.assertEqual(response.context['access'].pk, self.deputy_access.pk)
+
+            admin_access.status = EmployeeAccess.Status.BLOCKED
+            admin_access.save(update_fields=['status'])
+            self.deputy.photo.storage.delete(self.deputy.photo.name)
+            response = self.client.get(reverse('deputy_off_equipment'))
+            self.assertContains(response, f'<em title="{self.deputy_role.name}">{self.deputy_role.name}</em>', html=True)
+            self.assertContains(response, '<span class="admin-console-avatar" aria-hidden="true">З</span>', html=True)
+            self.assertNotContains(response, self.deputy.photo.url)
+
+    def test_deputy_header_identity_shows_signed_observer_without_changing_target(self):
+        admin, admin_access = self.create_employee_with_access(
+            'Администратор Проверочный', Role.objects.create(code='admin', name='Администратор'),
+            phone='+79000000199', access_code='110099',
+        )
+        url = reverse('deputy_off_equipment')
+        token = create_observer_token(actor_access=admin_access, target_access=self.deputy_access)
+        response = self.client.get(url, {'observe': token})
+        self.assertContains(response, f'<strong title="{admin.full_name}">{admin.full_name}</strong>', html=True)
+        self.assertContains(response, '<em title="Администратор">Администратор</em>', html=True)
+        self.assertEqual(response.context['access'], self.deputy_access)
+        self.assertEqual(response.context['observer_employee'], self.deputy)
+        self.assertEqual(self.client.post(url + '?observe=' + token, {}).status_code, 403)
+        self.authenticate(self.client, admin_access)
+        self.assertRedirects(self.client.get(url), reverse('role_home'), fetch_redirect_response=False)
 
     def test_deputy_pages_expose_standard_header_subtitles(self):
         expected_subtitles = {

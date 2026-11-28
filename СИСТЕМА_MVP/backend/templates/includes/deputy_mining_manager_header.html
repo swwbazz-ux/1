@@ -1,9 +1,11 @@
+{% load deputy_identity %}
+{% deputy_header_identity request access as viewer %}
 <header class="admin-console-header deputy-console-header" aria-label="Рабочая шапка заместителя начальника горного участка">
     <section class="admin-console-identity">
-        <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"З"|first }}</span>
+        {% include "users/includes/system_admin_avatar.html" with access=viewer only %}
         <span>
-            <strong>{{ access.employee.full_name|default:"Пользователь" }}</strong>
-            <em>Зам. начальника горного участка</em>
+            <strong title="{{ viewer.employee.full_name }}">{{ viewer.employee.full_name }}</strong>
+            <em title="{{ viewer.role.name }}">{{ viewer.role.name }}</em>
         </span>
     </section>
 
