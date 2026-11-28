@@ -1,0 +1,4 @@
+interface:
+  display_name: "Graphify"
+  short_description: "Карта связей исходного кода Copper Resources"
+  default_prompt: "Используй $graphify для проверки связей в текущей рабочей копии Copper Resources."
