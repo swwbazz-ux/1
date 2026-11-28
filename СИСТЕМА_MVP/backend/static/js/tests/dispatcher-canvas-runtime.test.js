@@ -126,7 +126,7 @@ test("control template delegates desktop and phone fitting to the canvas module"
     assert.match(TEMPLATE, /data-dispatcher-phone-fit/);
     assert.match(
         TEMPLATE,
-        /dispatcher-canvas-v1\.js[^\n]+dispatcher-desktop-shell-v170/
+        /dispatcher-canvas-v1\.js[^\n]+dispatcher-desktop-shell-v171/
     );
     assert.equal(
         (TEMPLATE.match(/function fitDispatcherShellToScreen/g) || []).length,
@@ -164,7 +164,7 @@ function makeStorage(initial = {}, options = {}) {
 
 const TABLET_PATH = "/mining-master/tablet/";
 const SHELL_V165 = "mining-master-mobile-shell-v165";
-const SHELL_V166 = "mining-master-mobile-shell-v166";
+const SHELL_V166 = "mining-master-mobile-shell-v167";
 
 function runSwBlock({
     pathname,

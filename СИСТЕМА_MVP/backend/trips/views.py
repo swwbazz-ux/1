@@ -1821,16 +1821,23 @@ def build_dispatcher_dashboard_context(
     # board projects the temporary move independently.
     from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
     free_bucket_marker_by_truck_id = {}
+    free_bucket_trips = {}
     free_bucket_marker_now = timezone.now()
     for acceptance in (
         FreeBucketAcceptance.objects
         .filter(
             truck_id__in=[truck.id for truck in trucks_list],
         )
-        .filter(active_free_bucket_acceptance_filter(now=free_bucket_marker_now))
-        .select_related('excavator', 'used_trip')
+        .filter(
+            free_bucket_reservation_filter(now=free_bucket_marker_now)
+            | Q(status=FreeBucketAcceptanceStatus.USED, used_trip__status__in=OPEN_TRIP_STATUSES)
+        )
+        .select_related('excavator', 'used_trip__dump_point', 'used_trip__assigned_dump_point')
         .order_by('-occurred_at', '-id')
     ):
+        if acceptance.status == FreeBucketAcceptanceStatus.USED:
+            free_bucket_trips[acceptance.truck_id] = acceptance.used_trip
+            continue
         free_bucket_marker_by_truck_id.setdefault(
             acceptance.truck_id,
             {
@@ -1839,10 +1846,6 @@ def build_dispatcher_dashboard_context(
                 'excavator_id': acceptance.excavator_id,
                 'destination': dispatcher_complex_label(acceptance.excavator),
                 'state': acceptance.status,
-                'on_board': (
-                    acceptance.status != FreeBucketAcceptanceStatus.USED
-                    or bool(acceptance.used_trip and acceptance.used_trip.status in OPEN_TRIP_STATUSES)
-                ),
                 'refresh_at': (
                     free_bucket_acceptance_expires_at(acceptance)
                     or acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL
@@ -2276,7 +2279,7 @@ def build_dispatcher_dashboard_context(
     )
     active_excavator_ids.update(trip.excavator_id for trip in active_trips_list if trip.excavator_id)
     active_excavator_ids.update(
-        marker['excavator_id'] for marker in free_bucket_marker_by_truck_id.values() if marker['on_board']
+        marker['excavator_id'] for marker in free_bucket_marker_by_truck_id.values()
     )
 
     downtime_state_code_by_equipment_id = {
@@ -2286,7 +2289,7 @@ def build_dispatcher_dashboard_context(
     truck_state_code_by_id = {}
     truck_state_by_id = {}
     for truck in trucks_list:
-        active_trip = active_trip_by_truck_id.get(truck.id)
+        active_trip = free_bucket_trips.get(truck.id) or active_trip_by_truck_id.get(truck.id)
         assignment = assignment_by_truck_id.get(truck.id)
         state_code = dispatcher_truck_state_code(
             is_active=getattr(truck, 'is_active', True),
@@ -2648,6 +2651,7 @@ def build_dispatcher_dashboard_context(
             row_state_code = row.get('equipment_state_code') or ''
             row_state = equipment_state_ui(equipment_state_map, row_state_code) if row_state_code else None
             row_plan = row.get('plan') or plan_progress_display_context(None)
+            outbound_trip = free_bucket_trips.get(row.get('truck_id'))
             truck_tiles.append({
                 'name': row.get('truck'),
                 'status': status,
@@ -2672,6 +2676,7 @@ def build_dispatcher_dashboard_context(
                 'assignment_state_id': row.get('assignment_state_id') or 0,
                 'transfer_pending': bool(row.get('transfer_pending')),
                 'transfer_source_label': row.get('transfer_source_label') or '',
+                'free_bucket_outbound': bool(outbound_trip),
                 'free_bucket_label': row.get('free_bucket_label') or '',
                 'free_bucket_expires_at': row.get('free_bucket_expires_at'),
                 'has_current_shift': bool(row.get('has_current_shift')),
@@ -2964,7 +2969,7 @@ def build_dispatcher_dashboard_context(
     free_bucket_board_deadlines = []
     for truck_id, marker in free_bucket_marker_by_truck_id.items():
         destination = complexes_by_id.get(marker['excavator_id'])
-        if not destination or not marker['on_board']:
+        if not destination:
             continue
         card_id = str(truck_id)
         primary, slot_index, original = primary_truck_slots.get(card_id, (None, None, None))
@@ -3178,6 +3183,13 @@ def build_dispatcher_dashboard_context(
             include_equipment_metadata=False,
         )
 
+    free_bucket_trip_details = {
+        truck_id: [
+            {'label': 'Загрузил', 'value': dispatcher_complex_label(excavator_by_id.get(trip.excavator_id))},
+            {'label': 'Точка разгрузки', 'value': str(trip.assigned_dump_point or trip.dump_point or '—')},
+        ]
+        for truck_id, trip in free_bucket_trips.items()
+    }
     for complex_card in complex_cards:
         for tile in complex_card.get('active_truck_tiles', []):
             card_id = str(tile.get('card_id') or '')
@@ -3209,6 +3221,7 @@ def build_dispatcher_dashboard_context(
                 {'label': 'Порода', 'value': complex_card.get('current_rock')},
                 {'label': 'Разгрузки', 'value': ', '.join(point.get('name') for point in complex_card.get('unload_points', []) if point.get('name'))},
             ]
+            details.extend(free_bucket_trip_details.get(int(card_id), []))
             if tile.get('free_bucket_label'):
                 details.append({'label': 'Временная работа', 'value': tile['free_bucket_label']})
             details.extend(dispatcher_plan_details(tile.get('plan')))
@@ -3267,6 +3280,7 @@ def build_dispatcher_dashboard_context(
                     {'label': 'Экскаватор', 'value': equipment_short_name(assignment.excavator)},
                     {'label': 'Назначен', 'value': format_dispatcher_datetime(assignment.assigned_at)},
                 ])
+            details.extend(free_bucket_trip_details.get(equipment.id, []))
             if tile.get('free_bucket_label'):
                 details.append({'label': 'Временная работа', 'value': tile['free_bucket_label']})
             if active_trip:

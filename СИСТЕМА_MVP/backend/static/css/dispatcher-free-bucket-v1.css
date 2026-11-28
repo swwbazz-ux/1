@@ -64,7 +64,7 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-boa
     stroke-linejoin: round;
 }
 
-.mm-mobile-shell .mm-mobile-truck-mini:is(.is-free-bucket-away, .is-free-bucket-temporary) {
+.mm-mobile-shell .mm-mobile-truck-mini:is(.is-free-bucket-away, .is-free-bucket-temporary, .is-free-bucket-outbound) {
     display: grid;
     place-content: center;
     justify-items: center;
@@ -73,7 +73,7 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-boa
     padding: 0 1px;
 }
 
-.mm-mobile-shell .mm-mobile-truck-mini:is(.is-free-bucket-away, .is-free-bucket-temporary) > small {
+.mm-mobile-shell .mm-mobile-truck-mini:is(.is-free-bucket-away, .is-free-bucket-temporary, .is-free-bucket-outbound) > small {
     max-width: 100%;
     line-height: 1.05;
     font-size: clamp(7px, calc(var(--mm-mobile-preview-tile, 44px) * .18), 9px);

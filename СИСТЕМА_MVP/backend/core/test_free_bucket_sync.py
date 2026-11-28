@@ -2532,7 +2532,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.excavator_id, self.excavator.id)
 
-    def test_dispatcher_used_marker_is_visible_only_for_five_minutes(self):
+    def test_free_bucket_departure_returns_truck_to_primary_for_entire_open_trip(self):
         other_client, other_operator, other_shift = (
             trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
         )
@@ -2552,28 +2552,19 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual({item['status'] for item in result}, {'accepted'}, result)
         trip = Trip.objects.get()
         acceptance = FreeBucketAcceptance.objects.get()
-        recent = timezone.now() - timedelta(minutes=4, seconds=59)
-        Trip.objects.filter(pk=trip.pk).update(loaded_at=recent)
-        FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(used_at=recent)
-
-        recent_tile = self.dispatcher_primary_tile()
-        self.assertIn('Свободный ковш', recent_tile['free_bucket_label'])
-        self.assertEqual(recent_tile['free_bucket_expires_at'], recent + timedelta(minutes=5))
-        board = self.dispatcher_dashboard()
-        destination = next(card for card in board['complex_cards'] if card['excavator'] == self.other_excavator)
-        temporary = next(tile for tile in destination['board_truck_tiles'] if tile.get('free_bucket_temporary'))
-        self.assertEqual(temporary['label'], 'На разгрузку')
-
-        expired = timezone.now() - timedelta(minutes=5, seconds=1)
-        Trip.objects.filter(pk=trip.pk).update(loaded_at=expired)
-        FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(used_at=expired)
-        expired_tile = self.dispatcher_primary_tile()
-        self.assertEqual(expired_tile['free_bucket_label'], '')
-        self.assertIsNone(expired_tile['free_bucket_expires_at'])
-        board = self.dispatcher_dashboard()
-        primary = next(card for card in board['complex_cards'] if card['excavator'] == self.excavator)
-        self.assertEqual(primary['board_truck_tiles'], primary['active_truck_tiles'])
-        self.assertIsNone(board['free_bucket_board_refresh_at'])
+        for elapsed in (0, 6):
+            loaded_at = timezone.now() - timedelta(minutes=elapsed)
+            Trip.objects.filter(pk=trip.pk).update(loaded_at=loaded_at)
+            FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(used_at=loaded_at)
+            board = self.dispatcher_dashboard()
+            primary = next(card for card in board['complex_cards'] if card['excavator'] == self.excavator)
+            receiver = next(card for card in board['complex_cards'] if card['excavator'] == self.other_excavator)
+            home_tile = next(tile for tile in primary['board_truck_tiles'] if tile['card_id'] == str(self.truck.pk))
+            self.assertTrue(home_tile['free_bucket_outbound'])
+            self.assertEqual(home_tile['label'], 'На разгрузку')
+            self.assertFalse(home_tile.get('free_bucket_away_to'))
+            self.assertNotIn(str(self.truck.pk), [tile['card_id'] for tile in receiver['board_truck_tiles']])
+            self.assertIsNone(board['free_bucket_board_refresh_at'])
 
     def test_spent_free_bucket_does_not_block_regular_loading_after_trip_completion(self):
         other_client, other_operator, other_shift = (
