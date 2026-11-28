@@ -1,4 +1,4 @@
-"""Project-local Codex entry point. Use the pinned Graphify CLI on backend sources."""
+﻿"""Project-local Codex entry point. Use the pinned Graphify CLI on backend sources."""
 import argparse
 import hashlib
 import json
@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+
+from reexport_calls import add_reexport_calls
 
 VERSION = "0.9.121"
 EXTENSIONS = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}
@@ -41,7 +43,7 @@ def ensure_map(backend, cache, exe, env):
     for name, data in sources.items():
         digest.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
     state = {"checkout": str(backend), "head": head, "fingerprint": digest.hexdigest(),
-             "files": len(sources), "graphify": VERSION}
+             "resolver_version": 1, "files": len(sources), "graphify": VERSION}
     marker = cache / "state.json"
     if marker.exists() and json.loads(marker.read_text(encoding="utf-8")) == state and all(
         (cache / name).is_file() for name in OUTPUTS
@@ -55,6 +57,20 @@ def ensure_map(backend, cache, exe, env):
             path.write_bytes(data)
         subprocess.run([exe, "update", "."], cwd=staging, env=env, check=True)
         output = staging / "graphify-out"
+        graph_path = output / "graph.json"
+        graph = json.loads(graph_path.read_bytes())
+        if add_reexport_calls(graph, sources):
+            graph_path.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+            # cluster-only regenerates the views but has no access to the original corpus stats.
+            report = output / "GRAPH_REPORT.md"
+            original = report.read_text(encoding="utf-8")
+            (output / "graph.html").unlink()
+            subprocess.run([exe, "cluster-only", ".", "--no-label"], cwd=staging, env=env, check=True)
+            corpus = original.partition("## Corpus Check\n")[2].partition("\n## ")[0].strip()
+            if corpus:
+                refreshed = report.read_text(encoding="utf-8").replace(
+                    "- cluster-only mode — file stats not available", corpus, 1)
+                report.write_text(refreshed, encoding="utf-8")
         if not all((output / name).is_file() for name in OUTPUTS):
             raise SystemExit("Graphify не создал полный комплект файлов карты.")
         marker.unlink(missing_ok=True)
