@@ -1,11 +1,50 @@
 from collections import defaultdict
 from datetime import timedelta
 
+from django.db.models import Exists, OuterRef, Subquery
 from django.utils import formats, timezone
 
+from core.models import OfflineFieldEvent, OfflineFieldEventStatus
 from shifts.equipment_plan_groups import equipment_is_belaz_truck, equipment_is_nhl_truck
 
-from .models import Trip, TripStatus
+from .models import Trip, TripClientAction, TripStatus
+
+
+REPEAT_LOAD_WINDOW = timedelta(seconds=20)
+
+
+def _repeats_previous_passive_load(trip):
+    """Group a rapid second mark for the same unconfirmed shipment at its first loading time."""
+    previous = getattr(trip, 'superseded_trip', None)
+    if previous is None or previous.status != TripStatus.UNCONTROLLED:
+        return False
+    if (
+        not trip.loading_shift_id
+        or previous.loading_shift_id != trip.loading_shift_id
+        or previous.excavator_id != trip.excavator_id
+        or previous.excavator_operator_id != trip.excavator_operator_id
+        or previous.truck_id != trip.truck_id
+        or not trip.assigned_dump_point_id
+        or previous.assigned_dump_point_id != trip.assigned_dump_point_id
+        or not trip.volume_m3
+        or previous.volume_m3 != trip.volume_m3
+        or not (previous.driver_participation_recorded and trip.driver_participation_recorded)
+        or previous.driver_control_shift_id
+        or trip.driver_control_shift_id
+        or previous.completed_at
+        or previous.unload_received_at
+        or previous.actual_dump_point_id
+        or not previous.loaded_at
+        or not trip.previous_load_mark_at
+        or not trip.load_mark_at
+    ):
+        return False
+    # A queued batch can reach the server seconds apart even when the loads were
+    # far apart on the machine. Use the two original marks to bound the repeat.
+    return (
+        timedelta(0) < trip.load_mark_at - trip.previous_load_mark_at <= REPEAT_LOAD_WINDOW
+        and previous.loaded_at <= trip.loaded_at
+    )
 
 
 def _period_label(start, end):
@@ -28,6 +67,15 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
     current_start = local_now.replace(minute=0, second=0, microsecond=0)
     previous_start = current_start - timedelta(hours=1)
 
+    load_actions = TripClientAction.objects.filter(
+        trip_id=OuterRef('trip_id'),
+        client_action_id=OuterRef('event_id'),
+        action_type='truck_loaded',
+    )
+    load_marks = OfflineFieldEvent.objects.filter(
+        event_type='excavator.trip.loaded',
+        status=OfflineFieldEventStatus.ACCEPTED,
+    ).filter(Exists(load_actions)).order_by('occurred_at', 'id').values('occurred_at')
     trips = (
         Trip.objects
         .filter(
@@ -36,7 +84,11 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
             loaded_at__lt=captured_at,
         )
         .exclude(status=TripStatus.CANCELLED)
-        .select_related('assigned_dump_point', 'truck__equipment_type', 'truck__model')
+        .select_related('assigned_dump_point', 'truck__equipment_type', 'truck__model', 'superseded_trip')
+        .annotate(
+            load_mark_at=Subquery(load_marks.filter(trip_id=OuterRef('pk'))[:1]),
+            previous_load_mark_at=Subquery(load_marks.filter(trip_id=OuterRef('superseded_trip__pk'))[:1]),
+        )
         .order_by('loaded_at', 'id')
     )
 
@@ -48,6 +100,8 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
     unknown_point_counts = [0, 0]
 
     for trip in trips:
+        if _repeats_previous_passive_load(trip):
+            continue
         bucket = 0 if trip.loaded_at < current_start else 1
         source_counts[bucket] += 1
 
