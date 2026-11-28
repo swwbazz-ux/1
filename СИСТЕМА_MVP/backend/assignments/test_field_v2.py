@@ -586,6 +586,154 @@ class MasterFieldV2Tests(TestCase):
         self.assertNotIn("snapshot", again.json())
         self.assertEqual(OfflineFieldEvent.objects.exclude(event_type=ENROLLMENT).count(), 0)
 
+    def test_queue_receipts_only_reads_original_records_for_this_employee_and_device(self):
+        opened = self.open()
+        missing_id, foreign_id = str(uuid4()), str(uuid4())
+        original = OfflineFieldEvent.objects.get(event_id=opened["id"])
+        OfflineFieldEvent.objects.create(
+            event_id=foreign_id, event_type=original.event_type, actor=self.employee,
+            access=self.access, role_code="mining_master", device_id=str(uuid4()),
+            sequence=1, occurred_at=self.now, fingerprint="0" * 64,
+            status=original.status, shift=original.shift,
+        )
+
+        def read_receipts(ids):
+            gate = self.client.get(
+                self.url, {"device_id": self.device, "protocol": PROTOCOL, "challenge": "1"}
+            ).json()
+            event = {**self.event("queue_receipts.read", 2),
+                "occurred_at": gate["server_time"], "challenge": gate["challenge"], "event_ids": ids}
+            return self.client.post(
+                self.url, {**self.envelope(event), "op": "queue_receipts"},
+                content_type="application/json",
+            )
+
+        response = read_receipts([missing_id, opened["id"], foreign_id])
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["contiguous_sequence"], 1)
+        self.assertEqual(data["bound_shift"]["id"], original.shift_id)
+        self.assertIsNone(data["bound_shift"]["closed_at"])
+        self.assertEqual(
+            [(row["id"], row["fingerprint"]) for row in data["receipts"]],
+            [(opened["id"], original.fingerprint)],
+        )
+        self.assertEqual(OfflineFieldEvent.objects.exclude(event_type=ENROLLMENT).count(), 2)
+        self.assertIsNone(EmployeeShift.objects.get(pk=original.shift_id).closed_at)
+        repeated = read_receipts([opened["id"], opened["id"]])
+        self.assertEqual(repeated.status_code, 400)
+        self.assertEqual(repeated.json()["code"], "invalid_queue_receipts")
+
+    def test_archive_closed_queue_preserves_signed_records_without_replaying_them(self):
+        opened = self.event("shift.open", 1)
+        ack = self.post(opened)
+        shift = EmployeeShift.objects.get(pk=ack["server_shift_id"])
+        self.assertEqual(self.post(opened)["server_shift_id"], shift.pk)
+        first = self.event("draft.save", 2, {"historical": "original"}, deps=[opened["id"]])
+        second = self.event("live.assign", 3, {"truck_id": self.truck.pk}, deps=[first["id"]])
+
+        def archive(events):
+            originals = [
+                {key: value for key, value in self.envelope(e).items() if key != "ticket"}
+                for e in events
+            ]
+            gate = self.client.get(
+                self.url, {"device_id": self.device, "protocol": PROTOCOL, "challenge": "1"}
+            ).json()
+            e = {**self.event("archive_closed_queue.read", 4), "originals": originals,
+                 "challenge": gate["challenge"], "occurred_at": gate["server_time"]}
+            return self.client.post(
+                self.url, {**self.envelope(e), "op": "archive_closed_queue"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(archive([first, second]).json()["code"], "archive_shift_active")
+        shift.closed_at = timezone.now()
+        shift.save(update_fields=["closed_at"])
+        rejected = self.post(first)
+        self.assertEqual(rejected["code"], "shift_closed")
+        other_shift = EmployeeShift.objects.create(
+            employee=self.employee, opened_by=self.employee, workplace_code="mining_master",
+            shift_type="day", opened_at=shift.closed_at,
+        )
+        self.assertEqual(archive([second]).json()["code"], "archive_sequence_gap")
+        foreign_shift = {**second, "local_shift_id": str(uuid4())}
+        self.assertEqual(archive([first, foreign_shift]).json()["code"], "archive_scope_mismatch")
+        self.assertEqual(OfflineFieldEvent.objects.exclude(event_type=ENROLLMENT).count(), 2)
+
+        response = archive([first, second])
+        self.assertEqual(response.status_code, 200, response.content)
+        receipts = response.json()["receipts"]
+        self.assertEqual([(r["id"], r["code"], r["resolved"]) for r in receipts], [
+            (first["id"], "shift_closed", True), (second["id"], "archived_closed_shift", True),
+        ])
+        repeated = archive([first, second])
+        self.assertEqual(repeated.json()["receipts"], receipts)
+        self.assertEqual(OfflineFieldEvent.objects.exclude(event_type=ENROLLMENT).count(), 3)
+        for source in (first, second):
+            row = OfflineFieldEvent.objects.get(event_id=source["id"])
+            self.assertEqual(row.payload, source["payload"])
+            self.assertEqual(row.depends_on, source["depends_on"])
+            self.assertEqual(row.context_snapshot["signed_bytes"], self.envelope(source)["signed_bytes"])
+        self.assertFalse(HaulAssignment.objects.exists())
+        self.assertIsNone(EmployeeShift.objects.get(pk=other_shift.pk).closed_at)
+        self.assertEqual(EmployeeShift.objects.get(pk=shift.pk).closed_at, shift.closed_at)
+        self.assertEqual(OfflineFieldEvent.objects.get(event_type=ENROLLMENT).result_payload["contiguous_sequence"], 3)
+
+        self.grant = self.enroll(self.signer).json()
+        self.local = self.grant["snapshot"]["shift"]["local_shift_id"]
+        self.now = timezone.now()
+        empty = {"excavators": []}
+        new = self.event("draft.save", 4, empty, base=empty, deps=[second["id"]])
+        self.assertEqual(self.post(new)["status"], "applied")
+        self.assertEqual(OfflineFieldEvent.objects.get(event_id=new["id"]).shift_id, other_shift.pk)
+
+    def test_old_unbound_batch_with_terminal_close_and_new_assignment(self):
+        from .field_sync import _server_local_shift_id
+        old = self.local
+        current = EmployeeShift.objects.create(employee=self.employee, opened_by=self.employee,
+            workplace_code="mining_master", shift_type="day", opened_at=timezone.now())
+        self.grant = self.enroll(self.signer).json()
+        events = []
+        for i in range(31):
+            kind = "shift.close" if i == 30 else ("draft.save" if i < 9 else "live.assign")
+            raw = self.event(kind, i + 1, deps=[events[-1]["id"]] if events else [])
+            raw["occurred_at"] = (current.opened_at + timedelta(seconds=i-30)).isoformat()
+            events.append(raw)
+        head = events[0]
+        # Admit a real conflict through the normal receive path, with no shift bound.
+        self.assertEqual(self.post(head)["status"], "conflict")
+        self.assertIsNone(OfflineFieldEvent.objects.get(event_id=head["id"]).shift_id)
+        def archive(events, local=old):
+            gate = self.client.get(self.url, {"device_id": self.device, "protocol": PROTOCOL, "challenge": "1"}).json()
+            parts = [{k:v for k,v in self.envelope(e).items() if k in ("signed_bytes","signature")} for e in events]
+            req = {**self.event("archive_closed_queue.read", 32), "local_shift_id": local, "originals": parts,
+                "challenge": gate["challenge"], "occurred_at": gate["server_time"]}
+            return self.client.post(self.url, {**self.envelope(req), "op": "archive_closed_queue"},
+                content_type="application/json")
+        self.assertEqual(archive(events[:-1]).status_code, 400)
+        self.assertEqual(archive([*events[:10], *events[11:]]).status_code, 400)
+        wrong = {**events[-1], "depends_on": []}
+        self.assertEqual(archive([*events[:-1], wrong]).status_code, 400)
+        wrong = {**events[-1], "actor_id": self.employee.pk + 1}
+        self.assertEqual(archive([*events[:-1], wrong]).status_code, 400)
+        self.assertEqual(OfflineFieldEvent.objects.exclude(event_type=ENROLLMENT).count(), 1)
+        reply = archive(events)
+        self.assertEqual(reply.status_code, 200, reply.content)
+        receipts = reply.json()["receipts"]
+        self.assertEqual([(r["id"],r["sequence"]) for r in receipts], [(r["id"],r["sequence"]) for r in events])
+        self.assertTrue(all(r["resolved"] and r["shift_id"] is None for r in receipts))
+        self.assertEqual(archive(events).json()["receipts"], receipts)
+        self.assertEqual(OfflineFieldEvent.objects.exclude(event_type=ENROLLMENT).count(), 31)
+        self.assertFalse(HaulAssignment.objects.exists())
+        self.assertIsNone(EmployeeShift.objects.get(pk=current.pk).closed_at)
+        self.assertEqual(self.grant["snapshot"]["shift"]["local_shift_id"], _server_local_shift_id(self.device,current.pk))
+        self.local = self.grant["snapshot"]["shift"]["local_shift_id"]
+        self.now = timezone.now() - timedelta(seconds=31)
+        new = self.event("draft.save", 32, {"excavators":[]}, base={"excavators":[]}, deps=[events[-1]["id"]])
+        self.assertEqual(self.post(new)["status"], "applied")
+        self.assertEqual(OfflineFieldEvent.objects.get(event_id=new["id"]).shift_id, current.pk)
+
     def test_old_ticket_can_replay_past_record_but_cannot_read_new_state(self):
         from django.core import signing
         from .field_sync import SALT

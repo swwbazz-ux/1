@@ -1,2 +1,2 @@
-СИСТЕМА_MVP/backend/trips/dispatcher_read_model.py
-СИСТЕМА_MVP/backend/trips/views.py
+# Receipt verification and archival for closed Mining Master shifts.
+СИСТЕМА_MVP/backend/assignments/field_sync.py
