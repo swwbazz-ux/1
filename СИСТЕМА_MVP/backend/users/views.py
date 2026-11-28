@@ -2274,6 +2274,7 @@ def get_system_admin_reference_configs():
             'title': 'Общий список простоев',
             'section': 'Простои',
             'model': DowntimeReason,
+            'allow_reorder': True,
             'fields': [
                 'name',
                 'short_label',
@@ -2295,6 +2296,7 @@ def get_system_admin_reference_configs():
             'title': 'Простои водителя самосвала',
             'section': 'Простои',
             'model': DowntimeReason,
+            'allow_reorder': True,
             'fields': ['name', 'short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_truck_driver', 'sort_order', 'is_active'],
             'search_fields': ['name', 'short_label', 'equipment_type__name', 'equipment_state__name'],
             'preview_fields': ['short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_truck_driver'],
@@ -2307,6 +2309,7 @@ def get_system_admin_reference_configs():
             'title': 'Простои машиниста экскаватора',
             'section': 'Простои',
             'model': DowntimeReason,
+            'allow_reorder': True,
             'fields': ['name', 'short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_excavator_operator', 'sort_order', 'is_active'],
             'search_fields': ['name', 'short_label', 'equipment_type__name', 'equipment_state__name'],
             'preview_fields': ['short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_excavator_operator'],
@@ -2319,6 +2322,7 @@ def get_system_admin_reference_configs():
             'title': 'Детальные простои механика',
             'section': 'Простои',
             'model': DowntimeReason,
+            'allow_reorder': True,
             'fields': ['name', 'short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_mechanic', 'sort_order', 'is_active'],
             'search_fields': ['name', 'short_label', 'equipment_type__name', 'equipment_state__name'],
             'preview_fields': ['short_label', 'equipment_type', 'equipment_state', 'is_critical', 'show_for_mechanic'],
@@ -2679,6 +2683,35 @@ def _rating_period_automation_context():
     }
 
 
+def move_downtime_reason(record, base_filter, direction):
+    # Lock in stable primary-key order before reading the current display order.
+    locked_ids = list(DowntimeReason.objects.select_for_update().order_by('pk').values_list('pk', flat=True))
+    ordered = list(
+        DowntimeReason.objects.filter(pk__in=locked_ids)
+        .annotate(can_move=Q(is_active=True, **base_filter))
+        .order_by('sort_order', 'name', 'pk')
+    )
+    active_ids = [reason.pk for reason in ordered if reason.can_move]
+    if record.pk not in active_ids:
+        return None
+    neighbor_index = active_ids.index(record.pk) + direction
+    if not 0 <= neighbor_index < len(active_ids):
+        return None
+
+    positions = {reason.pk: index for index, reason in enumerate(ordered)}
+    source = positions[record.pk]
+    target = positions[active_ids[neighbor_index]]
+    neighbor = ordered[target]
+    ordered[source], ordered[target] = ordered[target], ordered[source]
+    changed = []
+    for index, reason in enumerate(ordered, start=1):
+        if reason.sort_order != index * 10:
+            reason.sort_order = index * 10
+            changed.append(reason)
+    DowntimeReason.objects.bulk_update(changed, ['sort_order'])
+    return neighbor
+
+
 def system_admin_reference_detail_view(request, reference_code):
     access = require_admin_access(request)
     if not access:
@@ -2719,6 +2752,26 @@ def system_admin_reference_detail_view(request, reference_code):
         if record_id.isdigit():
             record = get_object_or_404(model, id=record_id)
             selected_record = record
+
+        if action in {'move_up', 'move_down'}:
+            if not record or not config.get('allow_reorder') or query or status_filter:
+                messages.error(request, 'Для этой записи изменение порядка недоступно.')
+                return redirect(reference_detail_redirect_url(record.id if record else None))
+            with transaction.atomic():
+                neighbor = move_downtime_reason(record, config.get('base_filter', {}), 1 if action == 'move_down' else -1)
+                if neighbor:
+                    direction_label = 'выше' if action == 'move_up' else 'ниже'
+                    log_admin_action(
+                        access.employee,
+                        f'Справочник: {config["title"]} — порядок',
+                        record,
+                        old_value=f'Рядом с «{neighbor}»',
+                        new_value=f'Перемещено {direction_label}',
+                    )
+                    messages.success(request, f'«{record}» перемещено {direction_label}. Новый порядок сохранен.')
+                else:
+                    messages.info(request, 'Запись уже находится на границе списка или отключена.')
+            return redirect(reference_detail_redirect_url(record.id))
 
         if action in {'disable', 'enable'} and record and hasattr(record, 'is_active'):
             try:
@@ -2879,15 +2932,29 @@ def system_admin_reference_detail_view(request, reference_code):
     if status_filter and hasattr(model, 'is_active'):
         records_queryset = records_queryset.filter(is_active=status_filter == 'active')
 
+    reorder_positions = {}
+    if config.get('allow_reorder'):
+        reorder_filter = {**(config.get('base_filter') or {}), 'is_active': True}
+        reorder_ids = list(
+            model.objects
+            .filter(**reorder_filter)
+            .order_by('sort_order', 'name', 'id')
+            .values_list('id', flat=True)
+        )
+        reorder_positions = {record_id: index for index, record_id in enumerate(reorder_ids)}
+
     records = []
     for record in records_queryset[:300]:
         status_label, status_class = get_reference_status(record)
+        reorder_position = reorder_positions.get(record.id)
         records.append({
             'object': record,
             'title': str(record),
             'status_label': status_label,
             'status_class': status_class,
             'preview': get_reference_record_preview(record, config),
+            'can_move_up': reorder_position is not None and reorder_position > 0,
+            'can_move_down': reorder_position is not None and reorder_position < len(reorder_positions) - 1,
         })
 
     count_queryset = build_reference_queryset(config)
@@ -2910,6 +2977,8 @@ def system_admin_reference_detail_view(request, reference_code):
             'query': query,
             'status_filter': status_filter,
             'has_active_status': hasattr(model, 'is_active'),
+            'allow_reorder': config.get('allow_reorder', False),
+            'reorder_filters_active': bool(query or status_filter),
             'show_rock_capacity_settings': reference_code == 'rocks',
             'rock_capacity_form': rock_capacity_form,
             'rock_capacity_rows': rock_capacity_form.capacity_rows if rock_capacity_form else [],
