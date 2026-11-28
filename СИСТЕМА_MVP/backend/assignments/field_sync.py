@@ -1268,8 +1268,20 @@ def _archive_closed_queue(access, event, key):
     generations = {event["actor_generation"]}
     if head:
         generations.add(head.context_snapshot.get("actor_generation"))
-    if any(raw.get("actor_generation") not in generations for raw, *_ in verified):
-        raise FieldProblem("archive_scope_mismatch", "Нет подтверждения ранее подписанного входа.")
+    # Closing a retained offline shift after signing in again can legitimately
+    # use a third generation. Its original server grant must attest that exact
+    # author, key and timestamp. It is never used to read or execute a command.
+    grants = {raw["actor_generation"]: envelope["original_grant"]
+              for raw, _, _, envelope in verified if isinstance(envelope.get("original_grant"), str)}
+    for raw, _, _, _ in verified:
+        generation = raw["actor_generation"]
+        if generation in generations:
+            continue
+        if not shift or raw["type"] != "shift.close" or not grants.get(generation):
+            raise FieldProblem("archive_grant_missing", "Нет подтверждения ранее подписанного входа.")
+        original_access, _ = _ticket_access(grants[generation], raw, key=key)
+        if original_access.pk != access.pk or original_access.employee_id != access.employee_id:
+            raise FieldProblem("archive_scope_mismatch", "Исходный допуск выдан другому сотруднику.")
     if any(raw["type"] == "shift.close" for raw, *_ in verified[:-1]):
         raise FieldProblem("archive_scope_mismatch", "Завершение должно быть последней записью смены.")
     if not shift:

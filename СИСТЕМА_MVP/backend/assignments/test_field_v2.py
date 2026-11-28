@@ -688,6 +688,45 @@ class MasterFieldV2Tests(TestCase):
         self.assertEqual(self.post(new)["status"], "applied")
         self.assertEqual(OfflineFieldEvent.objects.get(event_id=new["id"]).shift_id, other_shift.pk)
 
+    def test_late_local_close_requires_its_original_personal_grant_after_relogin(self):
+        opened = self.open()
+        shift = EmployeeShift.objects.get(pk=OfflineFieldEvent.objects.get(event_id=opened["id"]).shift_id)
+        first = self.event("draft.save", 2, deps=[opened["id"]])
+        shift.closed_at = timezone.now()
+        shift.save(update_fields=["closed_at"])
+        self.assertEqual(self.post(first)["code"], "shift_closed")
+        self.login(self.access)
+        middle = self.enroll(self.signer).json()
+        self.grant = middle
+        close = self.event("shift.close", 3, deps=[first["id"]])
+        self.login(self.access)
+        self.grant = self.enroll(self.signer).json()
+        self.assertEqual(len({first["actor_generation"], close["actor_generation"],
+                              self.grant["snapshot"]["actor"]["generation"]}), 3)
+        current = EmployeeShift.objects.create(employee=self.employee, opened_by=self.employee,
+            workplace_code="mining_master", shift_type="day", opened_at=shift.closed_at)
+        def archive(original_grant):
+            gate = self.client.get(self.url, {"device_id":self.device,"protocol":PROTOCOL,"challenge":"1"}).json()
+            parts = [{k:v for k,v in self.envelope(e).items() if k in ("signed_bytes","signature")}
+                     for e in (first, close)]
+            if original_grant:
+                parts[-1]["original_grant"] = original_grant
+            req = {**self.event("archive_closed_queue.read", 4),"originals":parts,
+                   "challenge":gate["challenge"],"occurred_at":gate["server_time"]}
+            return self.client.post(self.url,{**self.envelope(req),"op":"archive_closed_queue"},
+                content_type="application/json")
+        self.assertEqual(archive(None).json()["code"], "archive_grant_missing")
+        self.assertEqual(archive(self.grant["ticket"]).json()["code"], "generation_mismatch")
+        self.assertEqual(archive(middle["ticket"]+"x").json()["code"], "ticket_invalid")
+        self.assertFalse(OfflineFieldEvent.objects.filter(event_id=close["id"]).exists())
+        result = archive(middle["ticket"])
+        self.assertEqual(result.status_code, 200, result.content)
+        self.assertEqual(archive(middle["ticket"]).json()["receipts"], result.json()["receipts"])
+        self.assertTrue(result.json()["receipts"][-1]["resolved"])
+        self.assertEqual(OfflineFieldEvent.objects.get(event_id=close["id"]).shift_id, shift.pk)
+        self.assertIsNone(EmployeeShift.objects.get(pk=current.pk).closed_at)
+        self.assertEqual(EmployeeShift.objects.get(pk=shift.pk).closed_at, shift.closed_at)
+
     def test_old_unbound_batch_with_terminal_close_and_new_assignment(self):
         from .field_sync import _server_local_shift_id
         old = self.local
