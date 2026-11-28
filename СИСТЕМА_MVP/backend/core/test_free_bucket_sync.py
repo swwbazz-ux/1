@@ -65,7 +65,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         driver_session['employee_access_id'] = self.driver_access.id
         driver_session.save()
 
-    def dispatcher_dashboard(self):
+    def dispatcher_dashboard(self, **kwargs):
         from trips.views import build_dispatcher_dashboard_context
 
         return build_dispatcher_dashboard_context(
@@ -81,6 +81,7 @@ class FreeBucketServerIntegrationTests(TestCase):
             trucks=Equipment.objects.filter(equipment_type=self.truck_type).order_by('garage_number'),
             excavators=Equipment.objects.filter(equipment_type=self.excavator_type).order_by('garage_number'),
             recent_dispatcher_actions=[],
+            **kwargs,
         )
 
     def dispatcher_primary_tile(self):
@@ -2552,6 +2553,8 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual({item['status'] for item in result}, {'accepted'}, result)
         trip = Trip.objects.get()
         acceptance = FreeBucketAcceptance.objects.get()
+        trip.driver_control_shift = self.truck_shift
+        trip.save(update_fields=['driver_control_shift'])
         for elapsed in (0, 6):
             loaded_at = timezone.now() - timedelta(minutes=elapsed)
             Trip.objects.filter(pk=trip.pk).update(loaded_at=loaded_at)
@@ -2565,6 +2568,46 @@ class FreeBucketServerIntegrationTests(TestCase):
             self.assertFalse(home_tile.get('free_bucket_away_to'))
             self.assertNotIn(str(self.truck.pk), [tile['card_id'] for tile in receiver['board_truck_tiles']])
             self.assertIsNone(board['free_bucket_board_refresh_at'])
+
+    def test_k8_only_works_for_its_open_shift_and_passive_load_expires(self):
+        _, operator, loading_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
+        )
+        self.other_excavator.garage_number = '8'
+        self.other_excavator.save(update_fields=['garage_number'])
+        now = timezone.now()
+        trip = Trip.objects.create(
+            truck=self.truck, excavator=self.other_excavator,
+            loading_shift=loading_shift, excavator_operator=operator,
+            dump_point=self.dump_point, rock_type=self.rock,
+            status=TripStatus.LOADED_WAITING_UNLOAD, loaded_at=now,
+            driver_participation_recorded=True, load_time_source='excavator_device',
+        )
+        self.truck_shift.closed_at = now
+        self.truck_shift.save(update_fields=['closed_at'])
+        period = {'starts_at': now - timedelta(hours=1), 'ends_at': now + timedelta(hours=1)}
+
+        def assert_board(complex_state, truck_state, deadline):
+            for kwargs in ({}, {'reporting_period': period}):
+                with self.subTest(role='master' if kwargs else 'dispatcher'):
+                    board = self.dispatcher_dashboard(**kwargs)
+                    k8 = next(card for card in board['complex_cards'] if card['id'] == 'K-8')
+                    self.assertEqual(k8['equipment_state_code'], complex_state)
+                    tiles = [tile for card in board['complex_cards'] for tile in card['board_truck_tiles']]
+                    truck = next(tile for tile in tiles if tile['card_id'] == str(self.truck.pk))
+                    self.assertEqual(truck['equipment_state_code'], truck_state)
+                    self.assertEqual(board['free_bucket_board_refresh_at'], deadline)
+
+        deadline = now + timedelta(minutes=5)
+        assert_board('working', 'loaded_waiting_unload', deadline)
+        loading_shift.closed_at = now
+        loading_shift.save(update_fields=['closed_at'])
+        assert_board('assigned', 'loaded_waiting_unload', deadline)
+        loaded_at = now - timedelta(minutes=5)
+        Trip.objects.filter(pk=trip.pk).update(loaded_at=loaded_at)
+        assert_board('assigned', 'assigned', None)
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
 
     def test_spent_free_bucket_does_not_block_regular_loading_after_trip_completion(self):
         other_client, other_operator, other_shift = (

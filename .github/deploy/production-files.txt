@@ -1,7 +1,2 @@
-СИСТЕМА_MVP/backend/assignments/views.py
-СИСТЕМА_MVP/backend/static/css/dispatcher-free-bucket-v1.css
-СИСТЕМА_MVP/backend/templates/reports/dispatcher_shift_report.html
-СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html
-СИСТЕМА_MVP/backend/trips/dispatcher_pwa.py
+СИСТЕМА_MVP/backend/trips/dispatcher_read_model.py
 СИСТЕМА_MVP/backend/trips/views.py
-СИСТЕМА_MVP/backend/users/role_apps.py

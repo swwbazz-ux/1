@@ -664,7 +664,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '>версия v166</span>')
+        self.assertContains(response, '>версия v167</span>')
         self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
@@ -857,11 +857,21 @@ class MiningMasterAssignmentsViewTests(TestCase):
     def test_carryover_trip_created_before_master_shift_remains_visible(self):
         rock_type = RockType.objects.create(name='Щебень переходящий')
         dump_point = DumpPoint.objects.create(name='Накопитель переходящий')
+        driver = Employee.objects.create(full_name='Водитель переходящего рейса')
+        driver_shift = EmployeeShift.objects.create(
+            employee=driver,
+            opened_by=driver,
+            equipment=self.assigned_truck,
+            workplace_code='driver',
+            shift_type=self.shift.shift_type,
+            opened_at=self.shift.opened_at - timedelta(minutes=20),
+        )
         trip = Trip.objects.create(
             truck=self.assigned_truck,
             excavator=self.excavator,
             rock_type=rock_type,
             dump_point=dump_point,
+            driver_control_shift=driver_shift,
             status=TripStatus.LOADED_WAITING_UNLOAD,
         )
         Trip.objects.filter(pk=trip.pk).update(

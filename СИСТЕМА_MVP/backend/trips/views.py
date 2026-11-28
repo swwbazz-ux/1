@@ -86,6 +86,7 @@ from shifts.services import (
 )
 from users.models import Employee, EmployeeAccess
 from .manual_loading import (
+    MANUAL_DUMP_CARD_VISIBILITY,
     manual_dump_card_expires_at,
     manual_dump_card_is_visible,
     manual_dump_card_visibility_filter,
@@ -1832,7 +1833,10 @@ def build_dispatcher_dashboard_context(
             free_bucket_reservation_filter(now=free_bucket_marker_now)
             | Q(status=FreeBucketAcceptanceStatus.USED, used_trip__status__in=OPEN_TRIP_STATUSES)
         )
-        .select_related('excavator', 'used_trip__dump_point', 'used_trip__assigned_dump_point')
+        .select_related(
+            'excavator', 'used_trip__dump_point', 'used_trip__assigned_dump_point',
+            'used_trip__driver_control_shift',
+        )
         .order_by('-occurred_at', '-id')
     ):
         if acceptance.status == FreeBucketAcceptanceStatus.USED:
@@ -1962,6 +1966,30 @@ def build_dispatcher_dashboard_context(
         # Горного мастера и его периоду ответственности.
         open_shift_by_equipment_id = first_open_shift_by_equipment_id
         stale_equipment_shifts = []
+    trip_display_deadlines = []
+    expired_trip_ids = set()
+    operational_trips = {trip.pk: trip for trip in active_trips_list}
+    operational_trips.update((trip.pk, trip) for trip in free_bucket_trips.values())
+    for trip in operational_trips.values():
+        deadline = manual_dump_card_expires_at(trip)
+        if deadline is None and trip.truck_id not in open_shift_by_equipment_id:
+            shift_closed_at = trip.driver_control_shift.closed_at if trip.driver_control_shift_id else None
+            anchor = trip.loaded_at or trip.created_at
+            if shift_closed_at:
+                anchor = max(anchor, shift_closed_at)
+            deadline = anchor + MANUAL_DUMP_CARD_VISIBILITY
+        if deadline is None:
+            continue
+        if deadline <= dashboard_now:
+            expired_trip_ids.add(trip.pk)
+        else:
+            trip_display_deadlines.append(deadline)
+
+    active_trips_list = [trip for trip in active_trips_list if trip.pk not in expired_trip_ids]
+    free_bucket_trips = {
+        truck_id: trip for truck_id, trip in free_bucket_trips.items()
+        if trip.pk not in expired_trip_ids
+    }
     work_assignment_by_equipment_id = {
         assignment.equipment_id: assignment
         for assignment in equipment_work_assignments
@@ -2053,7 +2081,9 @@ def build_dispatcher_dashboard_context(
     active_trip_by_excavator_id = {}
     for trip in active_trips_list:
         active_trip_by_truck_id.setdefault(trip.truck_id, trip)
-        active_trip_by_excavator_id.setdefault(trip.excavator_id, trip)
+        loading_shift = open_shift_by_equipment_id.get(trip.excavator_id)
+        if loading_shift and trip.loading_shift_id == loading_shift.pk and loading_shift.closed_at is None:
+            active_trip_by_excavator_id.setdefault(trip.excavator_id, trip)
     latest_trip_by_equipment_id = {}
     for trip in recent_completed_trips_list:
         latest_trip_by_equipment_id.setdefault(trip.truck_id, trip)
@@ -2375,7 +2405,7 @@ def build_dispatcher_dashboard_context(
                 downtime_state_code_by_equipment_id.get(excavator.id) or ''
             ),
             has_pending=bool(row.get('pending')),
-            has_active_trips=bool(row.get('active_trips')),
+            has_active_trips=excavator.id in active_trip_by_excavator_id,
             has_accepted=bool(row.get('accepted')),
             is_in_active_zone=excavator.id in active_excavator_ids,
         )
@@ -2966,7 +2996,7 @@ def build_dispatcher_dashboard_context(
             primary_truck_slots[tile['card_id']] = (card, index, tile)
     garage_tiles_by_id = {tile['card_id']: tile for tile in truck_garage_tiles}
     displayed_bucket_truck_ids = set()
-    free_bucket_board_deadlines = []
+    free_bucket_board_deadlines = trip_display_deadlines.copy()
     for truck_id, marker in free_bucket_marker_by_truck_id.items():
         destination = complexes_by_id.get(marker['excavator_id'])
         if not destination:
