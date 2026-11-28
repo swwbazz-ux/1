@@ -11230,6 +11230,45 @@ th {
     min-width: 0;
 }
 
+.reference-reorder-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.reference-reorder-form {
+    margin: 0;
+}
+
+.reference-reorder-button {
+    display: inline-grid;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid #c7d9e3;
+    border-radius: 7px;
+    background: #f3f8fa;
+    color: var(--ink);
+    font: inherit;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.reference-reorder-button:hover,
+.reference-reorder-button:focus-visible {
+    border-color: var(--brand);
+    background: rgba(24, 172, 158, .12);
+    outline: none;
+}
+
+.reference-reorder-button:disabled {
+    opacity: .34;
+    cursor: not-allowed;
+}
+
 .reference-record-row-ok {
     border-left-color: var(--ok);
 }
@@ -14660,6 +14699,18 @@ th {
     border-color: var(--admin-green);
     background: var(--admin-green);
     color: #fff;
+}
+
+.system-admin-reference-detail-screen .reference-reorder-button {
+    border-color: var(--admin-line);
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+}
+
+.system-admin-reference-detail-screen .reference-reorder-button:hover,
+.system-admin-reference-detail-screen .reference-reorder-button:focus-visible {
+    border-color: var(--admin-green);
+    background: color-mix(in srgb, var(--admin-green) 16%, var(--admin-panel-soft));
 }
 
 .system-admin-reference-detail-screen .references-actions .button-link {
