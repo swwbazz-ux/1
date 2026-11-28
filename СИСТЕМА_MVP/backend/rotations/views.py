@@ -3,11 +3,13 @@ from urllib.parse import quote, urlencode
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db.models import Count, Q
+from django.db.models import Case, Count, Q, Value, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods, require_POST
 
 from settlement.models import SettlementResident
@@ -21,6 +23,7 @@ from shifts.models import (
     WatchPeriodBrigadePhaseRow,
     WatchPeriodBrigadePhaseVersion,
 )
+from users.forms import is_valid_russian_mobile_phone, normalize_phone
 from users.models import Employee, WatchComposition, WorkSchedule
 
 from users.role_apps import (
@@ -30,6 +33,7 @@ from users.role_apps import (
     role_app_service_worker_response,
 )
 from users.session_device import detect_session_device_kind
+from users.access_auth import can_review_watch_extensions, format_phone_for_display
 from users.views import get_current_access
 
 from .documents import build_extension_data_packet, document_bytes
@@ -110,6 +114,7 @@ from .models import (
     WatchExtensionCase,
 )
 from .services import (
+    approved_watch_extensions_on,
     close_cycle,
     decide_extension,
     mark_documentation_complete,
@@ -129,11 +134,11 @@ def _login_redirect(request):
     return redirect(f"{reverse('login')}?{urlencode({'next': request.get_full_path()})}")
 
 
-def _role_access(request, role_code):
+def _watch_extension_access(request):
     access = get_current_access(request)
     if not access:
         return None, _login_redirect(request)
-    if access.role.code != role_code:
+    if not can_review_watch_extensions(request, access):
         messages.error(request, 'У текущего доступа нет прав на этот рабочий раздел.')
         return None, redirect('role_home')
     return access, None
@@ -162,6 +167,7 @@ def _private_no_store(response):
     return response
 
 
+@sensitive_post_parameters('access_code')
 @require_http_methods(['GET', 'POST'])
 def timekeeper_login_view(request):
     if timekeeper_app_access_from_request(request):
@@ -174,22 +180,25 @@ def timekeeper_login_view(request):
     )
     if selected_device_kind not in {'personal', 'shared'}:
         selected_device_kind = detect_session_device_kind(request)
+    phone = ''
+    login_step = 'phone'
     if request.method == 'POST':
-        access = authenticate_timekeeper_app_access(
-            phone=request.POST.get('phone', ''),
-            access_code=request.POST.get('access_code', ''),
-        )
-        if access:
-            start_timekeeper_app_session(
-                request,
-                access,
-                device_kind=selected_device_kind,
+        phone = normalize_phone(request.POST.get('phone', ''))
+        if len(phone) == 10:
+            phone = f'7{phone}'
+        if is_valid_russian_mobile_phone(phone):
+            login_step = 'pin'
+        if request.POST.get('action') != 'continue':
+            access = authenticate_timekeeper_app_access(
+                phone=phone,
+                access_code=request.POST.get('access_code', '').strip().replace('-', ''),
             )
-            return redirect('rotation_timekeeper_dashboard')
-        messages.error(
-            request,
-            'Телефон или пинкод указаны неверно для приложения «Табельщик».',
-        )
+            if access:
+                start_timekeeper_app_session(request, access, device_kind=selected_device_kind)
+                return redirect('rotation_timekeeper_dashboard')
+            messages.error(request, 'Телефон или пинкод указаны неверно для приложения «Табельщик».')
+        elif login_step == 'phone':
+            messages.error(request, 'Введите мобильный номер телефона для входа в приложение «Табельщик».')
     return _private_no_store(render(
         request,
         'users/login.html',
@@ -197,6 +206,9 @@ def timekeeper_login_view(request):
             'selected_device_kind': selected_device_kind,
             'next_url': '',
             'login_role_app': get_role_app('timekeeper'),
+            'login_step': login_step,
+            'submitted_phone': format_phone_for_display(phone),
+            'change_login_phone_url': reverse('timekeeper_login'),
         },
     ))
 
@@ -1686,6 +1698,11 @@ def _response_form_view(request, *, response, access, is_timekeeper):
             'response': response,
             'form': form,
             'is_timekeeper': is_timekeeper,
+            'current_extension': (
+                None if is_timekeeper else approved_watch_extensions_on(
+                    timezone.localdate(), employee_ids=[access.employee_id],
+                ).get(access.employee_id)
+            ),
             'logout_url': reverse(
                 'timekeeper_logout' if is_timekeeper else 'logout',
             ),
@@ -1723,6 +1740,11 @@ def employee_home_view(request):
     )
     if response:
         return redirect('rotation_employee_response', response_id=response.pk)
+    current_extension = approved_watch_extensions_on(
+        timezone.localdate(), employee_ids=[access.employee_id],
+    ).get(access.employee_id)
+    if current_extension:
+        return redirect('rotation_employee_response', response_id=current_extension.response_id)
     return render(
         request,
         'rotations/employee_empty.html',
@@ -1747,8 +1769,17 @@ def employee_response_view(request, response_id):
     )
 
 
+def site_manager_home_view(request):
+    from reports.views import management_dashboard_view
+
+    _, denied = _watch_extension_access(request)
+    if denied:
+        return denied
+    return management_dashboard_view(request)
+
+
 def site_manager_queue_view(request):
-    access, response = _role_access(request, 'site_manager')
+    access, response = _watch_extension_access(request)
     if response:
         return response
     status = request.GET.get('status', '').strip()
@@ -1756,48 +1787,78 @@ def site_manager_queue_view(request):
         WatchExtensionCase.objects
         .select_related(
             'response__employee',
-            'response__cycle__target_watch_period',
+            'response__cycle',
             'decision_by',
         )
-        .order_by('decision_status', 'response__snapshot_full_name')
+        .order_by(
+            Case(When(decision_status='pending', then=Value(0)), default=Value(1)),
+            '-decision_at',
+            'response__snapshot_full_name',
+            'pk',
+        )
     )
     if status in {'pending', 'approved', 'rejected'}:
         cases = cases.filter(decision_status=status)
-    aggregate = WatchExtensionCase.objects.aggregate(
-        total=Count('id'),
-        pending=Count('id', filter=Q(decision_status='pending')),
-        approved=Count('id', filter=Q(decision_status='approved')),
-        rejected=Count('id', filter=Q(decision_status='rejected')),
-    )
     return render(
         request,
         'rotations/site_manager_queue.html',
-        {'access': access, 'cases': cases, 'metrics': aggregate},
+        {
+            'access': access,
+            'cases': cases,
+            'decision_route': (
+                'management_extension_decision' if access.role.code == 'manager'
+                else 'rotation_site_manager_decision'
+            ),
+        },
     )
 
 
 @require_POST
 def site_manager_decision_view(request, case_id, decision):
-    access, response = _role_access(request, 'site_manager')
+    access, response = _watch_extension_access(request)
     if response:
         return response
     extension_case = get_object_or_404(WatchExtensionCase, pk=case_id)
     try:
+        approved_end = None
+        if decision == 'approved' and 'approved_end' in request.POST:
+            try:
+                approved_end = parse_date(request.POST['approved_end'])
+            except ValueError as error:
+                raise ValidationError('Укажите корректную дату окончания продления.') from error
+            if approved_end is None:
+                raise ValidationError('Укажите корректную дату окончания продления.')
+        expected_updated_at = None
+        if 'case_updated_at' in request.POST:
+            try:
+                expected_updated_at = parse_datetime(request.POST['case_updated_at'])
+            except ValueError as error:
+                raise ValidationError('Обновите очередь и повторите решение.') from error
+            if expected_updated_at is None:
+                raise ValidationError('Обновите очередь и повторите решение.')
         decide_extension(
             extension_case,
             actor=access.employee,
             decision=decision,
             comment=request.POST.get('comment', ''),
+            approved_end=approved_end,
+            expected_updated_at=expected_updated_at,
         )
         messages.success(
             request,
-            'Продление одобрено и возвращено табельщику.'
+            'Продление согласовано и передано табельщику.'
             if decision == 'approved'
             else 'Продление отклонено. Причина сохранена.',
         )
     except ValidationError as error:
         messages.error(request, _validation_message(error))
-    return redirect('rotation_site_manager_queue')
+    target = reverse(
+        'management_extensions' if access.role.code == 'manager' else 'rotation_site_manager_queue',
+    )
+    overview_date = request.GET.get('overview_date')
+    if overview_date:
+        target = f"{target}?{urlencode({'overview_date': overview_date})}"
+    return redirect(target)
 
 
 @require_POST

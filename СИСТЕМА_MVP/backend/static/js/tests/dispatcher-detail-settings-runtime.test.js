@@ -144,6 +144,142 @@ test("detail settings presenter renders work fields and destination rows indepen
     assert.equal(nodes.get("[data-gd-detail-settings]").hidden, true);
 });
 
+function optionValues(select) {
+    return select.options.map((option) => option.value);
+}
+
+function destinationSelects(nodes) {
+    const list = nodes.get("[data-gd-destination-list]");
+    return list
+        .querySelectorAll("[data-gd-destination-row]")
+        .map((row) => row.querySelector("[data-gd-destination-select]"));
+}
+
+function destinationRemoveButtons(nodes) {
+    const list = nodes.get("[data-gd-destination-list]");
+    return list
+        .querySelectorAll("[data-gd-destination-row]")
+        .map((row) => row.querySelector("[data-gd-destination-remove]"));
+}
+
+function renderSettings(window, nodes, settings) {
+    const runtime = window.createDispatcherDetailSettings({
+        detailLayer: fakeElement("section"),
+        getShiftOpen: () => true,
+        roleIsReadonly: () => false,
+    });
+    runtime.render(settings);
+    return runtime;
+}
+
+const THREE_POINTS = [
+    {id: 1, name: "ККД"},
+    {id: 2, name: "СКДР"},
+    {id: 3, name: "Отвал"},
+];
+
+test("assigned dump points are absent from other destination rows", () => {
+    const {window, nodes} = loadSettingsRuntime();
+    renderSettings(window, nodes, {
+        editable: true,
+        rock_type_id: 7,
+        rock_types: [{id: 7, name: "Вскрыша"}],
+        dump_points: THREE_POINTS,
+        destinations: [{dump_point_id: 1}, {dump_point_id: 2}],
+    });
+
+    const selects = destinationSelects(nodes);
+    assert.equal(selects.length, 2);
+    assert.deepEqual(optionValues(selects[0]), ["", "1", "3"]);
+    assert.deepEqual(optionValues(selects[1]), ["", "2", "3"]);
+    assert.equal(selects[0].value, "1");
+    assert.equal(selects[1].value, "2");
+});
+
+test("adding a destination picks a free point and removing frees it again", () => {
+    const {window, nodes} = loadSettingsRuntime();
+    const runtime = renderSettings(window, nodes, {
+        editable: true,
+        rock_type_id: 7,
+        rock_types: [{id: 7, name: "Вскрыша"}],
+        dump_points: THREE_POINTS,
+        destinations: [{dump_point_id: 1}, {dump_point_id: 2}],
+    });
+
+    nodes.get("[data-gd-destination-add]").listeners.get("click")();
+
+    let selects = destinationSelects(nodes);
+    assert.equal(selects.length, 3);
+    assert.equal(selects[2].value, "3");
+    assert.deepEqual(optionValues(selects[0]), ["", "1"]);
+    assert.deepEqual(optionValues(selects[1]), ["", "2"]);
+    assert.deepEqual(optionValues(selects[2]), ["", "3"]);
+    assert.equal(nodes.get("[data-gd-destination-add]").disabled, true);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(runtime.collectDestinations().map((row) => row.dump_point_id))),
+        ["1", "2", "3"]
+    );
+
+    destinationRemoveButtons(nodes)[2].listeners.get("click")();
+
+    selects = destinationSelects(nodes);
+    assert.equal(selects.length, 2);
+    assert.deepEqual(optionValues(selects[0]), ["", "1", "3"]);
+    assert.deepEqual(optionValues(selects[1]), ["", "2", "3"]);
+    assert.equal(nodes.get("[data-gd-destination-add]").disabled, false);
+});
+
+test("clearing a row returns its point to the other rows", () => {
+    const {window, nodes} = loadSettingsRuntime();
+    renderSettings(window, nodes, {
+        editable: true,
+        rock_type_id: 7,
+        rock_types: [{id: 7, name: "Вскрыша"}],
+        dump_points: THREE_POINTS,
+        destinations: [{dump_point_id: 1}, {dump_point_id: 2}],
+    });
+
+    const select = destinationSelects(nodes)[1];
+    select.value = "";
+    select.listeners.get("change")();
+
+    assert.deepEqual(optionValues(destinationSelects(nodes)[0]), ["", "1", "2", "3"]);
+});
+
+test("empty catalogue and fully assigned list leave nothing to add", () => {
+    const {window, nodes} = loadSettingsRuntime();
+    renderSettings(window, nodes, {
+        editable: true,
+        rock_type_id: 7,
+        rock_types: [{id: 7, name: "Вскрыша"}],
+        dump_points: [],
+        destinations: [],
+    });
+
+    assert.equal(destinationSelects(nodes).length, 0);
+    assert.equal(nodes.get("[data-gd-destination-count]").textContent, "не назначены");
+    assert.equal(nodes.get("[data-gd-destination-add]").disabled, true);
+
+    const second = loadSettingsRuntime();
+    renderSettings(second.window, second.nodes, {
+        editable: true,
+        rock_type_id: 7,
+        rock_types: [{id: 7, name: "Вскрыша"}],
+        dump_points: [{id: 1, name: "ККД"}, {id: 2, name: "СКДР"}],
+        destinations: [{dump_point_id: 1}, {dump_point_id: 2}],
+    });
+
+    assert.equal(second.nodes.get("[data-gd-destination-add]").disabled, true);
+    assert.deepEqual(
+        optionValues(destinationSelects(second.nodes)[0]),
+        ["", "1"]
+    );
+    assert.deepEqual(
+        optionValues(destinationSelects(second.nodes)[1]),
+        ["", "2"]
+    );
+});
+
 test("settings code has one owner and detail runtime delegates render and reset", () => {
     assert.match(SETTINGS_SOURCE, /function saveDetailSettings\(\)/);
     assert.match(SETTINGS_SOURCE, /function addDetailDestinationRow\(destination\)/);
@@ -162,7 +298,7 @@ test("settings module is loaded before detail and packaged exactly once", () => 
     assert.ok(settingsIndex >= 0, "settings module is absent from dispatcher template");
     assert.ok(chartsIndex > settingsIndex, "charts must load after settings presenter");
     assert.ok(detailIndex > chartsIndex, "detail must load after its presenters");
-    assert.match(TEMPLATE, /dispatcher-detail-settings-v1\.js[^\n]+dispatcher-desktop-shell-v166/);
+    assert.match(TEMPLATE, /dispatcher-detail-settings-v1\.js[^\n]+dispatcher-desktop-shell-v171/);
 
     const pwaMatches = PWA_SOURCE.match(/\/static\/js\/dispatcher-detail-settings-v1\.js/g) || [];
     assert.equal(pwaMatches.length, 1, "settings module must occur once in PWA CORE_ASSETS");

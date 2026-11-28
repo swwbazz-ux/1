@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from settlement import validator as validator_module
+from settlement.intervals import effective_ends_at
 from settlement.validator import (
     ActualPlacementType,
     ActualPlacementValidationRequest,
@@ -21,6 +22,7 @@ from settlement.validator import (
     PersonnelContext,
     PlacementBasisContext,
     PlacementConflictValidationRequest,
+    PlacementStructureValidationRequest,
     ValidationFact,
     ValidationFinding,
     ValidationLevel,
@@ -28,6 +30,7 @@ from settlement.validator import (
     ValidationUiTarget,
     validate_actual_placement,
     validate_placement_conflicts,
+    validate_placement_structure,
 )
 
 
@@ -261,7 +264,7 @@ class ActualPlacementValidatorContractTests(unittest.TestCase):
             housing=housing,
             calendar=calendar,
             confirmed_exceptions=(),
-            rule_set_version="settlement-rules-2026-08-04",
+            rule_set_version="SET-R001-R101/2026-11-21",
         )
 
     @staticmethod
@@ -1262,6 +1265,167 @@ class ActualPlacementValidatorContractTests(unittest.TestCase):
         )
         self.assertIs(validator_module._REGISTERED_CHECKS, registry_before)
         self.assertEqual(django_modules_after, django_modules_before)
+
+
+class PlacementStructureContractTests(unittest.TestCase):
+    """Z1/Z2/C-2: структурный контракт точки записи и фильтр правил."""
+
+    STARTS_AT = datetime(2026, 8, 4, 6, 0, tzinfo=timezone.utc)
+    ENDS_AT = datetime(2026, 8, 20, 6, 0, tzinfo=timezone.utc)
+
+    def _request(self, **overrides):
+        values = {
+            "phase": ValidationPhase.COMMIT,
+            "employee_id": 101,
+            "bed_stable_id": "BED-KIS5-01-101-A-1",
+            "placement_type": ActualPlacementType.TEMPORARY,
+            "starts_at": self.STARTS_AT,
+            "ends_at": self.ENDS_AT,
+            "checked_at": self.STARTS_AT,
+            "rule_set_version": "SET-R001-R101/2026-11-21",
+        }
+        values.update(overrides)
+        return PlacementStructureValidationRequest(**values)
+
+    def _codes(self, request):
+        return [
+            (finding.code, finding.rule_id)
+            for finding in validate_placement_structure(request)
+        ]
+
+    def test_agreed_rule_ids_include_t044_rules_and_version(self) -> None:
+        # T-044: реестр — 101 правило; R095–R101 утверждены и не должны
+        # отбрасываться фильтром findings.
+        from settlement import validator as validator_module
+        from settlement.services import SETTLEMENT_RULE_SET_VERSION
+
+        new_ids = {f"SET-R{number:03d}" for number in range(95, 102)}
+        self.assertTrue(new_ids <= validator_module._AGREED_RULE_IDS)
+        for rule_id in sorted(new_ids):
+            validator_module._require_agreed_rule_id(rule_id)
+        self.assertEqual(
+            SETTLEMENT_RULE_SET_VERSION,
+            "SET-R001-R101/2026-11-21",
+        )
+        self.assertTrue(SETTLEMENT_RULE_SET_VERSION.strip())
+
+    def test_approved_r055_r058_r076_and_reserve_message(self) -> None:
+        # T-044 review-12: R055/R058/R076 в реестре «Утверждено», но
+        # отсутствовали в наборе; текст 38 — только командированный.
+        from settlement import special_fund
+        from settlement import validator as validator_module
+
+        missing_ids = {"SET-R055", "SET-R058", "SET-R076"}
+        self.assertTrue(missing_ids <= validator_module._AGREED_RULE_IDS)
+        for rule_id in sorted(missing_ids):
+            validator_module._require_agreed_rule_id(rule_id)
+        message = special_fund._MESSAGES[
+            special_fund.CODE_PROTECTED_DISPATCH_ONLY
+        ]
+        self.assertIn(
+            "только командированному из центрального офиса",
+            message,
+        )
+        self.assertNotIn("другой гость", message)
+
+    def test_valid_structure_has_no_findings(self) -> None:
+        self.assertEqual(validate_placement_structure(self._request()), ())
+
+    def test_input_contract_codes_match_write_path(self) -> None:
+        cases = (
+            (
+                {"employee_id": 0},
+                ("settlement.input.employee_id.invalid", "SET-R003"),
+            ),
+            (
+                {"bed_stable_id": "   "},
+                ("settlement.input.bed_stable_id.required", "SET-R030"),
+            ),
+            (
+                {"bed_stable_id": "B" * 65},
+                ("settlement.input.bed_stable_id.too_long", "SET-R030"),
+            ),
+            (
+                {"starts_at": self.STARTS_AT.replace(tzinfo=None)},
+                ("settlement.input.starts_at.timezone_required", "SET-R035"),
+            ),
+            (
+                {"ends_at": self.STARTS_AT},
+                ("settlement.input.interval.empty", "SET-R035"),
+            ),
+            (
+                {"ends_at": self.STARTS_AT - timedelta(seconds=1)},
+                ("settlement.input.interval.reversed", "SET-R035"),
+            ),
+            (
+                {"ends_at": None},
+                ("settlement.input.ends_at.required_for_temporary", "SET-R066"),
+            ),
+            (
+                {"phase": "replay"},
+                ("settlement.input.phase.invalid", "SET-R092"),
+            ),
+            (
+                {"checked_at": self.STARTS_AT.replace(tzinfo=None)},
+                ("settlement.input.checked_at.timezone_required", "SET-R093"),
+            ),
+            (
+                {"rule_set_version": ""},
+                ("settlement.input.rule_set_version.required", "SET-R094"),
+            ),
+        )
+        for overrides, expected in cases:
+            with self.subTest(overrides=overrides):
+                codes = self._codes(self._request(**overrides))
+                self.assertIn(expected, codes)
+
+    def test_agreed_filter_includes_set_r023_and_set_r057(self) -> None:
+        # C-2: оба правила «Утверждено», но отсутствовали в фильтре.
+        for rule_id in ("SET-R023", "SET-R057"):
+            with self.subTest(rule_id=rule_id):
+                self.assertIn(rule_id, validator_module._AGREED_RULE_IDS)
+                finding = ValidationFinding(
+                    level=ValidationLevel.BLOCK,
+                    code="settlement.contract.test",
+                    rule_id=rule_id,
+                    related_rule_ids=(),
+                    message="Контракт правила.",
+                    technical_details={"field": "test"},
+                    ui_target=ValidationUiTarget(scope="form", field="test"),
+                )
+                self.assertEqual(finding.rule_id, rule_id)
+
+
+class EffectiveEndsAtTests(unittest.TestCase):
+    """Z3 / SET-R076: min(ends_at, terminated_at)."""
+
+    STARTS_AT = datetime(2026, 8, 4, 6, 0, tzinfo=timezone.utc)
+    PLANNED_END = datetime(2026, 8, 20, 6, 0, tzinfo=timezone.utc)
+    TERMINATED_AT = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+
+    def test_open_interval_has_no_effective_end(self) -> None:
+        self.assertIsNone(effective_ends_at(None, None))
+
+    def test_single_boundary_is_returned(self) -> None:
+        self.assertEqual(
+            effective_ends_at(self.PLANNED_END, None),
+            self.PLANNED_END,
+        )
+        self.assertEqual(
+            effective_ends_at(None, self.TERMINATED_AT),
+            self.TERMINATED_AT,
+        )
+
+    def test_earliest_of_planned_end_and_termination_wins(self) -> None:
+        self.assertEqual(
+            effective_ends_at(self.PLANNED_END, self.TERMINATED_AT),
+            self.TERMINATED_AT,
+        )
+        later_termination = self.PLANNED_END + timedelta(days=5)
+        self.assertEqual(
+            effective_ends_at(self.PLANNED_END, later_termination),
+            self.PLANNED_END,
+        )
 
 
 if __name__ == "__main__":

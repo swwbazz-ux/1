@@ -1,21 +1,23 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{% if dispatcher_page_title %}{{ dispatcher_page_title }}{% else %}Горный диспетчер{% endif %}{% endblock %}
+{% block title %}{% if deputy_dispatcher_viewer %}Диспетчерский пульт · Зам. начальника участка{% elif dispatcher_page_title %}{{ dispatcher_page_title }}{% else %}Горный диспетчер{% endif %}{% endblock %}
 {% block app_stylesheets %}
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
     {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v166">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v171">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v171">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v171">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v171">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v171">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v171">
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
 {% block extra_head %}
+    <link rel="stylesheet" href="{% static 'css/dispatcher-free-bucket-v1.css' %}?v=2">
+    <script src="{% static 'js/dispatcher-free-bucket-v1.js' %}?v=1" defer></script>
     {% if mining_master_mobile_enabled %}
         <link rel="manifest" href="{% url 'mining_master_manifest' %}">
         <meta name="theme-color" content="#2366A8">
@@ -25,7 +27,20 @@
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
         <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
-        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v165" defer></script>
+        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v167" defer></script>
+    {% elif deputy_dispatcher_viewer %}
+        {% include "includes/deputy_mining_manager_pwa_head.html" %}
+        <style>
+            .dispatcher-shell .dispatcher-command-actions.deputy-board-navigation {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .deputy-board-navigation .dispatcher-utility-link {
+                width: auto;
+                padding-inline: 1em;
+            }
+        </style>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -46,10 +61,15 @@
     class="dispatcher-shell"
     data-dispatcher-theme
     data-static-prefix="{% static '' %}"
+    {% if deputy_dispatcher_viewer %}
+    data-dispatcher-view-only="true"
+    data-dispatcher-detail-url-template="{% url 'deputy_dispatcher_equipment_detail' category='equipment' equipment_id=0 %}"
+    {% else %}
     data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
     data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
     data-dispatcher-detail-url-template="{% url 'dispatcher_equipment_detail' category='equipment' equipment_id=0 %}"
     data-dispatcher-downtime-close-url-template="{% url 'dispatcher_close_downtime' event_id=0 %}"
+    {% endif %}
     data-dispatcher-service-worker-scope="{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}"
 >
     <h1 class="dispatcher-compat-title">{% if dispatcher_compat_title %}{{ dispatcher_compat_title }}{% else %}Диспетчерский пульт{% endif %}</h1>
@@ -64,7 +84,7 @@
     {% include "trips/includes/dispatcher_board.html" %}
 
     {% if mining_master_mobile_enabled %}
-    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %} {% if not dispatcher_header.shift_is_open %}is-readonly{% endif %}" data-mm-mobile-readonly="{% if dispatcher_header.shift_is_open %}false{% else %}true{% endif %}" aria-label="Мобильный пульт Горного мастера">
+    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %} {% if not dispatcher_header.shift_is_open %}is-readonly{% endif %}" data-mm-mobile-readonly="{% if dispatcher_header.shift_is_open %}false{% else %}true{% endif %}" data-server-now="{{ server_now|date:'c' }}" data-dispatcher-free-bucket-refresh-at="{{ dispatcher_dashboard.free_bucket_board_refresh_at|date:'c' }}" aria-label="Мобильный пульт Горного мастера">
         <div class="mm-mobile-home" data-mm-mobile-view="home">
         <header class="mm-mobile-header">
             <div class="mm-mobile-title">
@@ -113,13 +133,26 @@
                             <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         </div>
                         <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{{ complex.active_truck_tiles|length }}"{% if complex.mobile_transfer_notice %} data-mm-transfer-notice="{{ complex.mobile_transfer_notice }}"{% endif %}>
-                            {% for truck in complex.active_truck_tiles %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}"{% if truck.has_current_shift %} data-application-presence="{{ truck.presence_status }}" data-application-presence-label="{{ truck.presence_label }}"{% endif %}><b class="mm-mobile-truck-number">{{ truck.name }}</b>{% if truck.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ truck.presence_status }}" data-mm-mobile-presence-indicator title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}</span>
+                            {% for truck in complex.board_truck_tiles %}
+                                {% if truck.free_bucket_temporary %}
+                                    <button type="button" class="mm-mobile-truck-mini is-free-bucket-temporary" data-mm-mobile-free-bucket-details="{{ truck.card_id }}" data-mm-mobile-ignore-double-tap="true" title="{{ truck.free_bucket_label }} · {{ truck.label }}" aria-label="Самосвал {{ truck.name }} · {{ truck.free_bucket_label }} · {{ truck.label }}">
+                                        <b class="mm-mobile-truck-number">{{ truck.name }}</b>
+                                        <small>{{ truck.label }}</small>
+                                        {% include "trips/includes/dispatcher_free_bucket_badge.html" %}
+                                    </button>
+                                {% elif truck.free_bucket_away_to %}
+                                    <button type="button" class="mm-mobile-truck-mini is-free-bucket-away" disabled title="Временно в {{ truck.free_bucket_away_to }}" data-mm-mobile-ignore-double-tap="true" data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}">
+                                        <b class="mm-mobile-truck-number">{{ truck.name }}</b>
+                                        <small>В {{ truck.free_bucket_away_to }}</small>
+                                    </button>
+                                {% else %}
+                                    <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.free_bucket_outbound %} is-free-bucket-outbound{% endif %}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}"{% if truck.has_current_shift %} data-application-presence="{{ truck.presence_status }}" data-application-presence-label="{{ truck.presence_label }}"{% endif %}><b class="mm-mobile-truck-number">{{ truck.name }}</b>{% if truck.free_bucket_outbound %}<small>{{ truck.label }}</small>{% endif %}{% if truck.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ truck.presence_status }}" data-mm-mobile-presence-indicator title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}</span>
+                                {% endif %}
                             {% endfor %}
                             {% if complex.mobile_truck_overflow %}
                                 <button type="button" class="mm-mobile-truck-mini is-more" data-mm-mobile-open-truck-list data-mm-mobile-ignore-double-tap="true" aria-label="Показать остальные самосвалы комплекса">+{{ complex.mobile_truck_overflow }}</button>
                             {% endif %}
-                            {% if not complex.active_truck_tiles %}
+                            {% if not complex.board_truck_tiles %}
                                 <span class="mm-mobile-truck-empty">нет</span>
                             {% endif %}
                         </div>
@@ -437,7 +470,7 @@
                         </div>
                         <div class="mm-mobile-fill-assigned" data-mm-mobile-fill-assigned aria-label="Самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}"{% if truck.has_current_shift %} data-application-presence="{{ truck.presence_status }}" data-application-presence-label="{{ truck.presence_label }}"{% endif %}><b class="mm-mobile-truck-number">{{ truck.name }}</b>{% if truck.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ truck.presence_status }}" data-mm-mobile-presence-indicator title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.free_bucket_outbound %} is-free-bucket-outbound{% endif %}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}"{% if truck.has_current_shift %} data-application-presence="{{ truck.presence_status }}" data-application-presence-label="{{ truck.presence_label }}"{% endif %}><b class="mm-mobile-truck-number">{{ truck.name }}</b>{% if truck.free_bucket_outbound %}<small>{{ truck.label }}</small>{% endif %}{% if truck.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ truck.presence_status }}" data-mm-mobile-presence-indicator title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}</span>
                             {% endfor %}
                         </div>
                     </div>
@@ -568,18 +601,18 @@
     {% endif %}
     {% endif %}
 
-    {% include "trips/includes/dispatcher_service_lists.html" %}
+    {% if not deputy_dispatcher_viewer %}{% include "trips/includes/dispatcher_service_lists.html" %}{% endif %}
 
     {% include "trips/includes/dispatcher_equipment_detail.html" %}
 </main>
 </div>
-{% if not mining_master_mobile_enabled %}
+{% if not mining_master_mobile_enabled and not deputy_dispatcher_viewer %}
 {% include "trips/includes/dispatcher_push_invite.html" %}
 {% endif %}
 {% endspaceless %}
 {% if not mining_master_mobile_enabled %}
 {# Холст: общий скрипт диспетчерских экранов (static/js/dispatcher-canvas-v1.js). #}
-<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v166"></script>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v171"></script>
 {% else %}
 <script>
 (function () {
@@ -744,7 +777,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v165";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v167";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1575,6 +1608,11 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     };
     var dispatcherNotice = document.querySelector("[data-dispatcher-notice]");
+    if (typeof window.startDispatcherFreeBucketRefresh === "function") {
+        window.startDispatcherFreeBucketRefresh(".mm-mobile-shell", isMobileOperationalRefreshUnsafe, function () {
+            return refreshMobileBoardFromServer({ preserveScreen: true });
+        });
+    }
     var dispatcherNoticeMessage = document.querySelector("[data-dispatcher-notice-message]");
     var dispatcherNoticeClose = document.querySelector("[data-dispatcher-notice-close]");
     function closeDispatcherNotice() {
@@ -2748,9 +2786,15 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!preview) return;
             var truckTiles = Array.from(preview.querySelectorAll(".mm-mobile-truck-mini:not(.is-more)"));
             var tiles = truckTiles.length;
-            var visibleLimit = 3;
-            truckTiles.forEach(function (tile, index) {
-                tile.hidden = index >= visibleLimit;
+            var bucketTiles = truckTiles.filter(function (tile) {
+                return tile.matches(".is-free-bucket-temporary, .is-free-bucket-away, .is-free-bucket-outbound");
+            });
+            var visibleLimit = Math.max(3, bucketTiles.length);
+            var visibleTiles = new Set(bucketTiles.concat(truckTiles.filter(function (tile) {
+                return !bucketTiles.includes(tile);
+            })).slice(0, visibleLimit));
+            truckTiles.forEach(function (tile) {
+                tile.hidden = !visibleTiles.has(tile);
             });
             var overflowCount = Math.max(0, tiles - visibleLimit);
             var overflow = preview.querySelector(".mm-mobile-truck-mini.is-more");
@@ -2840,10 +2884,19 @@ document.addEventListener("DOMContentLoaded", function () {
             var zone = screen.querySelector("[data-mm-mobile-fill-drop]");
             if (!preview || !assigned) return;
             var excavatorId = (zone && zone.dataset.mmMobileFillExcavatorId) || (card && card.dataset.mmMobileExcavatorId) || "";
-            preview.querySelectorAll(".mm-mobile-truck-mini, .mm-mobile-truck-empty").forEach(function (node) {
+            var reserved = new Map(Array.from(preview.querySelectorAll(".is-free-bucket-away, .is-free-bucket-outbound")).map(function (tile) {
+                return [tile.dataset.mmMobileHomeTruckId, tile];
+            }));
+            preview.querySelectorAll(".mm-mobile-truck-mini:not(.is-free-bucket-temporary), .mm-mobile-truck-empty").forEach(function (node) {
                 node.remove();
             });
             Array.from(assigned.querySelectorAll("[data-mm-mobile-assigned-truck-id]")).forEach(function (source) {
+                var reservedTile = reserved.get(source.dataset.mmMobileAssignedTruckId);
+                if (reservedTile) {
+                    reservedTile.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
+                    preview.appendChild(reservedTile);
+                    return;
+                }
                 var mini = document.createElement("span");
                 mini.className = "mm-mobile-truck-mini " + getMobileAssignedTruckStatusClass(source);
                 mini.dataset.mmMobileHomeTruckId = source.dataset.mmMobileAssignedTruckId || "";
@@ -3850,7 +3903,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         function bindMobileHomeTruckDrag(mini) {
-            if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
+            if (!mini || mini.disabled || mini.dataset.mmMobileHomeTruckBound === "true") return;
             mini.dataset.mmMobileHomeTruckBound = "true";
             bindMobileTruckTransferDrag(mini);
         }
@@ -5402,6 +5455,12 @@ document.addEventListener("DOMContentLoaded", function () {
         shell.querySelectorAll("[data-mm-mobile-fill-assigned]").forEach(updateMobileFillAssignedLayout);
         shell.querySelectorAll(".mm-mobile-truck-preview").forEach(updateMobileHomeTruckPreviewLayout);
         shell.querySelectorAll("[data-mm-mobile-home-truck-id]").forEach(bindMobileHomeTruckDrag);
+        shell.querySelectorAll("[data-mm-mobile-free-bucket-details]").forEach(function (button) {
+            button.onclick = function (event) {
+                event.stopPropagation();
+                openEquipmentCard(button.dataset.mmMobileFreeBucketDetails);
+            };
+        });
         updateMobileHomeComplexGridLayout();
         updateMobileExcavatorGarageGridLayout();
         shell.querySelectorAll("[data-mm-mobile-nav]").forEach(function (item) {
@@ -6820,22 +6879,22 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
+<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-transport-v1.js' %}?v={% if deputy_dispatcher_viewer %}20261125-deputy-view{% else %}dispatcher-desktop-shell-v171{% endif %}" defer></script>
+<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v171" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v={% if deputy_dispatcher_viewer %}20261125-deputy-view{% else %}dispatcher-desktop-shell-v171{% endif %}" defer></script>
 {% endif %}
 {% endblock %}

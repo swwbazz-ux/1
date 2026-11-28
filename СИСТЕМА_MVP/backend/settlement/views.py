@@ -1,39 +1,62 @@
 import json
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import date, datetime, timedelta
+from functools import wraps
+from hashlib import sha256
 from urllib.parse import urlencode
 
 from django import forms
 from django.contrib import messages
+from django.core import signing
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
-from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.http import FileResponse, HttpResponse, HttpResponseNotAllowed, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from assignments.models import AssignmentStatus, EquipmentAssignment
-from core.production_time import production_day_bounds, production_work_date
+from assignments.models import AssignmentStatus, CrewPlan, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment
+from assignments.off_equipment import off_equipment_on
+from core.production_time import (
+    BUSINESS_TIME_ZONE, DAY_SHIFT_START, business_localtime, production_day_bounds, production_work_date,
+)
+from references.models import Dormitory
 from shifts.models import EmployeeShift
-from users.active_role import role_session_state
-from users.models import Employee, EmployeeAccess
+from users.active_role import active_access_for_employee_role, role_session_state
+from users.work_profiles import (
+    PRODUCTION_APP_ROLE_CODES, effective_specializations_by_employee_id,
+    legacy_work_category_for_specialization,
+)
+from users.models import (
+    ContractorOrganization,
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+)
 from users.role_apps import (
     get_role_app,
     role_app_manifest_response,
     role_app_service_worker_response,
 )
 from rotations.arrival_roster_routing import settlement_clerk_arrival_roster_routing_queue
+from rotations.services import approved_watch_extensions_on
 
 from .control import (
     SettlementControlWriteContext,
     acquire_control_lease,
     clear_control_session_credentials,
     control_session_credentials_from_session,
+    ensure_control_lease,
     heartbeat_control_lease,
+    lock_settlement_write_lease,
     release_control_lease,
     store_control_session_credentials,
+    takeover_control_lease,
 )
 from .apply import apply_confirmed_settlement_preview
 from .cohorts import (
@@ -41,7 +64,45 @@ from .cohorts import (
     create_approved_arrival_roster_cohort,
     revalidate_routing_cohort_members,
 )
-from .cohort_readiness import build_arrival_roster_cohort_overview
+from .clerk_shifts import (
+    clerk_shift_payload,
+    clerk_shift_state,
+    close_clerk_shift,
+    handover_clerk_shift,
+    open_clerk_shift,
+)
+from rotations.models import ArrivalRosterRoutingBatch, ArrivalRosterVersion
+from .resolver import resolve_ready_arrivals
+from .cohort_readiness import build_arrival_roster_cohort_overview, build_arrival_roster_cohort_readiness
+from .current_housing_draft import CurrentHousingDraft, CurrentHousingDraftStorage
+from .current_housing_export import build_current_housing_export
+from .watch_templates import active_template_periods, save_watch_template, store_watch_snapshot
+from .next_housing import next_housing_snapshot
+from .current_housing_import import (
+    MANUAL_BED_BLOCKERS,
+    MAX_FILE_SIZE,
+    apply_current_housing,
+    build_current_housing_preview,
+    external_housing_card_exists,
+    housing_review_cases,
+    housing_review_map,
+    interwatch_occupancy_id,
+    parse_current_housing_workbook,
+    preview_placements,
+    preview_releases,
+    search_housing_subjects,
+)
+from .fund import (
+    close_dormitory as close_fund_dormitory,
+    create_bed as create_fund_bed,
+    create_dormitory as create_fund_dormitory,
+    create_room as create_fund_room,
+    fund_dormitory_list,
+    reopen_dormitory as reopen_fund_dormitory,
+    room_map_positions,
+    set_room_transfer_status,
+)
+from .intervals import occupancy_interval
 from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
@@ -50,6 +111,14 @@ from .models import (
     SettlementCohortMember,
     SettlementPreviewCorrection,
     SettlementPreviewRun,
+    SettlementResident,
+    SettlementWatchTemplate,
+)
+from .personnel_categories import (
+    MISSING_CATEGORY,
+    MISSING_CATEGORY_MESSAGE,
+    ROOM_CATEGORY_CONFLICT,
+    ROOM_CATEGORY_CONFLICT_MESSAGE,
 )
 from .preview_corrections import (
     exclude_settlement_preview_resident,
@@ -58,19 +127,41 @@ from .preview_corrections import (
     restore_settlement_preview_resident,
 )
 from .resolver import _slot_candidates as _resolver_slot_candidates
+from .residents import create_external_resident, get_or_create_employee_resident, update_resident_card
 from .saved_previews import (
     confirm_settlement_preview_run,
     create_settlement_preview_run,
     settlement_preview_is_stale,
 )
 from .services import (
+    MANUAL_CATEGORY_EXCEPTION_LABEL,
+    current_housing_excel_occupancy_ids,
     current_roster_resolution,
     build_auto_settlement_preview,
+    can_edit_stay,
     effective_occupancy_at_q,
+    occupancies_with_manual_category_exception,
     relocate_resident_to_bed,
     release_resident_from_bed,
+    resident_stay_version,
     settle_resident_on_bed,
+    swap_resident_beds,
     unsettled_current_roster_employees,
+    update_resident_stay,
+)
+from .special_fund import room_anchor_types_by_room
+from .temporary_placement import (
+    cancel_bed_preparation,
+    clear_bed_reserve,
+    confirm_bed_preparation,
+    preview_bed_checkin,
+    extend_bed_preparation,
+    prepare_bed,
+    relocate_temporary_occupancy,
+    release_temporary_occupancy,
+    set_bed_reserve,
+    suggest_beds_for_preparation,
+    temporary_placement_state,
 )
 
 
@@ -85,7 +176,18 @@ SHIFT_FILTER_VALUES = {
     'Ранняя': 'early',
 }
 
+# T-029, Q-06/Д3: в ручной форме заселения только «Постоянное» и «Временное».
+# «Предложенное» — историческое значение; «Временное до утверждения» создаётся
+# только сервисом срочного размещения (prepare → confirm), иначе клерк получает
+# тупик 409 на карте. Значения остаются в модели и читаются на старых строках.
+NEW_SETTLEMENT_ASSIGNMENT_TYPES = frozenset({
+    EmployeeBedOccupancy.AssignmentType.PERMANENT,
+    EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+})
+
 AUTO_SETTLEMENT_REASON_LABELS = {
+    MISSING_CATEGORY: MISSING_CATEGORY_MESSAGE,
+    ROOM_CATEGORY_CONFLICT: ROOM_CATEGORY_CONFLICT_MESSAGE,
     'cohort_not_approved': 'Состав заезда ещё не утверждён.',
     'resolver_not_configured': 'Для этого случая ещё не настроено правило размещения.',
     'resident_inactive': 'Карточка жильца неактивна.',
@@ -95,6 +197,15 @@ AUTO_SETTLEMENT_REASON_LABELS = {
     'no_compatible_place': 'Подходящее свободное место не найдено.',
     'equal_priority_conflict': 'Найдено несколько равноприоритетных вариантов.',
     'hard_rule_conflict': 'Размещение нарушает обязательное правило.',
+    'bed_prepared_hold': 'Койка придержана подготовкой за другим жильцом.',
+    'bed_reserve_hold': 'Койка находится в резерве для срочного размещения.',
+    'room_occupant_sex_unknown': (
+        'В комнате живёт жилец с неуказанным полом.'
+    ),
+    'resident_sex_unknown': 'Пол жильца не указан.',
+    'room_sex_mismatch': 'Пол жильца не совпадает с полом комнаты.',
+    'room_sex_mixed': 'В комнате живут и мужчины, и женщины.',
+    'room_sex_taken': 'Комната уже назначена другому полу в этом плане.',
 }
 
 
@@ -114,6 +225,8 @@ class AutoSettlementPreviewForm(forms.Form):
 
 
 _AUTO_SETTLEMENT_CONFLICT_LABELS = {
+    MISSING_CATEGORY: MISSING_CATEGORY_MESSAGE,
+    ROOM_CATEGORY_CONFLICT: ROOM_CATEGORY_CONFLICT_MESSAGE,
     'employee_multiple_effective_assignments': 'У сотрудника несколько несовместимых действующих назначений.',
     'assignment_equipment_missing': 'В действующем назначении не указана техника.',
     'assignment_shift_missing_or_invalid': 'В действующем назначении не указана дневная или ночная смена.',
@@ -242,13 +355,6 @@ def _person_initials(full_name):
     return ''.join(part[0].upper() for part in parts[:2])
 
 
-def _person_short_label(full_name):
-    parts = [part for part in str(full_name or '').split() if part]
-    if len(parts) < 2:
-        return ' '.join(parts)
-    return f"{parts[0]} {''.join(f'{part[0]}.' for part in parts[1:])}"
-
-
 def settlement_clerk_access_from_request(request, *, allow_admin=True):
     access_id = request.session.get('employee_access_id')
     if not access_id:
@@ -276,10 +382,422 @@ def settlement_clerk_access_from_request(request, *, allow_admin=True):
     return access
 
 
+class CurrentHousingWorkbookForm(forms.Form):
+    workbook = forms.FileField(
+        label='Файл Excel (.xlsx)',
+        required=False,
+        widget=forms.FileInput(attrs={'accept': '.xlsx'}),
+    )
+    as_of = forms.DateField(
+        label='Дата расселения',
+        widget=forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+    )
+
+    def clean_workbook(self):
+        workbook = self.cleaned_data['workbook']
+        if workbook and (not workbook.name.casefold().endswith('.xlsx') or workbook.size > MAX_FILE_SIZE):
+            raise ValidationError('Выберите файл .xlsx размером до 10 МБ.')
+        return workbook
+
+
+CURRENT_HOUSING_PREVIEW_SALT = 'settlement.current_housing.preview'
+CURRENT_HOUSING_PREVIEW_MAX_AGE = 30 * 60
+CURRENT_HOUSING_GROUPS = (
+    ('applied', 'Перенесено на карту'),
+    ('ready', 'Готово к переносу'),
+    ('needs_resident', 'Нужна карточка жильца'),
+    ('conflict', 'Требуется сверка'),
+    ('interwatch', 'Межвахта'),
+    ('outside', 'Вне выбранного периода'),
+    ('duplicate', 'Дубли строк'),
+    ('omitted', 'Исключено при сверке'),
+    ('existing', 'Уже учтено на карте'),
+)
+
+
+def _housing_identity_choice(request, row, decision, command):
+    # Exactly one source of identity per row, while retaining its place and dates.
+    identity = {key: value for key, value in decision.items() if key not in ('employee_id', 'resident_id', 'external')}
+    if command == 'external':
+        values = _validated_external_resident_fields({
+            key: request.POST.get(f'external_{key}:{row.source}', '')
+            for key in ('resident_type', 'full_name', 'position_title', 'organization', 'phone', 'sex')
+        })
+        if values['resident_type'] not in (SettlementResident.ResidentType.CONTRACTOR,
+                                          SettlementResident.ResidentType.BUSINESS_TRIP):
+            raise ValidationError('Выберите «Командированный» или «Сотрудник подрядчика».')
+        for field in ('full_name', 'position_title', 'organization', 'phone'):
+            if len(values[field]) > SettlementResident._meta.get_field(field).max_length:
+                raise ValidationError('Проверьте длину полей карточки жильца.')
+        if not any(char.isdigit() for char in values['phone']):
+            raise ValidationError('Укажите контактный телефон жильца.')
+        if external_housing_card_exists(values):
+            raise ValidationError('Такая карточка уже есть. Найдите её по ФИО или восстановите из архива.')
+        return {**identity, 'external': values}
+
+    kind, _, pk = request.POST.get('review_subject', '').partition(':')
+    subject_id = forms.IntegerField(min_value=1, max_value=2**63 - 1).clean(pk)
+    if kind == 'employee' and Employee.objects.filter(
+        pk=subject_id, is_active=True, status=Employee.Status.ACTIVE,
+    ).exists():
+        return {**identity, 'employee_id': subject_id}
+    if kind == 'resident' and SettlementResident.objects.filter(
+        pk=subject_id, employee_id__isnull=True, status=SettlementResident.Status.ACTIVE,
+    ).exists():
+        return {**identity, 'resident_id': subject_id}
+    raise ValidationError('Карточка больше недоступна. Выполните поиск заново.')
+
+
+def _housing_review_row(groups, command, source):
+    group_codes = ('conflict', 'existing') if command == 'interwatch' else ('conflict',)
+    return next((row for code in group_codes for row in groups[code] if row.source == source), None)
+
+
+def _housing_review_choice(request, groups, review, as_of):
+    command, _, source = request.POST['review_action'].partition(':')
+    if command == 'undo' and source in review:
+        remaining = {key: value for key, value in review.items() if key != source}
+        if 'interwatch_rows' in review[source]:
+            previous = {
+                key: value for key, value in review[source].items()
+                if key not in ('interwatch_rows', 'interwatch_occupancy_id')
+            }
+            if previous:
+                remaining[source] = previous
+        return remaining
+    row = _housing_review_row(groups, command, source)
+    if row is None:
+        raise ValidationError('Строка изменилась. Выберите её в обновлённом списке.')
+    decision = dict(review.get(source, {}))
+    if command == 'omit':
+        decision = {'omit': True}
+    elif command == 'interwatch':
+        # Exclude the other current alternatives only when the subject is known.
+        subject = row.placement_subject
+        decision['interwatch_rows'] = sorted({source} | {
+            entry.source
+            for group in ('conflict', 'ready', 'needs_resident', 'existing')
+            for entry in groups[group]
+            if subject is not None and entry.placement_subject == subject
+        })
+        decision['interwatch_occupancy_id'] = interwatch_occupancy_id(row)
+    elif command == 'keep' and (row.review_peers or (row.review_notes and not row.review_dates)):
+        if row.review_peers:
+            decision['peers'] = sorted(set(decision.get('peers', ())) | row.review_peers)
+        if row.review_notes and not row.review_dates:
+            decision['confirm'] = True
+            for field in ('starts', 'ends'):
+                if value := getattr(row, field):
+                    decision[field] = value.isoformat()
+    elif command == 'move':
+        decision['bed_id'] = forms.IntegerField(
+            min_value=1, max_value=2**63 - 1,
+            error_messages={'required': 'Выберите комнату и койку.', 'invalid': 'Выберите койку из жилфонда.'},
+        ).clean(request.POST.get('review_bed_id'))
+        peers = set(decision.get('peers', ())) | row.review_peers
+        decision['peers'] = sorted(
+            entry.source for entries in groups.values() for entry in entries
+            if entry.source in peers and row.match_identity and entry.match_identity == row.match_identity
+        )
+        decision['confirm'] = True
+        if not row.review_dates:
+            for field in ('starts', 'ends'):
+                if value := getattr(row, field):
+                    decision[field] = value.isoformat()
+    elif command in ('identify', 'external') and row.review_identity:
+        decision = _housing_identity_choice(request, row, decision, command)
+    elif command == 'edit' and (row.review_identity or row.review_dates):
+        number = request.POST.get(f'personnel_number:{source}', '').strip()
+        if row.review_identity and number:
+            matches = list(Employee.objects.filter(
+                is_active=True, status=Employee.Status.ACTIVE, personnel_number__iexact=number,
+            ).values_list('pk', flat=True)[:2])
+            if len(matches) != 1:
+                raise ValidationError('По этому табельному номеру нужна одна активная карточка сотрудника.')
+            decision.pop('external', None)
+            decision.pop('resident_id', None)
+            decision['employee_id'] = matches[0]
+        if row.review_dates:
+            try:
+                starts = date.fromisoformat(request.POST.get(f'starts:{source}', ''))
+                ends = date.fromisoformat(request.POST.get(f'ends:{source}', ''))
+            except ValueError as error:
+                raise ValidationError('Укажите даты заезда и выезда.') from error
+            if not starts <= as_of < ends:
+                raise ValidationError('Дата расселения должна входить в период проживания.')
+            decision.update(starts=starts.isoformat(), ends=ends.isoformat())
+        if decision == review.get(source, {}):
+            raise ValidationError('Укажите табельный номер сотрудника.')
+    else:
+        raise ValidationError('Это решение недоступно для выбранной строки.')
+    return {**review, source: decision}
+
+
+def _housing_draft_scope(request, access, draft):
+    session_key = request.session.session_key or ''
+    return {'access': access.pk, 'session': sha256(session_key.encode()).hexdigest(), 'revision': draft.revision}
+
+
+def _housing_draft_from_open_preview(request, access, draft):
+    token = request.POST.get('review_state')
+    if not token or not request.session.session_key:
+        return draft
+    try:
+        state = signing.loads(token, salt='settlement.current_housing.review', max_age=12 * 60 * 60)
+    except signing.BadSignature:
+        return draft
+    scope = {
+        'access': access.pk, 'session': sha256(request.session.session_key.encode()).hexdigest(),
+        'workbook': draft.digest, 'filename': draft.filename, 'date': draft.as_of.isoformat(),
+    }
+    return draft.with_review(state['review']) if state.get('scope') == scope else draft
+
+
+def _housing_draft_groups(draft, rows=None):
+    if rows is None:
+        rows = parse_current_housing_workbook(draft.workbook)
+    return build_current_housing_preview(rows, draft.as_of, filename=draft.filename, review=draft.review)
+
+
+def _housing_draft_report(request, access, context, draft, groups):
+    applying = 'application' in context
+    if not applying:
+        placements = preview_placements(groups)
+        releases = preview_releases(groups)
+        if placements or releases:
+            context['receipt'] = signing.dumps(
+                {'scope': _housing_draft_scope(request, access, draft), 'placements': placements, 'releases': releases},
+                salt=CURRENT_HOUSING_PREVIEW_SALT, compress=True,
+            )
+            context['applicable_count'] = len(placements)
+            context['release_count'] = len(releases)
+    context.update(draft=draft, as_of=draft.as_of, review_cases=housing_review_cases(groups['conflict']), report_groups=[
+        {'code': code, 'label': label, 'rows': groups[code]}
+        for code, label in CURRENT_HOUSING_GROUPS
+        if code in groups and (code not in ('duplicate', 'omitted') or groups[code])
+        and (not applying or code not in ('ready', 'needs_resident'))
+    ])
+
+
+def _apply_housing_draft(request, access, context, draft, rows):
+    try:
+        receipt = signing.loads(
+            request.POST.get('receipt', ''), salt=CURRENT_HOUSING_PREVIEW_SALT,
+            max_age=CURRENT_HOUSING_PREVIEW_MAX_AGE,
+        )
+    except signing.BadSignature:
+        receipt = {}
+    session_key = request.session.session_key or ''
+    if (not session_key or receipt.get('scope') != _housing_draft_scope(request, access, draft)
+            or not (receipt.get('placements') or receipt.get('releases'))):
+        raise ValidationError('Предпросмотр изменился. Проверьте обновлённый список перед применением.')
+    groups, created_residents, grant = apply_current_housing(
+        rows, draft.as_of, confirmed=receipt['placements'], workbook_digest=draft.digest,
+        access_id=access.pk, session_key=session_key, filename=draft.filename, review=draft.review,
+        confirmed_releases=receipt.get('releases', {}),
+    )
+    store_control_session_credentials(request.session, owner_access_id=access.pk, grant=grant)
+    context['application'] = {'placed': len(groups['applied']), 'residents': created_residents}
+    context['released_count'] = len(groups['released'])
+    review = dict(draft.review)
+    for row in groups['applied']:
+        if row.external_draft:
+            decision = dict(review[row.source])
+            decision.pop('external')
+            decision['resident_id'] = row.applied_resident_id
+            review[row.source] = decision
+    return groups, draft.with_review(review) if review != draft.review else draft
+
+
+def _current_housing_post(request, access, form, context, storage, saved):
+    applying = request.POST.get('action') == 'apply'
+    review_action = request.POST.get('review_action', '')
+    submitted_revision = request.POST.get('draft_revision', '')
+    as_of = form.cleaned_data['as_of']
+    workbook = form.cleaned_data['workbook']
+    draft = saved
+    if workbook:
+        candidate = CurrentHousingDraft.from_workbook(workbook.name, workbook.read(MAX_FILE_SIZE + 1), as_of)
+        if not saved or (candidate.filename, candidate.digest, candidate.as_of) != (saved.filename, saved.digest, saved.as_of):
+            draft = candidate if saved else _housing_draft_from_open_preview(request, access, candidate)
+    elif saved and saved.as_of != as_of and not (applying or review_action):
+        draft = CurrentHousingDraft.from_workbook(saved.filename, saved.workbook, as_of)
+    if draft is None:
+        form.add_error('workbook', 'Выберите Excel для начала сверки.')
+        return
+    revision_matches = submitted_revision == (saved.revision if saved else '')
+    # An old page may still hold the same file after a release. It can check the
+    # saved draft, but a different file needs the latest revision to replace it.
+    old_preview = workbook and draft is saved and not submitted_revision and not (applying or review_action)
+    if not revision_matches and not old_preview:
+        raise ValidationError('Черновик обновился в другой вкладке. Показана последняя сохранённая версия.')
+    if (applying or review_action) and draft is not saved:
+        raise ValidationError('Файл или дата изменились. Сначала проверьте Excel.')
+    try:
+        rows = parse_current_housing_workbook(draft.workbook)
+    except ValidationError as error:
+        form.add_error('workbook', error)
+        return
+    if applying:
+        groups, draft = _apply_housing_draft(request, access, context, draft, rows)
+    else:
+        groups = _housing_draft_groups(draft, rows)
+        if review_action:
+            command, _, source = review_action.partition(':')
+            try:
+                review = _housing_review_choice(request, groups, draft.review, draft.as_of)
+                revised = draft.with_review(review)
+                revised_groups = _housing_draft_groups(revised)
+                if command == 'move':
+                    moved = next((row for row in revised_groups['conflict'] if row.source == source), None)
+                    if moved:
+                        blockers = [issue for issue in moved.issues if issue in MANUAL_BED_BLOCKERS]
+                        if blockers:
+                            raise ValidationError(' '.join(blockers))
+            except ValidationError as error:
+                context['review_error'] = ' '.join(error.messages)
+                context['review_source'] = source
+            else:
+                context['review_undone'] = command == 'undo'
+                context['review_marked_interwatch'] = command == 'interwatch'
+                if command != 'undo' and source in review:
+                    context['last_review_source'] = source
+                    context['last_review_name'] = _housing_review_row(groups, command, source).name
+                draft, groups = revised, revised_groups
+                context['review_saved'] = True
+    if draft is not saved:
+        storage.save(draft)
+    _housing_draft_report(request, access, context, draft, groups)
+
+
+def _housing_review_map_response(request, storage, source):
+    try:
+        with storage.locked():
+            draft = storage.load()
+        if not draft or request.GET.get('revision') != draft.revision:
+            return JsonResponse({'message': 'Черновик изменился. Обновите страницу сверки.'}, status=409)
+        groups = _housing_draft_groups(draft)
+        row = next((entry for entry in groups['conflict'] if entry.source == source), None)
+        if row is None:
+            return JsonResponse({'message': 'Этот вопрос уже изменился. Обновите страницу сверки.'}, status=409)
+        rooms, catalog, map_time = housing_review_map(groups, row, draft.as_of)
+        _attach_occupancy_view(rooms, map_time)
+        shift_labels = {
+            bed.active_occupancy.pk: bed.tooltip_shift_label
+            for room in rooms for bed in room.beds.all() if bed.active_occupancy
+        }
+        for room in catalog:
+            for bed in room['beds']:
+                for resident in bed['residents']:
+                    resident['shift'] = shift_labels.get(resident['id'], resident['shift'])
+        plan = render_to_string('settlement/_housing_review_map.html', {'dormitories': _dormitory_views(rooms)})
+        return JsonResponse({
+            'resident': row.name, 'origin': row.place, 'date': draft.as_of.strftime('%d.%m.%Y'),
+            'personnel_number': row.personnel_number,
+            'room_id': row.physical_room_id, 'rooms': catalog, 'plan': plan,
+        })
+    except (OSError, ValidationError):
+        return JsonResponse({'message': 'Не удалось открыть карту. Попробуйте ещё раз.'}, status=503)
+
+
+@never_cache
+@require_http_methods(['GET', 'POST'])
+def settlement_current_housing_import_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        next_url = urlencode({'next': reverse('settlement_current_housing_import')})
+        return redirect(f'{reverse("clerk_login")}?{next_url}')
+
+    storage = CurrentHousingDraftStorage(access.pk)
+    if request.method == 'GET' and 'place_map' in request.GET:
+        return _housing_review_map_response(request, storage, request.GET['place_map'])
+    if request.method == 'GET' and 'identity_search' in request.GET:
+        try:
+            draft = storage.load()
+        except OSError:
+            return JsonResponse({'message': 'Не удалось открыть черновик.'}, status=503)
+        if not draft or request.GET.get('revision') != draft.revision:
+            return JsonResponse({'message': 'Черновик изменился. Обновите страницу сверки.'}, status=409)
+        return JsonResponse({'results': search_housing_subjects(request.GET['identity_search'])})
+    saved = None
+    context = {'access': access, 'clerk_active_section': 'settlement'}
+    status = 200
+    posted = request.method == 'POST'
+    form = CurrentHousingWorkbookForm(request.POST if posted else None, request.FILES if posted else None)
+    context['form'] = form
+    try:
+        if posted or storage.path.exists():
+            with storage.locked():
+                saved = storage.load()
+                context['draft'] = saved
+                if posted and form.is_valid():
+                    try:
+                        _current_housing_post(request, access, form, context, storage, saved)
+                    except ValidationError as error:
+                        form.add_error(None, error)
+                if saved and 'report_groups' not in context:
+                    _housing_draft_report(request, access, context, saved, _housing_draft_groups(saved))
+    except (OSError, ValidationError):
+        context['draft_error'] = 'Не удалось открыть или сохранить черновик. Попробуйте ещё раз.'
+        status = 503
+    if not posted:
+        form.initial['as_of'] = saved.as_of if saved else production_work_date()
+    elif form.errors and status == 200:
+        status = 400
+    return render(request, 'settlement/clerk_housing_import.html', context, status=status)
+
+
+@never_cache
+@require_GET
+def settlement_provisional_plan_view(request, period_id=None):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return redirect(f'{reverse("clerk_login")}?{urlencode({"next": request.path})}')
+    batches = ArrivalRosterRoutingBatch.objects.select_related(
+        'watch_period__watch_composition', 'arrival_roster_version',
+    ).filter(
+        arrival_roster_version__status=ArrivalRosterVersion.Status.CONFIRMED,
+        arrival_roster_version__superseded_at__isnull=True,
+    )
+    if period_id is None:
+        period_ids = list(batches.order_by('watch_period_id').values_list('watch_period_id', flat=True).distinct()[:2])
+        if len(period_ids) == 1:
+            return redirect('settlement_provisional_plan', period_id=period_ids[0])
+        return redirect('settlement_arrival_roster_routing')
+    context = {'access': access, 'clerk_active_section': 'routing'}
+    try:
+        batch = batches.get(watch_period_id=period_id)
+        readiness = build_arrival_roster_cohort_readiness(batch_id=batch.pk)
+        rows = batch.rows.select_related(
+            'employee', 'resident__employee__personnel_position', 'resident__employee__work_schedule',
+        ).in_bulk()
+        waiting = [
+            (rows[item.routing_row_id].resident if item.routing_row_id else None, item.message)
+            for item in readiness.blockers
+        ]
+        proposed = []
+        exceptions = []
+        if readiness.ready_members:
+            result = resolve_ready_arrivals(batch=batch, readiness=readiness, rows=rows)
+            residents = {row.resident_id: row.resident for row in rows.values()}
+            beds = PhysicalBed.objects.select_related('room__dormitory').in_bulk(
+                item.physical_bed_id for item in result.placements
+            )
+            proposed = [(residents[item.resident_id], str(beds[item.physical_bed_id])) for item in result.placements]
+            exceptions = [(residents[item.resident_id], ' '.join(_auto_settlement_reason_label(code)
+                          for code in item.reason_codes)) for item in result.unresolved]
+        context.update(period=batch.watch_period, waiting=waiting, proposed=proposed, exceptions=exceptions)
+    except (ArrivalRosterRoutingBatch.DoesNotExist, ArrivalRosterRoutingBatch.MultipleObjectsReturned):
+        context['error'] = 'Для этой вахты требуется один актуальный утверждённый список заезда.'
+    except ValidationError:
+        context['error'] = 'Данные заезда требуют проверки. Откройте раздел «Готово к расселению» и повторите расчёт.'
+    return render(request, 'settlement/provisional_plan.html', context)
+
+
 @require_GET
 def settlement_arrival_roster_routing_view(request):
-    """Read-only ready-for-settlement hand-off queue for the exact clerk access."""
-    access = settlement_clerk_access_from_request(request, allow_admin=False)
+    """Read-only ready-for-settlement queue for the clerk workplace."""
+    access = settlement_clerk_access_from_request(request)
     if not access:
         next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
         return redirect(f'{reverse("clerk_login")}?{next_url}')
@@ -316,22 +834,29 @@ def settlement_arrival_roster_routing_view(request):
             'routing_queue': settlement_clerk_arrival_roster_routing_queue(),
             'cohort_overview': cohort_overview,
             'cohort_preview_rows': tuple(preview_rows),
+            'can_manage_routing': access.role.code == 'settlement_clerk',
             'clerk_active_section': 'routing',
         },
     )
 
 
+def _routing_write_access(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
+        return None, redirect(f'{reverse("clerk_login")}?{next_url}')
+    if access.role.code != 'settlement_clerk':
+        messages.info(request, 'Формирование состава и подготовка плана из очереди доступны в роли делопроизводителя.')
+        return None, redirect('settlement_arrival_roster_routing')
+    return access, None
+
+
 @require_POST
 def settlement_arrival_roster_create_cohort_view(request, batch_id):
     """Create one approved cohort from an exact routing batch."""
-    access = settlement_clerk_access_from_request(request, allow_admin=False)
-    if not access:
-        messages.error(
-            request,
-            'Для создания состава требуется действующий доступ делопроизводителя.',
-        )
-        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
-        return redirect(f'{reverse("clerk_login")}?{next_url}')
+    access, response = _routing_write_access(request)
+    if response is not None:
+        return response
 
     try:
         create_approved_arrival_roster_cohort(
@@ -351,15 +876,9 @@ def settlement_arrival_roster_create_cohort_view(request, batch_id):
 @require_POST
 def settlement_arrival_roster_create_preview_view(request, cohort_id):
     """Create a saved preview for the exact routing cohort from server context."""
-    access = settlement_clerk_access_from_request(request, allow_admin=False)
-    if not access:
-        messages.error(
-            request,
-            'Для подготовки расселения требуется действующий '
-            'доступ делопроизводителя.',
-        )
-        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
-        return redirect(f'{reverse("clerk_login")}?{next_url}')
+    access, response = _routing_write_access(request)
+    if response is not None:
+        return response
 
     try:
         control_context = _auto_settlement_control_context(request, access)
@@ -382,10 +901,12 @@ def settlement_arrival_roster_create_preview_view(request, cohort_id):
     return redirect('settlement_map')
 
 
-def _employee_profiles(employees):
+def _employee_profiles(employees, *, settlement_date=None):
     employees = list(employees)
     employee_ids = [employee.pk for employee in employees]
     equipment_by_employee = {}
+    equipment_labels_by_shift = defaultdict(dict)
+    published_assignments = defaultdict(list)
     shift_by_employee = {}
 
     if employee_ids:
@@ -403,11 +924,19 @@ def _employee_profiles(employees):
                 'equipment',
                 'equipment__equipment_type',
                 'equipment__model',
+                'source_crew_plan_slot__plan__role',
             )
             .order_by('employee_id', '-assigned_at', '-id')
         )
         for assignment in equipment_assignments:
             equipment_by_employee.setdefault(assignment.employee_id, assignment)
+            equipment_labels_by_shift[assignment.employee_id].setdefault(
+                assignment.shift_type, str(assignment.equipment),
+            )
+            if settlement_date and assignment.source_kind == EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN:
+                plan = assignment.source_crew_plan_slot.plan
+                if plan.status == CrewPlanStatus.PUBLISHED and plan.work_date < settlement_date:
+                    published_assignments[assignment.employee_id].append(assignment)
 
         open_shifts = (
             EmployeeShift.objects
@@ -421,10 +950,46 @@ def _employee_profiles(employees):
         )
         for shift in open_shifts:
             shift_by_employee.setdefault(shift.employee_id, shift)
+            if shift.equipment_id:
+                equipment_labels_by_shift[shift.employee_id].setdefault(
+                    shift.shift_type, str(shift.equipment),
+                )
 
+    specializations = effective_specializations_by_employee_id(employees, as_of=settlement_date) if settlement_date else {}
+    published_roles = set()
+    published_slots = defaultdict(list)
+    off_equipment = {}
+    if settlement_date and employee_ids:
+        off_equipment = {
+            entry.employee_id: entry for entry in off_equipment_on(settlement_date, employee_ids=employee_ids)
+        }
+        plans = dict(CrewPlan.objects.filter(
+            work_date=settlement_date, status=CrewPlanStatus.PUBLISHED,
+        ).values_list('pk', 'role__code'))
+        published_roles.update(plans.values())
+        slots = CrewPlanSlot.objects.filter(plan_id__in=plans).filter(
+            Q(employee_id__in=employee_ids) | Q(secondary_employee_id__in=employee_ids)
+        ).select_related('equipment__model', 'equipment__equipment_type')
+        for slot in slots:
+            for employee_id in {slot.employee_id, slot.secondary_employee_id} - {None}:
+                published_slots[employee_id].append(slot)
     profiles = {}
     for employee in employees:
+        specialization = specializations.get(employee.pk)
+        work_category = legacy_work_category_for_specialization(specialization) if specialization else employee.work_category
+        position = employee.personnel_position
+        if position:
+            needs_equipment = position.requires_equipment and position.settlement_category != PersonnelPosition.SettlementCategory.ITR
+        else:
+            needs_equipment = work_category in PRODUCTION_APP_ROLE_CODES and (not specialization or specialization.is_active)
         assignment = equipment_by_employee.get(employee.pk)
+        slots = published_slots.get(employee.pk, [])
+        if not slots:
+            slots = [
+                prior for prior in published_assignments[employee.pk]
+                if prior.source_crew_plan_slot.plan.role.code not in published_roles
+            ]
+        has_plan = bool(slots) or (needs_equipment and work_category in published_roles)
         shift = shift_by_employee.get(employee.pk)
         shift_type = (
             assignment.shift_type
@@ -441,11 +1006,19 @@ def _employee_profiles(employees):
             if employee.personnel_position_id
             else employee.position.strip()
         )
+        equipment_label = str(equipment) if equipment is not None else ''
         profiles[employee.pk] = {
             'photo_url': _employee_photo_url(employee),
             'shift_label': DAY_NIGHT_LABELS.get(shift_type, UNKNOWN_LABEL),
             'position_label': position_label or UNKNOWN_LABEL,
-            'work_label': str(equipment) if equipment is not None else (position_label or UNKNOWN_LABEL),
+            'work_label': (equipment_label if needs_equipment else position_label) or UNKNOWN_LABEL,
+            'equipment_label': equipment_label,
+            'equipment_by_shift': equipment_labels_by_shift.get(employee.pk, {}),
+            'published_slots': slots,
+            'has_published_assignment_data': has_plan,
+            'requires_equipment': needs_equipment,
+            'off_equipment': off_equipment.get(employee.pk),
+            'work_date': settlement_date,
         }
     return profiles
 
@@ -479,18 +1052,113 @@ def _unsettled_employee_cards(moment):
     ]
 
 
-def _attach_occupancy_view(rooms):
-    beds = [bed for room in rooms for bed in room.beds.all()]
-    occupancies = [
+def _resident_work_display(resident, occupancy, profile, *, from_excel):
+    off = profile.get('off_equipment') if profile else None
+    if off:
+        shift = DAY_NIGHT_LABELS.get(off.shift_type) if off.work_date == profile['work_date'] else None
+        work = ' · '.join(filter(None, (off.get_status_display(), off.location)))
+        return {
+            'shift_label': shift or UNKNOWN_LABEL,
+            'tooltip_shift_label': ' · '.join((shift, 'по расстановке')) if shift else 'Смена требует уточнения',
+            'work_label': work, 'work_caption': 'Статус', 'tooltip_work_label': work,
+            'assignment_warning': '' if shift else 'Смена требует уточнения',
+        }
+    work_shift = occupancy.work_shift if occupancy else None
+    recorded = DAY_NIGHT_LABELS.get(work_shift)
+    shift = recorded or (profile['shift_label'] if profile else UNKNOWN_LABEL)
+    tooltip_shift = shift
+    published = profile and profile['has_published_assignment_data']
+    slots = profile['published_slots'] if published else []
+    if published:
+        shifts = {slot.shift_type for slot in slots}
+        shift = DAY_NIGHT_LABELS.get(next(iter(shifts)), UNKNOWN_LABEL) if len(shifts) == 1 else UNKNOWN_LABEL
+        tooltip_shift = shift
+        if shift != UNKNOWN_LABEL:
+            tooltip_shift += ' · по расстановке'
+            if from_excel and recorded and recorded != shift:
+                tooltip_shift += f', в Excel — {recorded.lower()}'
+    elif from_excel:
+        shift = recorded or UNKNOWN_LABEL
+        tooltip_shift = f'{shift} · по Excel' if recorded else shift
+
+    work = profile['work_label'] if profile else resident.organization or UNKNOWN_LABEL
+    tooltip_work = resident.organization
+    missing_equipment = False
+    caption = 'Организация'
+    if profile:
+        caption = 'Техника' if profile['requires_equipment'] else 'Должность'
+        if profile['requires_equipment']:
+            equipment = str(slots[0].equipment) if len(slots) == 1 else ''
+            if not equipment and not from_excel and not published:
+                equipment = (profile['equipment_by_shift'].get(work_shift)
+                             if work_shift else profile['equipment_label'])
+            missing_equipment = not equipment
+            work = equipment or UNKNOWN_LABEL
+            tooltip_work = f"Техника: {equipment or ('проверьте расстановку' if from_excel else 'не назначена')}"
+        else:
+            work = profile['position_label']
+            tooltip_work = f'Должность: {work}'
+    missing_shift = bool(profile) and shift == UNKNOWN_LABEL
+    warning = ''
+    if len(slots) > 1 and (missing_equipment or missing_shift):
+        warning = 'Найдено несколько назначений'
+    elif missing_equipment and missing_shift:
+        warning = 'Не назначены техника и смена'
+    elif missing_equipment:
+        warning = 'Не назначена техника'
+    elif missing_shift:
+        warning = 'Не указана смена'
+
+    return {
+        'shift_label': shift, 'tooltip_shift_label': tooltip_shift,
+        'work_label': work, 'work_caption': caption, 'tooltip_work_label': tooltip_work,
+        'assignment_warning': warning,
+    }
+
+
+def _housing_work_by_resident(residents, occupancies, moment):
+    """Use the current assignment for both views, retaining the recorded stay shift as a fallback."""
+    profiles = _employee_profiles(
+        (resident.employee for resident in residents if resident.employee_id),
+        settlement_date=production_work_date(moment),
+    )
+    by_resident = {occupancy.resident_id: occupancy for occupancy in occupancies}
+    imported_ids = current_housing_excel_occupancy_ids(occupancies)
+    return {
+        resident.pk: _resident_work_display(
+            resident, by_resident.get(resident.pk), profiles.get(resident.employee_id),
+            from_excel=resident.pk in by_resident and by_resident[resident.pk].pk in imported_ids,
+        )
+        for resident in residents
+    }
+
+
+def _clerk_map_occupancies(rooms):
+    return [
         bed.active_occupancies[0]
-        for bed in beds
+        for room in rooms
+        for bed in room.beds.all()
         if bed.active_occupancies
     ]
-    profiles = _employee_profiles(
-        occupancy.resident.employee
-        for occupancy in occupancies
-        if occupancy.resident.employee_id
+
+
+def _bed_stay_period(occupancy):
+    start, end = occupancy_interval(occupancy)
+    return {
+        'start': business_localtime(start).strftime('%d.%m.%Y %H:%M'),
+        'end': business_localtime(end).strftime('%d.%m.%Y %H:%M') if end else '',
+    }
+
+
+def _attach_occupancy_view(rooms, moment):
+    occupancies = _clerk_map_occupancies(rooms)
+    residents = [occupancy.resident for occupancy in occupancies]
+    work_by_resident = _housing_work_by_resident(residents, occupancies, moment)
+    extensions = approved_watch_extensions_on(
+        production_work_date(moment), employee_ids={resident.employee_id for resident in residents if resident.employee_id},
     )
+
+    exception_ids = occupancies_with_manual_category_exception(occupancy.pk for occupancy in occupancies)
 
     for room in rooms:
         room.occupied_bed_count = 0
@@ -500,31 +1168,28 @@ def _attach_occupancy_view(rooms):
             bed.preview_rows = []
             if occupancy is None:
                 bed.occupant_name = UNKNOWN_LABEL
-                bed.occupant_short_name = UNKNOWN_LABEL
                 bed.occupant_photo_url = ''
                 bed.shift_label = UNKNOWN_LABEL
+                bed.tooltip_shift_label = UNKNOWN_LABEL
                 bed.work_label = UNKNOWN_LABEL
-                bed.position_label = UNKNOWN_LABEL
+                bed.tooltip_work_label = ''
                 bed.assignment_type_label = UNKNOWN_LABEL
                 continue
 
             resident = occupancy.resident
             room.occupied_bed_count += 1
+            bed.on_extension = resident.employee_id in extensions
+            bed.stay_period = _bed_stay_period(occupancy)
             bed.occupant_name = resident.display_name
-            bed.occupant_short_name = _person_short_label(resident.display_name)
-            if resident.employee_id:
-                profile = profiles[resident.employee_id]
-                bed.occupant_photo_url = profile['photo_url']
-                bed.shift_label = profile['shift_label']
-                bed.work_label = profile['work_label']
-                bed.position_label = profile['position_label']
-            else:
-                bed.occupant_photo_url = _resident_photo_url(resident)
-                bed.shift_label = UNKNOWN_LABEL
-                bed.work_label = resident.organization or UNKNOWN_LABEL
-                bed.position_label = resident.position_title or UNKNOWN_LABEL
+            bed.personnel_number = resident.personnel_number
+            bed.category_exception = MANUAL_CATEGORY_EXCEPTION_LABEL if str(occupancy.pk) in exception_ids else ''
+            bed.occupant_initials = _person_initials(bed.occupant_name)
+            bed.occupant_photo_url = _resident_photo_url(resident)
+            for field, value in work_by_resident[resident.pk].items():
+                setattr(bed, field, value)
             bed.assignment_type_label = occupancy.get_assignment_type_display()
         room.free_bed_count = len(room.beds.all()) - room.occupied_bed_count
+    return extensions
 
 
 def _room_view(room):
@@ -556,16 +1221,12 @@ def _room_view(room):
 
 
 def _floor_view(floor_number, rooms):
-    left = {
-        room.side_position: _room_view(room)
-        for room in rooms
-        if room.corridor_side == PhysicalRoom.CorridorSide.LEFT
-    }
-    right = {
-        room.side_position: _room_view(room)
-        for room in rooms
-        if room.corridor_side == PhysicalRoom.CorridorSide.RIGHT
-    }
+    left, right = {}, {}
+    positions = room_map_positions(rooms)
+    for room in rooms:
+        side, position = positions[room.pk]
+        row = left if side == PhysicalRoom.CorridorSide.LEFT else right
+        row[position] = _room_view(room)
     row_count = max([*left.keys(), *right.keys()], default=0)
     return {
         'number': floor_number,
@@ -634,12 +1295,40 @@ def _dormitory_views(rooms):
 def settlement_login_view(request):
     from users.views import login_view
 
-    return login_view(
+    admin_login = request.GET.get('role') == 'admin'
+    previous_access = None
+    previous_control = None
+    if admin_login and request.method == 'POST':
+        previous_access = settlement_clerk_access_from_request(request, allow_admin=False)
+        if previous_access:
+            try:
+                previous_control = _settlement_write_control_context(request)
+            except ValidationError:
+                pass
+
+    response = login_view(
         request,
-        allowed_role_codes=('settlement_clerk', 'admin'),
+        allowed_role_codes=('admin',) if admin_login else ('settlement_clerk', 'admin'),
         target_role_app=get_role_app('settlement_clerk'),
         forced_next_url=reverse('clerk_home'),
+        allow_same_employee_multiple_active_roles=True,
     )
+    if previous_control and response.status_code == 302:
+        access = settlement_clerk_access_from_request(request)
+        if access and access.role.code == 'admin' and access.employee_id == previous_access.employee_id:
+            try:
+                release_control_lease(
+                    owner_access_id=previous_control.owner_access_id,
+                    raw_session_key=previous_control.raw_session_key,
+                    lease_token=previous_control.lease_token,
+                    fencing_revision=previous_control.fencing_revision,
+                    source='admin_sign_in',
+                )
+            except ValidationError:
+                # Работа могла завершиться в другой вкладке до подтверждения PIN.
+                pass
+            clear_control_session_credentials(request.session)
+    return response
 
 
 def settlement_manifest_view(request):
@@ -710,6 +1399,251 @@ self.addEventListener("fetch", event => {
     return response
 
 
+def _clerk_map_rooms(moment):
+    return (
+        PhysicalRoom.objects
+        .select_related('dormitory')
+        .prefetch_related(
+            Prefetch(
+                'beds',
+                queryset=(
+                    PhysicalBed.objects
+                    .prefetch_related(
+                        Prefetch(
+                            'occupancies',
+                            queryset=(
+                                EmployeeBedOccupancy.objects
+                                .filter(effective_occupancy_at_q(moment))
+                                .select_related(
+                                    'resident',
+                                    'resident__employee',
+                                    'resident__employee__personnel_position',
+                                    'resident__employee__base_specialization__access_role',
+                                )
+                            ),
+                            to_attr='active_occupancies',
+                        )
+                    )
+                    .order_by('block', 'position')
+                ),
+            )
+        )
+        .filter(
+            dormitory__number__in=['5', '6'],
+            # T-029 m3 (review-8): карта только собственный фонд. Арендованное
+            # общежитие с номером 5/6 (заведённое в обход панели) на карту не
+            # попадает и в счётчики не входит.
+            dormitory__kind=Dormitory.Kind.OWN,
+        )
+        .order_by(
+            'dormitory__number',
+            'floor',
+            'corridor_side',
+            'side_position',
+            'number',
+        )
+    )
+
+
+def _clerk_map_extension_state(rooms, moment, *, cases=None):
+    work_date = production_work_date(moment)
+    occupancies = _clerk_map_occupancies(rooms)
+    if cases is None:
+        cases = approved_watch_extensions_on(
+            work_date, employee_ids={row.resident.employee_id for row in occupancies if row.resident.employee_id},
+        )
+    entries = []
+    for occupancy in occupancies:
+        case = cases.get(occupancy.resident.employee_id)
+        if case is None:
+            continue
+        bed = occupancy.physical_bed
+        entries.append({
+            'occupancy_id': occupancy.pk,
+            'name': occupancy.resident.display_name,
+            'personnel_number': occupancy.resident.personnel_number,
+            'location': f'{bed.room} · {bed.get_block_display()}-{bed.position}',
+            'ends_on': case.extension_end.strftime('%d.%m.%Y'),
+            'expires_at': production_day_bounds(case.extension_end)[1].isoformat(),
+        })
+    return {
+        'server_time': moment.isoformat(),
+        'refresh_at': production_day_bounds(work_date)[1].isoformat(),
+        'entries': entries,
+    }
+
+
+@never_cache
+@require_GET
+def settlement_clerk_extensions_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'error': 'Нет доступа к расселению.'}, status=403)
+    moment = timezone.now()
+    return JsonResponse(_clerk_map_extension_state(list(_clerk_map_rooms(moment)), moment))
+
+
+@require_GET
+def settlement_map_assignments(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'ok': False}, status=403)
+    moment = timezone.now()
+    rooms = list(_clerk_map_rooms(moment))
+    _attach_occupancy_view(rooms, moment)
+    response = JsonResponse({'beds': {
+        str(bed.active_occupancy.pk): {
+            'shiftLabel': bed.shift_label, 'tooltipShiftLabel': bed.tooltip_shift_label,
+            'workCaption': bed.work_caption, 'workLabel': bed.work_label, 'tooltipWorkLabel': bed.tooltip_work_label,
+            'assignmentWarning': bed.assignment_warning,
+            'categoryException': bed.category_exception,
+        }
+        for room in rooms for bed in room.beds.all() if bed.active_occupancy
+    }})
+    response['Cache-Control'] = 'private, no-store'
+    return response
+
+
+@require_GET
+@never_cache
+def settlement_current_housing_export_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    moment = timezone.now()
+    rooms = list(_clerk_map_rooms(moment))
+    _attach_occupancy_view(rooms, moment)
+    return FileResponse(
+        build_current_housing_export(rooms, moment),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        filename=f'Текущее расселение {business_localtime(moment):%Y-%m-%d}.xlsx',
+    )
+
+
+class PreviousHousingWorkbookForm(CurrentHousingWorkbookForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['workbook'].required = True
+        self.fields['as_of'].label = 'Дата прошлого расселения'
+
+
+@never_cache
+@require_http_methods(['GET', 'POST'])
+def next_housing_import_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return redirect(f'{reverse("clerk_login")}?{urlencode({"next": request.path})}')
+    action = request.POST.get('action') if request.method == 'POST' else None
+    uploading = action == 'preview'
+    form = PreviousHousingWorkbookForm(request.POST if uploading else None, request.FILES if uploading else None)
+    storage = CurrentHousingDraftStorage(access.pk, next_arrival=True)
+    error = ''
+    status = 200
+    draft = None
+    name = request.POST.get('name', '').strip()
+    try:
+        with storage.locked():
+            draft = storage.load()
+            if uploading and form.is_valid():
+                file = form.cleaned_data['workbook']
+                candidate = CurrentHousingDraft.from_workbook(file.name, file.read(MAX_FILE_SIZE + 1), form.cleaned_data['as_of'])
+                storage.save(candidate.with_review(next_housing_snapshot(candidate)))
+                return redirect('next_housing_import')
+            if action == 'save':
+                if not draft or request.POST.get('revision') != draft.revision:
+                    raise ValidationError('Файл для сверки изменился. Проверьте открытый предпросмотр.')
+                if not draft.review['entries']:
+                    raise ValidationError('На выбранную дату нет строк проживания.')
+                name = forms.CharField(max_length=128).clean(name)
+                template, created = store_watch_snapshot(draft.review, name, draft.as_of, timezone.now(), None, access)
+                messages.success(request, 'Шаблон сохранён' if created else 'Этот шаблон уже сохранён')
+                return redirect('settlement_watch_template_detail', template.pk)
+    except ValidationError as exc:
+        error = ' '.join(exc.messages)
+        status = 400
+    except OSError:
+        error = 'Не удалось открыть или записать черновик. Повторите попытку.'
+        status = 503
+    if draft:
+        form.initial['as_of'] = draft.as_of
+    recent = SettlementWatchTemplate.objects.filter(snapshot__source_kind='next_excel').defer('snapshot')[:20]
+    return render(request, 'settlement/next_housing_import.html', {
+        'access': access, 'clerk_active_section': 'settlement', 'form': form, 'draft': draft,
+        'template_name': name or (draft.filename.rsplit('.', 1)[0][:128] if draft else ''),
+        'recent': recent, 'error': error,
+    }, status=400 if form.errors else status)
+
+
+def _watch_template_link(template):
+    return {
+        'name': template.name,
+        'saved_at': business_localtime(template.saved_at).strftime('%d.%m.%Y %H:%M'),
+        'url': reverse('settlement_watch_template_detail', args=[template.pk]),
+    }
+
+
+@require_http_methods(['GET', 'POST'])
+@never_cache
+def settlement_watch_templates_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return JsonResponse({'error': 'Нет доступа к расселению.'}, status=403)
+    if request.method == 'GET':
+        work_date = production_work_date(timezone.now())
+        periods = list(active_template_periods(work_date))
+        return JsonResponse({
+            'work_date': work_date.isoformat(),
+            'default_name': periods[0].name if len(periods) == 1 else f'Вахта {work_date:%d.%m.%Y}',
+            'periods': [{'id': period.pk, 'name': period.name} for period in periods],
+            'recent': [_watch_template_link(template) for template in
+                       SettlementWatchTemplate.objects.exclude(snapshot__has_key='source_kind').defer('snapshot')[:8]],
+        })
+
+    try:
+        payload = json.loads(request.body)
+        if not isinstance(payload, dict) or not isinstance(payload.get('name'), str):
+            raise ValueError
+        name = forms.CharField(max_length=128).clean(payload['name'])
+        period_id = payload.get('period_id')
+        if period_id is not None and (type(period_id) is not int or period_id <= 0):
+            raise ValueError
+    except (ValueError, ValidationError):
+        return JsonResponse({'error': 'Укажите название шаблона длиной до 128 символов.'}, status=400)
+
+    with transaction.atomic():
+        # Use the same shared lock as assignments to physical beds. Saving a
+        # copy is available to clerks and admins even outside an open work session.
+        ensure_control_lease()
+        moment = timezone.now()
+        work_date = production_work_date(moment)
+        period = active_template_periods(work_date).filter(pk=period_id).first() if period_id else None
+        if payload.get('work_date') != work_date.isoformat() or (period_id and period is None):
+            return JsonResponse({'error': 'Вахта или рабочая дата изменилась. Откройте окно заново.'}, status=409)
+        rooms = list(_clerk_map_rooms(moment))
+        _attach_occupancy_view(rooms, moment)
+        template, created = save_watch_template(
+            rooms=rooms, moment=moment, name=name, watch_period=period, access=access,
+        )
+    return JsonResponse({
+        'template': _watch_template_link(template),
+        'occupied_beds': template.snapshot['occupied_beds'],
+        'marked_beds': template.snapshot['marked_beds'],
+        'created': created,
+    }, status=201 if created else 200)
+
+
+@require_GET
+@never_cache
+def settlement_watch_template_detail_view(request, template_id):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return redirect(f'{reverse("clerk_login")}?{urlencode({"next": request.path})}')
+    template = get_object_or_404(SettlementWatchTemplate.objects.select_related('watch_period'), pk=template_id)
+    return render(request, 'settlement/watch_template.html', {
+        'access': access,
+        'watch_template': template,
+        'captured_at': business_localtime(template.saved_at),
+    })
+
+
 @require_GET
 def settlement_map_view(request):
     access = settlement_clerk_access_from_request(request)
@@ -736,43 +1670,15 @@ def settlement_map_view(request):
                 'effective_date',
                 'Не удалось выполнить расчёт для указанной даты.',
             )
-    rooms = list(
-        PhysicalRoom.objects
-        .select_related('dormitory')
-        .prefetch_related(
-            Prefetch(
-                'beds',
-                queryset=(
-                    PhysicalBed.objects
-                    .prefetch_related(
-                        Prefetch(
-                            'occupancies',
-                            queryset=(
-                                EmployeeBedOccupancy.objects
-                                .filter(effective_occupancy_at_q(moment))
-                                .select_related(
-                                    'resident',
-                                    'resident__employee',
-                                    'resident__employee__personnel_position',
-                                )
-                            ),
-                            to_attr='active_occupancies',
-                        )
-                    )
-                    .order_by('block', 'position')
-                ),
-            )
-        )
-        .filter(dormitory__number__in=['5', '6'])
-        .order_by(
-            'dormitory__number',
-            'floor',
-            'corridor_side',
-            'side_position',
-            'number',
-        )
+    rooms = list(_clerk_map_rooms(moment))
+    extension_cases = _attach_occupancy_view(rooms, moment)
+    # T-036 backend-23/24: бейджи комнат 36–38 на карте (резерв/защищённая);
+    # типы якорей берутся одним пакетным запросом на все комнаты.
+    anchor_types_by_room = room_anchor_types_by_room(
+        room_ids=[room.pk for room in rooms]
     )
-    _attach_occupancy_view(rooms)
+    for room in rooms:
+        room.anchor_types = anchor_types_by_room.get(room.pk, frozenset())
     if auto_settlement_preview is not None:
         _attach_auto_settlement_preview(rooms, auto_settlement_preview)
     dormitories = _dormitory_views(rooms)
@@ -797,6 +1703,11 @@ def settlement_map_view(request):
         {
             'access': access,
             'dormitories': dormitories,
+            'clerk_admin_login_available': (
+                access.role.code == 'settlement_clerk'
+                and active_access_for_employee_role(access.employee, 'admin') is not None
+            ),
+            'watch_extensions': _clerk_map_extension_state(rooms, moment, cases=extension_cases),
             'current_date': timezone.localdate(moment),
             'summary': {
                 'rooms': len(rooms),
@@ -808,7 +1719,11 @@ def settlement_map_view(request):
                 'not_transferred_rooms': len(rooms) - transferred_rooms,
                 'not_transferred_beds': total_beds - transferred_beds,
             },
-            'assignment_type_choices': EmployeeBedOccupancy.AssignmentType.choices,
+            'assignment_type_choices': tuple(
+                (value, label)
+                for value, label in EmployeeBedOccupancy.AssignmentType.choices
+                if value in NEW_SETTLEMENT_ASSIGNMENT_TYPES
+            ),
             'unsettled_employees': unsettled_employees,
             'unsettled_employee_count': len(unsettled_employees),
             'unsettled_roster_available': roster_resolution['has_unambiguous'],
@@ -868,6 +1783,7 @@ def settlement_employee_search_view(request):
 
 
 @require_GET
+@never_cache
 def settlement_employee_detail_view(request, employee_id):
     """Read-only operational card opened from an occupied bed on the map."""
     if not settlement_clerk_access_from_request(request):
@@ -892,13 +1808,26 @@ def settlement_employee_detail_view(request, employee_id):
             status=404,
         )
 
-    occupancy = (
+    return JsonResponse({
+        'ok': True,
+        'employee': {
+            **_employee_card_fields(employee),
+            **_resident_stay_fields(_resident_current_occupancy(timezone.now(), resident__employee=employee)),
+        },
+    })
+
+
+def _resident_current_occupancy(moment, **subject):
+    return (
         EmployeeBedOccupancy.objects
-        .filter(effective_occupancy_at_q(timezone.now()), resident__employee=employee)
+        .filter(effective_occupancy_at_q(moment), **subject)
         .select_related('physical_bed__room__dormitory')
         .order_by('pk')
         .first()
     )
+
+
+def _resident_stay_fields(occupancy, *, editable=False):
     residence = 'Фактическое место проживания не назначено.'
     if occupancy is not None:
         bed = occupancy.physical_bed
@@ -909,25 +1838,126 @@ def settlement_employee_detail_view(request, employee_id):
             f'койка {bed.position} ({bed.stable_id})'
         )
 
-    return JsonResponse({
-        'ok': True,
-        'employee': {
-            'id': employee.pk,
-            'full_name': employee.full_name,
-            'personnel_number': employee.personnel_number or UNKNOWN_LABEL,
-            'position': (
-                employee.personnel_position.name
-                if employee.personnel_position_id
-                else employee.position or UNKNOWN_LABEL
-            ),
-            'department': employee.department_label or UNKNOWN_LABEL,
-            'work_schedule': employee.work_schedule_label or UNKNOWN_LABEL,
-            'brigade': employee.get_brigade_number_display() or UNKNOWN_LABEL,
-            'sex': employee.get_sex_display(),
-            'phone': employee.phone or UNKNOWN_LABEL,
-            'residence': residence,
-        },
-    })
+    fields = {
+        'residence': residence,
+        'stay_period': _bed_stay_period(occupancy) if occupancy else None,
+    }
+    if editable and occupancy and can_edit_stay(occupancy):
+        fields['stay_edit'] = {
+            'occupancy_id': occupancy.pk,
+            'version': resident_stay_version(occupancy),
+            'start': business_localtime(occupancy.starts_at).isoformat(timespec='minutes')[:16],
+            'end': business_localtime(occupancy.ends_at).isoformat(timespec='minutes')[:16] if occupancy.ends_at else '',
+            'end_editable': occupancy.assignment_type != EmployeeBedOccupancy.AssignmentType.TEMPORARY_UNAPPROVED,
+            'end_required': occupancy.assignment_type == EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        }
+    return fields
+
+
+def _employee_card_fields(employee):
+    return {
+        'id': employee.pk,
+        'full_name': employee.full_name,
+        'personnel_number': employee.personnel_number or UNKNOWN_LABEL,
+        'position': (
+            employee.personnel_position.name
+            if employee.personnel_position_id
+            else employee.position or UNKNOWN_LABEL
+        ),
+        'settlement_category_label': (
+            employee.personnel_position.settlement_category_label
+            if employee.personnel_position_id
+            else PersonnelPosition.SettlementCategory.UNCLASSIFIED.label
+        ),
+        'department': employee.department_label or UNKNOWN_LABEL,
+        'work_schedule': employee.work_schedule_label or UNKNOWN_LABEL,
+        'brigade': employee.get_brigade_number_display() or UNKNOWN_LABEL,
+        'sex': employee.get_sex_display(),
+        'phone': employee.phone or UNKNOWN_LABEL,
+    }
+
+
+def _resident_card_payload(resident):
+    fields = _external_resident_payload(resident) if resident.is_external else _employee_card_fields(resident.employee)
+    editable = resident.status == SettlementResident.Status.ACTIVE
+    moment = timezone.now()
+    occupancy = _resident_current_occupancy(moment, resident=resident)
+    work = _housing_work_by_resident([resident], [occupancy] if occupancy else [], moment)[resident.pk]
+    return {
+        **fields,
+        **_resident_stay_fields(occupancy, editable=editable),
+        'work_assignment': work,
+        'id': resident.pk,
+        'personnel_number': resident.personnel_number,
+        'is_external': resident.is_external,
+        'editable': editable,
+        'revision': resident.revision,
+        'housing_note': resident.housing_note,
+    }
+
+
+@require_http_methods(['GET', 'POST'])
+@never_cache
+def settlement_resident_detail_view(request, resident_id):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    resident = SettlementResident.objects.select_related(
+        'employee__personnel_position', 'employee__personnel_department', 'employee__work_schedule',
+    ).filter(pk=resident_id).first()
+    if resident is None:
+        return JsonResponse({'ok': False, 'error': 'Карточка жильца не найдена.'}, status=404)
+    if request.method == 'POST':
+        try:
+            payload = _external_resident_request_payload(request)
+            revision = payload.pop('revision', None)
+            stay = payload.pop('stay', None)
+            fields = {'housing_note': forms.CharField(label='Заметка', max_length=3000, required=False)}
+            if resident.is_external:
+                fields.update({
+                    'full_name': forms.CharField(label='ФИО', max_length=255),
+                    'organization': forms.CharField(label='Организация', max_length=255),
+                    'position_title': forms.CharField(label='Должность', max_length=255, required=False),
+                    'phone': forms.CharField(label='Телефон', max_length=64, required=False),
+                    'external_personnel_number': forms.CharField(label='Табельный номер', max_length=64, required=False),
+                    'sex': forms.ChoiceField(label='Пол', choices=[('male', 'Мужской'), ('female', 'Женский')]),
+                })
+            if any(key not in fields or not isinstance(value, str) for key, value in payload.items()):
+                raise ValidationError('Переданы недопустимые поля карточки.')
+            updates = {}
+            for key, value in payload.items():
+                try:
+                    updates[key] = fields[key].clean(value)
+                except ValidationError as error:
+                    raise ValidationError(f'{fields[key].label}. {error.messages[0]}') from error
+            control = _settlement_write_control_context(request)
+            with transaction.atomic():
+                if stay is not None:
+                    if (
+                        not isinstance(stay, dict) or set(stay) != {'occupancy_id', 'version', 'start', 'end'}
+                        or type(stay['occupancy_id']) is not int or stay['occupancy_id'] <= 0
+                        or any(not isinstance(stay[key], str) for key in ('version', 'start', 'end'))
+                    ):
+                        raise ValidationError('Некорректные данные срока проживания.')
+                    update_resident_stay(
+                        resident_id=resident.pk, occupancy_id=stay['occupancy_id'],
+                        version=stay['version'], starts_at=stay['start'], ends_at=stay['end'],
+                        control_context=control,
+                    )
+                resident = update_resident_card(
+                    resident_id=resident.pk, expected_revision=revision, control_context=control, **updates,
+                )
+        except ValidationError as error:
+            _, code = _validation_error_details(error)
+            code = code or ''
+            if code.startswith('settlement.control.'):
+                return _control_error_response(request, error)
+            status = 409 if code in (
+                'settlement.resident.stale_revision', 'settlement.resident.archived',
+                'settlement.manual.occupancy_stale', 'settlement.manual.occupancy_not_found',
+                'settlement.bed.interval_overlap', 'settlement.employee.interval_overlap',
+            ) else 400
+            return JsonResponse({'ok': False, 'error': ' '.join(error.messages)}, status=status)
+    return JsonResponse({'ok': True, 'resident': _resident_card_payload(resident)})
 
 
 def _validation_error_details(error):
@@ -1048,7 +2078,7 @@ def _auto_settlement_error_payload(error):
         'details': {
             key: value
             for key, value in params.items()
-            if key in {'manual_occupancy_count'}
+            if key in {'manual_occupancy_count', 'skipped_rows'}
         },
     }
 
@@ -1082,6 +2112,7 @@ def _auto_settlement_resident_payload(resident):
     return {
         'id': resident.pk,
         'name': resident.display_name,
+        'personnel_number': resident.personnel_number,
         'kind': 'internal' if resident.employee_id else 'external',
         'kind_label': 'Внутренний' if resident.employee_id else 'Внешний',
         'organization': '' if resident.employee_id else (resident.organization or ''),
@@ -1092,6 +2123,14 @@ def _auto_settlement_application_payload(application, unresolved_count):
     action_counts = Counter(
         application.occupancy_items.values_list('action', flat=True)
     )
+    snapshot = application.result_snapshot or {}
+    skipped_rows = snapshot.get('skipped_rows', [])
+    skipped_numbers = {
+        row.pk: row.personnel_number
+        for row in SettlementResident.objects.filter(
+            pk__in={row.get('resident_id') for row in skipped_rows if row.get('resident_id')},
+        ).select_related('employee')
+    }
     return {
         'applied_at': application.applied_at.isoformat(),
         'actor': application.applied_by_access.employee.full_name,
@@ -1100,6 +2139,11 @@ def _auto_settlement_application_payload(application, unresolved_count):
         'replaced_auto': action_counts.get('replaced_auto', 0),
         'replaced_manual': action_counts.get('replaced_manual', 0),
         'unresolved': unresolved_count,
+        'skipped_count': snapshot.get('skipped_count', len(skipped_rows)),
+        'skipped': [
+            {**row, 'personnel_number': skipped_numbers.get(row.get('resident_id'), '')}
+            for row in skipped_rows
+        ],
     }
 
 
@@ -1134,7 +2178,7 @@ def _auto_settlement_plan_map(cohort):
     candidates_by_bed = defaultdict(list)
     for candidate in candidates.values():
         candidates_by_bed[candidate.bed_id].append(candidate)
-    rooms = (
+    rooms = list(
         PhysicalRoom.objects
         .select_related('dormitory')
         .prefetch_related('beds')
@@ -1143,8 +2187,10 @@ def _auto_settlement_plan_map(cohort):
             'side_position', 'number', 'pk',
         )
     )
+    positions = room_map_positions(rooms)
     payload = []
-    for room in rooms:
+    for room in sorted(rooms, key=lambda room: (room.dormitory.number, room.floor, *positions[room.pk])):
+        side, position = positions[room.pk]
         beds = []
         for bed in room.beds.all().order_by('block', 'position', 'pk'):
             exact_candidates = candidates_by_bed.get(bed.pk, [])
@@ -1162,8 +2208,8 @@ def _auto_settlement_plan_map(cohort):
             'display': f'КИС-{room.dormitory.number}, комната {room.number}',
             'dormitory': str(room.dormitory.number),
             'floor': room.floor,
-            'corridor_side': room.corridor_side,
-            'side_position': room.side_position,
+            'corridor_side': side,
+            'side_position': position,
             'transferred': room.is_transferred,
             'beds': beds,
         })
@@ -1296,6 +2342,7 @@ def _auto_settlement_effective_plan_payload(run, *, stale, shift_apply):
                 SettlementPreviewCorrection.Action.RESTORE: 'Возврат исходного решения',
             }[correction.action],
             'resident': residents[correction.resident_id].display_name,
+            'personnel_number': residents[correction.resident_id].personnel_number,
             'work_shift': _auto_settlement_work_shift_label(correction.work_shift),
             'previous_place': previous_place,
             'new_place': new_place,
@@ -1330,6 +2377,9 @@ def _auto_settlement_shift_apply_payload(run, work_shift, *, stale):
         action_counts = Counter(
             application.occupancy_items.values_list('action', flat=True)
         )
+        skipped_rows = (application.result_snapshot or {}).get(
+            'skipped_rows', [],
+        )
         return {
             'status': 'applied',
             'allowed_date': allowed_date.isoformat(),
@@ -1341,6 +2391,8 @@ def _auto_settlement_shift_apply_payload(run, work_shift, *, stale):
                 'replaced_manual': action_counts.get('replaced_manual', 0),
                 'unresolved': run.unresolved_rows.filter(work_shift=work_shift).count(),
             },
+            'skipped_count': len(skipped_rows),
+            'skipped': skipped_rows,
         }
     if run.status != SettlementPreviewRun.Status.CONFIRMED or stale:
         status = 'not_ready'
@@ -1353,6 +2405,8 @@ def _auto_settlement_shift_apply_payload(run, work_shift, *, stale):
         'allowed_date': allowed_date.isoformat(),
         'applied_at': None,
         'counts': None,
+        'skipped_count': 0,
+        'skipped': [],
     }
 
 
@@ -1391,6 +2445,9 @@ def _auto_settlement_run_payload(run):
         unresolved.append({
             'resident': _auto_settlement_resident_payload(row.resident),
             'reason': _auto_settlement_reason_label(row.reason_code),
+            'rule_ids': list(
+                (row.structured_details or {}).get('rule_ids') or ()
+            ),
         })
     applications = list(run.applications.all())
     application = next(iter(applications), None)
@@ -1735,25 +2792,22 @@ def settlement_control_release_view(request):
 
 def _occupancy_response(occupancy):
     resident = occupancy.resident
-    if resident.employee_id:
-        employee = resident.employee
-        profile = _employee_profiles([employee])[employee.pk]
-        photo_url = profile['photo_url']
-        shift_label = profile['shift_label']
-        work_label = profile['work_label']
-    else:
-        photo_url = _resident_photo_url(resident)
-        shift_label = UNKNOWN_LABEL
-        work_label = resident.organization or UNKNOWN_LABEL
+    moment = timezone.now()
+    work = _housing_work_by_resident([resident], [occupancy], moment)[resident.pk]
     bed = occupancy.physical_bed
     room = bed.room
-    moment = timezone.now()
+    on_extension = (
+        bool(approved_watch_extensions_on(production_work_date(moment), employee_ids=[resident.employee_id]))
+        if resident.employee_id and occupancy.is_active_at(moment) else False
+    )
     active_in_room = EmployeeBedOccupancy.objects.filter(
         effective_occupancy_at_q(moment),
         physical_bed__room=room,
     ).count()
     transferred_beds = PhysicalBed.objects.filter(
         room__dormitory__number__in=['5', '6'],
+        # T-029 m3: счётчики считают только собственный фонд (см. карту).
+        room__dormitory__kind=Dormitory.Kind.OWN,
         room__transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
     )
     occupied_beds = EmployeeBedOccupancy.objects.filter(
@@ -1769,11 +2823,18 @@ def _occupancy_response(occupancy):
             'employee_id': resident.employee_id,
             'bed_stable_id': bed.stable_id,
             'occupant_name': resident.display_name,
-            'photo_url': photo_url,
-            'shift_label': shift_label,
-            'work_label': work_label,
+            'personnel_number': resident.personnel_number,
+            'photo_url': _resident_photo_url(resident),
+            **work,
+            'on_extension': on_extension,
+            'stay_period': _bed_stay_period(occupancy),
             'assignment_type': occupancy.assignment_type,
             'assignment_type_label': occupancy.get_assignment_type_display(),
+            'placement_reason': occupancy.placement_reason,
+            'category_exception': (
+                MANUAL_CATEGORY_EXCEPTION_LABEL
+                if str(occupancy.pk) in occupancies_with_manual_category_exception([occupancy.pk]) else ''
+            ),
         },
         'room': {
             'id': room.pk,
@@ -1841,17 +2902,31 @@ def settlement_occupancy_create_view(request):
                 assignment_type=payload.get('assignment_type', ''),
                 ends_at=_payload_ends_at(payload),
                 control_context=control_context,
+                confirm_itr=payload.get('confirm_itr') is True,
+                placement_reason=payload.get('placement_reason', '') or '',
+                category_exception=payload.get('category_exception', ''),
             )
         elif action == 'relocate':
             occupancy = relocate_resident_to_bed(
                 bed_stable_id=payload.get('bed_stable_id', ''),
                 occupancy_id=payload.get('occupancy_id'),
                 control_context=control_context,
+                confirm_itr=payload.get('confirm_itr') is True,
+                placement_reason=payload.get('placement_reason', '') or '',
+            )
+        elif action == 'swap':
+            replacements = swap_resident_beds(
+                first_occupancy_id=payload.get('first_occupancy_id'),
+                first_bed_id=payload.get('first_bed_id'),
+                second_occupancy_id=payload.get('second_occupancy_id'),
+                second_bed_id=payload.get('second_bed_id'),
+                control_context=control_context,
             )
         elif action == 'release':
             occupancy = release_resident_from_bed(
                 occupancy_id=payload.get('occupancy_id'),
                 bed_stable_id=payload.get('bed_stable_id'),
+                reason=payload.get('reason', ''),
                 control_context=control_context,
             )
         else:
@@ -1874,6 +2949,9 @@ def settlement_occupancy_create_view(request):
             'settlement_bed_multiple_active_occupancies',
             'settlement_bed_already_free',
             'settlement_relocation_same_bed',
+            'settlement.swap.stale',
+            'settlement.swap.same_place',
+            ROOM_CATEGORY_CONFLICT,
             'settlement_relocation_same_moment',
             'settlement_release_same_moment',
             'settlement.manual.shift_not_applied',
@@ -1885,6 +2963,15 @@ def settlement_occupancy_create_view(request):
             'settlement.cohort.shift_review_required',
             'settlement_employee_sex_unknown',
             'settlement_room_sex_mismatch',
+            'settlement_room_sex_mixed',
+            'settlement_room_occupant_sex_unknown',
+            'itr_room_requires_itr',
+            'itr_room_manual_only',
+            'protected_dispatch_only',
+            'protected_room_forbidden',
+            'settlement.proposed.relocation_disabled',
+            'settlement.temporary_unapproved.use_service',
+            'settlement.bed.preparation_hold',
         } else 400
         if code in {
             'settlement_bed_not_found',
@@ -1893,11 +2980,13 @@ def settlement_occupancy_create_view(request):
             'settlement.manual.occupancy_not_found',
         }:
             status = 404
-        return JsonResponse(
-            {'ok': False, 'error': message, 'code': code},
-            status=status,
-        )
+        result = {'ok': False, 'error': message, 'code': code}
+        if action == 'settle' and getattr(error, 'confirmable_category_conflict', None):
+            result['category_exception'] = error.confirmable_category_conflict
+        return JsonResponse(result, status=status)
 
+    if action == 'swap':
+        return JsonResponse({'ok': True, 'placements': [_occupancy_response(row) for row in replacements]})
     if action == 'release':
         return JsonResponse({
             'ok': True,
@@ -1905,3 +2994,1399 @@ def settlement_occupancy_create_view(request):
             'occupancy_id': occupancy.pk,
         })
     return JsonResponse(_occupancy_response(occupancy), status=201)
+
+
+EXTERNAL_RESIDENT_TYPES = (
+    SettlementResident.ResidentType.CONTRACTOR,
+    SettlementResident.ResidentType.BUSINESS_TRIP,
+    SettlementResident.ResidentType.EXTERNAL_OTHER,
+)
+
+EXTERNAL_RESIDENT_INVALID_PAYLOAD = 'settlement.external_resident.invalid_payload'
+
+
+def _external_resident_json_response(payload, *, status=200):
+    response = JsonResponse(payload, status=status)
+    response['Cache-Control'] = 'private, no-store'
+    return response
+
+
+def _external_resident_post_only(view):
+    """POST-only with the same no-store contract on the 405 answer."""
+
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if request.method != 'POST':
+            response = HttpResponseNotAllowed(['POST'])
+            response['Cache-Control'] = 'private, no-store'
+            return response
+        return view(request, *args, **kwargs)
+
+    return wrapper
+
+
+EXTERNAL_RESIDENT_REQUIRED_FIELDS = (
+    ('full_name', 'ФИО'),
+    ('organization', 'Организация'),
+    ('phone', 'Телефон'),
+)
+
+
+def _normalized_external_required(value):
+    return ' '.join(str(value or '').split())
+
+
+def _validated_external_resident_fields(payload, *, require_phone=True):
+    """Repeat the domain's fail-closed checks before any duplicate warning."""
+    resident_type = payload.get('resident_type')
+    if not isinstance(resident_type, str) or resident_type not in EXTERNAL_RESIDENT_TYPES:
+        raise ValidationError(
+            'Для внешней карточки требуется внешний тип жильца.',
+            code='settlement.resident.invalid_type',
+        )
+    values = {
+        'resident_type': resident_type,
+        'position_title': _normalized_external_required(payload.get('position_title')),
+    }
+    for field_name, field_label in EXTERNAL_RESIDENT_REQUIRED_FIELDS:
+        normalized = _normalized_external_required(payload.get(field_name))
+        if not normalized and (field_name != 'phone' or require_phone):
+            raise ValidationError(
+                f'{field_label} обязательно.',
+                code='settlement.resident.required_field',
+            )
+        values[field_name] = normalized
+    sex = payload.get('sex')
+    if not isinstance(sex, str) or sex.strip().lower() not in {
+        Employee.Sex.MALE,
+        Employee.Sex.FEMALE,
+    }:
+        raise ValidationError(
+            'Для внешнего resident требуется пол male/female.',
+            code='settlement.resident.invalid_sex',
+        )
+    values['sex'] = sex.strip().lower()
+    return values
+
+
+def _external_resident_payload(resident):
+    """Only the fields confirmed for the clerk card search (no photo, no audit)."""
+    return {
+        'id': resident.pk,
+        'full_name': resident.full_name,
+        'resident_type': resident.resident_type,
+        'resident_type_label': resident.get_resident_type_display(),
+        'position_title': resident.position_title,
+        'organization': resident.organization,
+        'phone': resident.phone,
+        'personnel_number': resident.personnel_number,
+        'external_sex': resident.external_sex or '',
+    }
+
+
+def _external_resident_request_payload(request):
+    try:
+        payload = json.loads(request.body or b'{}')
+    except (TypeError, ValueError) as error:
+        raise ValidationError(
+            'Некорректные данные запроса.',
+            code=EXTERNAL_RESIDENT_INVALID_PAYLOAD,
+        ) from error
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            'Некорректные данные запроса.',
+            code=EXTERNAL_RESIDENT_INVALID_PAYLOAD,
+        )
+    return payload
+
+
+def _normalized_external_text(value):
+    if not isinstance(value, str):
+        return ''
+    return ' '.join(value.split())
+
+
+def _external_resident_duplicate_conditions(*, full_name, phone, organization):
+    conditions = Q()
+    for field_name, value in (
+        ('full_name', full_name),
+        ('phone', phone),
+        ('organization', organization),
+    ):
+        normalized = _normalized_external_text(value)
+        if normalized:
+            conditions |= Q(**{f'{field_name}__iexact': normalized})
+    return conditions
+
+
+def _external_resident_duplicate_candidates(*, full_name, phone, organization):
+    conditions = _external_resident_duplicate_conditions(
+        full_name=full_name,
+        phone=phone,
+        organization=organization,
+    )
+    if not conditions:
+        return []
+    return list(
+        SettlementResident.objects
+        .filter(
+            conditions,
+            status=SettlementResident.Status.ACTIVE,
+            resident_type__in=EXTERNAL_RESIDENT_TYPES,
+        )
+        .order_by('full_name', 'pk')[:12]
+    )
+
+
+@_external_resident_post_only
+def settlement_external_resident_search_view(request):
+    """Read-only search over active external resident cards (T-025a)."""
+    if not settlement_clerk_access_from_request(request):
+        return _external_resident_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+
+    try:
+        payload = _external_resident_request_payload(request)
+    except ValidationError as error:
+        message, code = _validation_error_details(error)
+        return _external_resident_json_response(
+            {'ok': False, 'error': message, 'code': code},
+            status=400,
+        )
+
+    query = payload.get('q', '')
+    if query is None:
+        query = ''
+    if not isinstance(query, str):
+        return _external_resident_json_response(
+            {
+                'ok': False,
+                'error': 'Некорректные данные запроса.',
+                'code': EXTERNAL_RESIDENT_INVALID_PAYLOAD,
+            },
+            status=400,
+        )
+    query = _normalized_external_text(query)
+    if len(query) < 2:
+        return _external_resident_json_response({'ok': True, 'results': []})
+
+    residents = (
+        SettlementResident.objects
+        .filter(
+            Q(full_name__icontains=query)
+            | Q(organization__icontains=query)
+            | Q(phone__icontains=query)
+            | Q(position_title__icontains=query),
+            status=SettlementResident.Status.ACTIVE,
+            resident_type__in=EXTERNAL_RESIDENT_TYPES,
+        )
+        .order_by('full_name', 'pk')[:12]
+    )
+    return _external_resident_json_response({
+        'ok': True,
+        'results': [_external_resident_payload(resident) for resident in residents],
+    })
+
+
+@_external_resident_post_only
+def settlement_external_resident_create_view(request):
+    """Create one external resident card under the clerk lease (T-025a)."""
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _external_resident_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+
+    try:
+        payload = _external_resident_request_payload(request)
+    except ValidationError as error:
+        message, code = _validation_error_details(error)
+        return _external_resident_json_response(
+            {'ok': False, 'error': message, 'code': code},
+            status=400,
+        )
+
+    try:
+        control_context = _settlement_write_control_context(request)
+    except ValidationError as error:
+        response = _control_error_response(request, error)
+        response['Cache-Control'] = 'private, no-store'
+        return response
+
+    try:
+        values = _validated_external_resident_fields(payload)
+    except ValidationError as error:
+        message, code = _validation_error_details(error)
+        return _external_resident_json_response(
+            {'ok': False, 'error': message, 'code': code},
+            status=400,
+        )
+
+    duplicate_candidates = _external_resident_duplicate_candidates(
+        full_name=values['full_name'],
+        phone=values['phone'],
+        organization=values['organization'],
+    )
+    if duplicate_candidates and payload.get('confirm_duplicate') is not True:
+        return _external_resident_json_response({
+            'ok': False,
+            'requires_confirmation': True,
+            'duplicate_candidates': [
+                _external_resident_payload(resident)
+                for resident in duplicate_candidates
+            ],
+        })
+
+    try:
+        resident = create_external_resident(
+            resident_type=values['resident_type'],
+            full_name=values['full_name'],
+            position_title=values['position_title'],
+            organization=values['organization'],
+            phone=values['phone'],
+            sex=values['sex'],
+            control_context=control_context,
+        )
+    except ValidationError as error:
+        message, code = _validation_error_details(error)
+        if code.startswith('settlement.control.'):
+            response = _control_error_response(request, error)
+            response['Cache-Control'] = 'private, no-store'
+            return response
+        return _external_resident_json_response(
+            {'ok': False, 'error': message, 'code': code},
+            status=400,
+        )
+
+    return _external_resident_json_response(
+        {'ok': True, 'resident': _external_resident_payload(resident)},
+        status=201,
+    )
+
+
+TEMPORARY_PLACEMENT_INVALID_PAYLOAD = 'settlement.placement.invalid_payload'
+
+TEMPORARY_PLACEMENT_NOT_FOUND_CODES = frozenset({
+    'settlement_resident_not_found',
+    'settlement_bed_not_found',
+    'settlement_room_not_found',
+    'settlement.preparation.not_found',
+    'settlement.manual.occupancy_not_found',
+})
+
+TEMPORARY_PLACEMENT_CONFLICT_CODES = frozenset({
+    'settlement.bed.interval_overlap',
+    'settlement.employee.interval_overlap',
+    'settlement_bed_occupied',
+    'settlement_employee_already_housed',
+    'settlement_employee_inactive',
+    'settlement_employee_sex_unknown',
+    'settlement_occupancy_changed',
+    'settlement.preparation.bed_already_prepared',
+    'settlement.preparation.expired',
+    'settlement.preparation.hold_until_not_extended',
+    'settlement.preparation.not_prepared',
+    'settlement.preparation.resident_already_prepared',
+    'settlement.bed.preparation_hold',
+    'settlement.reserve.already_set',
+    'settlement.reserve.not_set',
+    'settlement.temporary.not_temporary',
+    'settlement.manual.occupancy_stale',
+    'settlement_relocation_same_bed',
+    'settlement_relocation_same_moment',
+    'settlement_resident_inactive',
+    'settlement_room_not_transferred',
+    'settlement_room_sex_mismatch',
+    'settlement_room_sex_mixed',
+    'settlement_room_occupant_sex_unknown',
+    'itr_room_requires_itr',
+    'itr_room_manual_only',
+    'protected_dispatch_only',
+    'protected_room_forbidden',
+})
+
+
+def _temporary_placement_json_response(payload, *, status=200):
+    response = JsonResponse(payload, status=status)
+    response['Cache-Control'] = 'private, no-store'
+    return response
+
+
+def _temporary_placement_error_response(error, *, offer_category_exception=False):
+    message, code = _validation_error_details(error)
+    if code in TEMPORARY_PLACEMENT_NOT_FOUND_CODES:
+        status = 404
+    elif code in TEMPORARY_PLACEMENT_CONFLICT_CODES:
+        status = 409
+    else:
+        status = 400
+    result = {'ok': False, 'error': message, 'code': code}
+    if offer_category_exception and getattr(error, 'confirmable_category_conflict', None):
+        result['category_exception'] = error.confirmable_category_conflict
+    return _temporary_placement_json_response(result, status=status)
+
+
+def _temporary_placement_control_error(request, error):
+    response = _control_error_response(request, error)
+    response['Cache-Control'] = 'private, no-store'
+    return response
+
+
+def _temporary_placement_payload(request):
+    try:
+        payload = json.loads(request.body or b'{}')
+    except (TypeError, ValueError) as error:
+        raise ValidationError(
+            'Некорректные данные запроса.',
+            code=TEMPORARY_PLACEMENT_INVALID_PAYLOAD,
+        ) from error
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            'Некорректные данные запроса.',
+            code=TEMPORARY_PLACEMENT_INVALID_PAYLOAD,
+        )
+    return payload
+
+
+def _temporary_placement_write_context(request):
+    return _settlement_write_control_context(request)
+
+
+def _bed_preparation_payload(preparation):
+    return {
+        'id': preparation.pk,
+        'resident_id': preparation.resident_id,
+        'bed_stable_id': preparation.physical_bed.stable_id,
+        'arrival_date': preparation.arrival_date.isoformat(),
+        'hold_until': preparation.hold_until.isoformat(),
+        'status': preparation.status,
+        'status_label': preparation.get_status_display(),
+        'basis': preparation.basis,
+        'created_by_access_id': preparation.created_by_access_id,
+        'created_at': preparation.created_at.isoformat(),
+        'confirmed_at': (
+            preparation.confirmed_at.isoformat()
+            if preparation.confirmed_at else None
+        ),
+        'confirmed_occupancy_id': preparation.confirmed_occupancy_id,
+        'cancelled_at': (
+            preparation.cancelled_at.isoformat()
+            if preparation.cancelled_at else None
+        ),
+        'cancel_reason': preparation.cancel_reason,
+    }
+
+
+def _temporary_occupancy_payload(occupancy):
+    return {
+        'id': occupancy.pk,
+        'resident_id': occupancy.resident_id,
+        'bed_stable_id': occupancy.physical_bed.stable_id,
+        'assignment_type': occupancy.assignment_type,
+        'assignment_type_label': occupancy.get_assignment_type_display(),
+        'placement_reason': occupancy.placement_reason,
+        'starts_at': occupancy.starts_at.isoformat(),
+        'ends_at': occupancy.ends_at.isoformat() if occupancy.ends_at else None,
+        'settled_by_id': occupancy.settled_by_id,
+    }
+
+
+def _bed_reserve_payload(reserve):
+    return {
+        'id': reserve.pk,
+        'bed_stable_id': reserve.physical_bed.stable_id,
+        'is_active': reserve.is_active,
+        'reason': reserve.reason,
+        'created_by_access_id': reserve.created_by_access_id,
+        'created_at': reserve.created_at.isoformat(),
+        'deactivated_at': (
+            reserve.deactivated_at.isoformat()
+            if reserve.deactivated_at else None
+        ),
+    }
+
+
+@require_GET
+@never_cache
+def settlement_bed_checkin_people_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    return JsonResponse({'results': search_housing_subjects(request.GET.get('q', ''))})
+
+
+def _bed_checkin_subject_id(subject):
+    if isinstance(subject, str):
+        kind, _, key = subject.partition(':')
+        if key.isascii() and key.isdigit() and len(key) <= 19 and 0 < int(key) <= 2**63 - 1:
+            return kind, int(key)
+    return '', None
+
+
+def _bed_checkin_resident(payload, control):
+    subject = payload.get('subject')
+    if subject == 'new':
+        values = _validated_external_resident_fields(payload, require_phone=False)
+        if external_housing_card_exists(values):
+            raise ValidationError('Такая карточка уже есть. Выберите жильца по ФИО. Если карточка в архиве, восстановите её.')
+        return create_external_resident(**values, control_context=control, require_phone=False).pk
+    kind, pk = _bed_checkin_subject_id(subject)
+    if kind == 'employee' and Employee.objects.filter(
+        pk=pk, is_active=True, status=Employee.Status.ACTIVE,
+    ).exists():
+        resident, _ = get_or_create_employee_resident(employee_id=pk)
+        return resident.pk
+    if kind == 'resident' and SettlementResident.objects.filter(pk=pk, employee__isnull=True).exists():
+        return pk
+    raise ValidationError('Выберите человека из списка или создайте нового жильца.')
+
+
+class BedCheckinForm(forms.Form):
+    arrival = forms.DateField(input_formats=['%Y-%m-%d'], required=False)
+    departure = forms.DateField(input_formats=['%Y-%m-%d'], required=False)
+    work_shift = forms.ChoiceField(choices=DAY_NIGHT_LABELS.items(), required=False)
+
+    def stay(self, *, now):
+        if not self.is_valid():
+            if 'work_shift' in self.errors:
+                raise ValidationError('Выберите дневную или ночную смену.')
+            raise ValidationError('Проверьте даты заселения и выезда.')
+        today = business_localtime(now).date()
+        arrival = self.cleaned_data['arrival'] or today
+        if arrival > today:
+            raise ValidationError('Для будущего заезда выберите «Подготовить место».')
+        start = now if arrival == today else datetime.combine(arrival, DAY_SHIFT_START, BUSINESS_TIME_ZONE)
+        departure = self.cleaned_data['departure']
+        end = datetime.combine(departure, DAY_SHIFT_START, BUSINESS_TIME_ZONE) if departure else None
+        if end is not None and end <= now:
+            raise ValidationError('Выезд должен быть позже текущего времени.')
+        return arrival, start, end
+
+
+@require_POST
+def settlement_bed_checkin_preview_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return _temporary_placement_json_response({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    try:
+        payload = _temporary_placement_payload(request)
+        _, start, end = BedCheckinForm(payload).stay(now=timezone.now())
+        kind, pk = _bed_checkin_subject_id(payload.get('subject'))
+        employee = (
+            Employee.objects.select_related('settlement_resident', 'personnel_position')
+            .filter(pk=pk, is_active=True, status=Employee.Status.ACTIVE).first()
+            if kind == 'employee' else None
+        )
+        if employee is None:
+            raise ValidationError('Выберите активного сотрудника из списка.')
+        resident = getattr(employee, 'settlement_resident', None)
+        if resident is None:
+            resident = SettlementResident(employee=employee, resident_type=SettlementResident.ResidentType.EMPLOYEE)
+        preview_bed_checkin(
+            resident=resident, bed_stable_id=payload.get('bed_stable_id'), starts_at=start, ends_at=end,
+            confirm_itr=payload.get('confirm_itr') is True, basis=payload.get('basis', ''),
+        )
+    except ValidationError as error:
+        return _temporary_placement_error_response(error, offer_category_exception=True)
+    return _temporary_placement_json_response({'ok': True})
+
+
+@require_POST
+def settlement_bed_checkin_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return _temporary_placement_json_response({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    try:
+        payload = _temporary_placement_payload(request)
+        control = _temporary_placement_write_context(request)
+        form = BedCheckinForm(payload)
+        with transaction.atomic():
+            lock_settlement_write_lease(control_context=control, using='default')
+            now = timezone.now()
+            arrival, start, end = form.stay(now=now)
+            resident_id = _bed_checkin_resident(payload, control)
+            confirm_itr = payload.get('confirm_itr') is True
+            category_exception = payload.get('category_exception', '')
+            prepared = prepare_bed(
+                resident_id=resident_id, bed_stable_id=payload.get('bed_stable_id'),
+                arrival_date=arrival, hold_until=end or now + timedelta(minutes=1),
+                basis=payload.get('basis', ''), control_context=control, confirm_itr=confirm_itr,
+                current_stay=(start, end), category_exception=category_exception,
+            )
+            occupancy = confirm_bed_preparation(
+                preparation_id=prepared.pk, control_context=control,
+                starts_at=start, ends_at=end, confirm_itr=confirm_itr, placement_reason=payload.get('basis', ''),
+                work_shift=form.cleaned_data['work_shift'] or None,
+                category_exception=category_exception,
+            )
+            result = _occupancy_response(occupancy)
+    except ValidationError as error:
+        if (_validation_error_details(error)[1] or '').startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error, offer_category_exception=True)
+    return _temporary_placement_json_response(result, status=201)
+
+
+@require_POST
+def settlement_bed_preparation_prepare_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    try:
+        control_context = _temporary_placement_write_context(request)
+    except ValidationError as error:
+        return _temporary_placement_control_error(request, error)
+    try:
+        preparation = prepare_bed(
+            resident_id=payload.get('resident_id'),
+            bed_stable_id=payload.get('bed_stable_id', ''),
+            arrival_date=payload.get('arrival_date'),
+            basis=payload.get('basis', ''),
+            hold_until=payload.get('hold_until'),
+            control_context=control_context,
+        )
+    except ValidationError as error:
+        if _validation_error_details(error)[1].startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response(
+        {'ok': True, 'preparation': _bed_preparation_payload(preparation)},
+        status=201,
+    )
+
+
+@require_POST
+def settlement_bed_preparation_confirm_view(request, preparation_id):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        control_context = _temporary_placement_write_context(request)
+    except ValidationError as error:
+        return _temporary_placement_control_error(request, error)
+    try:
+        occupancy = confirm_bed_preparation(
+            preparation_id=preparation_id,
+            control_context=control_context,
+        )
+    except ValidationError as error:
+        if _validation_error_details(error)[1].startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response({
+        'ok': True,
+        'occupancy': _temporary_occupancy_payload(occupancy),
+    })
+
+
+@require_POST
+def settlement_bed_preparation_cancel_view(request, preparation_id):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    try:
+        control_context = _temporary_placement_write_context(request)
+    except ValidationError as error:
+        return _temporary_placement_control_error(request, error)
+    try:
+        preparation = cancel_bed_preparation(
+            preparation_id=preparation_id,
+            reason=payload.get('reason'),
+            control_context=control_context,
+        )
+    except ValidationError as error:
+        if _validation_error_details(error)[1].startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response({
+        'ok': True,
+        'preparation': _bed_preparation_payload(preparation),
+    })
+
+
+@require_POST
+def settlement_bed_preparation_extend_view(request, preparation_id):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    try:
+        control_context = _temporary_placement_write_context(request)
+    except ValidationError as error:
+        return _temporary_placement_control_error(request, error)
+    try:
+        preparation = extend_bed_preparation(
+            preparation_id=preparation_id,
+            hold_until=payload.get('hold_until'),
+            reason=payload.get('reason'),
+            control_context=control_context,
+        )
+    except ValidationError as error:
+        if _validation_error_details(error)[1].startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response({
+        'ok': True,
+        'preparation': _bed_preparation_payload(preparation),
+    })
+
+
+@require_POST
+def settlement_temporary_relocate_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    try:
+        control_context = _temporary_placement_write_context(request)
+    except ValidationError as error:
+        return _temporary_placement_control_error(request, error)
+    try:
+        occupancy = relocate_temporary_occupancy(
+            occupancy_id=payload.get('occupancy_id'),
+            bed_stable_id=payload.get('bed_stable_id', ''),
+            reason=payload.get('reason', ''),
+            control_context=control_context,
+        )
+    except ValidationError as error:
+        if _validation_error_details(error)[1].startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response({
+        'ok': True,
+        'occupancy': {
+            **_temporary_occupancy_payload(occupancy),
+            **_occupancy_response(occupancy)['occupancy'],
+        },
+    })
+
+
+@require_POST
+def settlement_temporary_release_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    try:
+        control_context = _temporary_placement_write_context(request)
+    except ValidationError as error:
+        return _temporary_placement_control_error(request, error)
+    try:
+        occupancy = release_temporary_occupancy(
+            occupancy_id=payload.get('occupancy_id'),
+            bed_stable_id=payload.get('bed_stable_id'),
+            reason=payload.get('reason', ''),
+            control_context=control_context,
+        )
+    except ValidationError as error:
+        if _validation_error_details(error)[1].startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response({
+        'ok': True,
+        'action': 'release',
+        'occupancy_id': occupancy.pk,
+    })
+
+
+@require_POST
+def settlement_bed_reserve_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    action = payload.get('action')
+    if action not in {'set', 'clear'}:
+        return _temporary_placement_json_response(
+            {
+                'ok': False,
+                'error': 'Неизвестное действие с резервом.',
+                'code': 'settlement.reserve.action_invalid',
+            },
+            status=400,
+        )
+    try:
+        control_context = _temporary_placement_write_context(request)
+    except ValidationError as error:
+        return _temporary_placement_control_error(request, error)
+    try:
+        if action == 'set':
+            reserve = set_bed_reserve(
+                bed_stable_id=payload.get('bed_stable_id', ''),
+                reason=payload.get('reason'),
+                control_context=control_context,
+            )
+        else:
+            reserve = clear_bed_reserve(
+                bed_stable_id=payload.get('bed_stable_id', ''),
+                reason=payload.get('reason'),
+                control_context=control_context,
+            )
+    except ValidationError as error:
+        if _validation_error_details(error)[1].startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response({
+        'ok': True,
+        'action': action,
+        'reserve': _bed_reserve_payload(reserve),
+    })
+
+
+@require_GET
+def settlement_temporary_state_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    return _temporary_placement_json_response({
+        'ok': True,
+        **temporary_placement_state(),
+    })
+
+
+CLERK_SHIFT_FORBIDDEN_CODES = frozenset({
+    'settlement.shift.invalid_access',
+    'settlement.shift.inactive_access',
+    'settlement.shift.invalid_role',
+})
+
+CLERK_SHIFT_BAD_REQUEST_CODES = frozenset({
+    'settlement.shift.reason_required',
+    'settlement.shift.reason_invalid',
+    'settlement.shift.close_kind_invalid',
+    'settlement.shift.invalid_payload',
+})
+
+
+def _clerk_shift_json_response(payload, *, status=200):
+    response = JsonResponse(payload, status=status)
+    response['Cache-Control'] = 'private, no-store'
+    return response
+
+
+def _clerk_shift_error_response(error):
+    message, code = _validation_error_details(error)
+    if code in CLERK_SHIFT_FORBIDDEN_CODES:
+        status = 403
+    elif code in CLERK_SHIFT_BAD_REQUEST_CODES:
+        status = 400
+    else:
+        status = 409
+    return _clerk_shift_json_response(
+        {'ok': False, 'error': message, 'code': code},
+        status=status,
+    )
+
+
+def _clerk_shift_request_payload(request):
+    try:
+        payload = json.loads(request.body or b'{}')
+    except (TypeError, ValueError) as error:
+        raise ValidationError(
+            'Некорректные данные запроса.',
+            code='settlement.shift.invalid_payload',
+        ) from error
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            'Некорректные данные запроса.',
+            code='settlement.shift.invalid_payload',
+        )
+    return payload
+
+
+@require_GET
+def settlement_clerk_shift_state_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _clerk_shift_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = clerk_shift_state(access_id=access.pk)
+    except ValidationError as error:
+        return _clerk_shift_error_response(error)
+    return _clerk_shift_json_response({'ok': True, **payload})
+
+
+@require_POST
+def settlement_clerk_shift_open_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _clerk_shift_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        shift = open_clerk_shift(access_id=access.pk)
+    except ValidationError as error:
+        return _clerk_shift_error_response(error)
+    return _clerk_shift_json_response({
+        'ok': True,
+        'shift': clerk_shift_payload(shift, access_id=access.pk),
+    })
+
+
+@require_POST
+def settlement_clerk_shift_close_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _clerk_shift_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _clerk_shift_request_payload(request)
+    except ValidationError as error:
+        return _clerk_shift_error_response(error)
+    try:
+        shift = close_clerk_shift(
+            access_id=access.pk,
+            reason=payload.get('reason', ''),
+            shift_id=payload.get('shift_id'),
+        )
+    except ValidationError as error:
+        return _clerk_shift_error_response(error)
+    return _clerk_shift_json_response({
+        'ok': True,
+        'shift': clerk_shift_payload(shift, access_id=access.pk),
+    })
+
+
+@require_POST
+def settlement_clerk_shift_handover_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _clerk_shift_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _clerk_shift_request_payload(request)
+    except ValidationError as error:
+        return _clerk_shift_error_response(error)
+    try:
+        shift, grant = handover_clerk_shift(
+            access_id=access.pk,
+            reason=payload.get('reason', ''),
+            raw_session_key=request.session.session_key,
+        )
+    except ValidationError as error:
+        return _clerk_shift_error_response(error)
+    if grant is not None:
+        store_control_session_credentials(
+            request.session,
+            owner_access_id=access.pk,
+            grant=grant,
+        )
+    return _clerk_shift_json_response({
+        'ok': True,
+        'shift': clerk_shift_payload(shift, access_id=access.pk),
+        'lease': {
+            'acquired': grant is not None,
+            'expires_at': grant.expires_at.isoformat() if grant else None,
+        },
+    })
+
+
+RESIDENT_SEARCH_LIMIT = 12
+RESIDENT_SEARCH_MIN_QUERY = 2
+
+
+def _resident_search_employee_row(resident):
+    """Карточка внутреннего сотрудника без фото, телефона и аудита."""
+    employee = resident.employee
+    position = (
+        employee.personnel_position.name
+        if employee.personnel_position_id
+        else employee.position
+    )
+    return {
+        'resident_id': resident.pk,
+        'employee_id': employee.pk,
+        'resident_type': resident.resident_type,
+        'resident_type_label': resident.get_resident_type_display(),
+        'full_name': employee.full_name,
+        'meta': {
+            'position': position or '',
+            'organization': employee.department_label or '',
+            'personnel_number': employee.personnel_number or '',
+        },
+    }
+
+
+def _resident_search_external_row(resident):
+    """Карточка внешнего жильца без фото и аудита."""
+    return {
+        'resident_id': resident.pk,
+        'employee_id': None,
+        'resident_type': resident.resident_type,
+        'resident_type_label': resident.get_resident_type_display(),
+        'full_name': resident.full_name,
+        'meta': {
+            'position': resident.position_title,
+            'organization': resident.organization,
+            'personnel_number': resident.personnel_number or '',
+        },
+    }
+
+
+@require_POST
+def settlement_resident_search_view(request):
+    """T-029: поиск жильца для подготовки места вне состава заезда.
+
+    Существующий ``settlement_employee_search_view`` ищет только незаселённых
+    сотрудников текущего утверждённого состава; подготовка по пропуску бывает
+    до утверждения списка, поэтому здесь ищутся все активные сотрудники и все
+    активные внешние карточки.
+    """
+    if not settlement_clerk_access_from_request(request):
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    query = payload.get('q', '')
+    if query is None:
+        query = ''
+    if not isinstance(query, str):
+        return _temporary_placement_json_response(
+            {
+                'ok': False,
+                'error': 'Некорректные данные запроса.',
+                'code': TEMPORARY_PLACEMENT_INVALID_PAYLOAD,
+            },
+            status=400,
+        )
+    # T-036 backend-19: необязательный `resident_type` фильтрует выдачу ДО
+    # лимита, поэтому командированный не вытесняется двенадцатью сотрудниками.
+    # Без параметра поведение прежнее (сотрудники + внешние, общий лимит 12).
+    raw_resident_type = payload.get('resident_type')
+    resident_type = None
+    if raw_resident_type not in (None, ''):
+        if not isinstance(raw_resident_type, str):
+            return _temporary_placement_json_response(
+                {
+                    'ok': False,
+                    'error': 'Некорректный тип жильца.',
+                    'code': TEMPORARY_PLACEMENT_INVALID_PAYLOAD,
+                },
+                status=400,
+            )
+        candidate_type = raw_resident_type.strip().upper()
+        valid_types = {
+            value for value, _label
+            in SettlementResident.ResidentType.choices
+        }
+        if candidate_type != 'GUEST' and candidate_type not in valid_types:
+            return _temporary_placement_json_response(
+                {
+                    'ok': False,
+                    'error': 'Некорректный тип жильца.',
+                    'code': TEMPORARY_PLACEMENT_INVALID_PAYLOAD,
+                },
+                status=400,
+            )
+        resident_type = candidate_type
+
+    # T-036 backend-21: длина запроса проверяется ПОСЛЕ валидации типа, иначе
+    # невалидный `resident_type` при коротком `q` давал бы 200 [].
+    query = ' '.join(query.split())
+    if len(query) < RESIDENT_SEARCH_MIN_QUERY:
+        return _temporary_placement_json_response({'ok': True, 'results': []})
+
+    employees = []
+    if resident_type in (
+        None, SettlementResident.ResidentType.EMPLOYEE,
+    ):
+        employees = (
+            SettlementResident.objects
+            .filter(
+                Q(employee__full_name__icontains=query)
+                | Q(employee__personnel_number__icontains=query)
+                | Q(employee__position__icontains=query)
+                | Q(employee__personnel_position__name__icontains=query)
+                | Q(employee__personnel_department__name__icontains=query)
+                | Q(employee__department__icontains=query)
+                | Q(employee__phone__icontains=query),
+                resident_type=SettlementResident.ResidentType.EMPLOYEE,
+                status=SettlementResident.Status.ACTIVE,
+                employee__is_active=True,
+                employee__status=Employee.Status.ACTIVE,
+            )
+            .select_related(
+                'employee',
+                'employee__personnel_position',
+                'employee__personnel_department',
+            )
+            .order_by('employee__full_name', 'pk')[:RESIDENT_SEARCH_LIMIT]
+        )
+    guest_types = (
+        SettlementResident.ResidentType.BUSINESS_TRIP,
+        SettlementResident.ResidentType.EXTERNAL_OTHER,
+    )
+    externals = []
+    if (
+        resident_type is None
+        or resident_type in EXTERNAL_RESIDENT_TYPES
+        or resident_type == 'GUEST'
+    ):
+        external_filter = Q(
+            status=SettlementResident.Status.ACTIVE,
+            resident_type__in=EXTERNAL_RESIDENT_TYPES,
+        )
+        if resident_type == 'GUEST':
+            external_filter &= Q(resident_type__in=guest_types)
+        elif resident_type is not None:
+            external_filter &= Q(resident_type=resident_type)
+        externals = (
+            SettlementResident.objects
+            .filter(
+                Q(full_name__icontains=query)
+                | Q(organization__icontains=query)
+                | Q(external_personnel_number__icontains=query)
+                | Q(position_title__icontains=query)
+                | Q(phone__icontains=query),
+            )
+            .filter(external_filter)
+            .order_by('full_name', 'pk')[:RESIDENT_SEARCH_LIMIT]
+        )
+    results = [
+        _resident_search_employee_row(resident)
+        for resident in employees
+    ] + [
+        _resident_search_external_row(resident)
+        for resident in externals
+    ]
+    if resident_type is None:
+        # Совместимость: без параметра — прежний общий лимит.
+        results = results[:RESIDENT_SEARCH_LIMIT]
+    return _temporary_placement_json_response({
+        'ok': True,
+        'results': results,
+    })
+
+
+@require_POST
+def settlement_bed_preparation_suggest_view(request):
+    """T-029: read-only подбор койки для подготовки — резерв → свободные."""
+    if not settlement_clerk_access_from_request(request):
+        return _temporary_placement_json_response(
+            {'ok': False, 'error': 'Нет доступа к расселению.'},
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    try:
+        suggestion = suggest_beds_for_preparation(
+            resident_id=payload.get('resident_id'),
+            arrival_date=payload.get('arrival_date'),
+        )
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response({'ok': True, **suggestion})
+
+
+@require_POST
+def settlement_control_takeover_view(request):
+    """T-029: административный перехват управления расселением с причиной."""
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return _control_access_denied_response(request)
+    if access.role.code != 'admin':
+        # Аренду клерка не трогаем: он остаётся её владельцем до передачи.
+        return _temporary_placement_json_response(
+            {
+                'ok': False,
+                'status': 'held',
+                'error': 'Перехват управления доступен только администратору.',
+                'code': 'settlement.control.admin_required',
+            },
+            status=403,
+        )
+    try:
+        payload = _temporary_placement_payload(request)
+    except ValidationError as error:
+        return _temporary_placement_error_response(error)
+    try:
+        grant = takeover_control_lease(
+            admin_access_id=access.pk,
+            raw_session_key=request.session.session_key,
+            reason=payload.get('reason', ''),
+            source='http_takeover',
+            session_metadata={'session_kind': 'django'},
+        )
+    except ValidationError as error:
+        return _temporary_placement_control_error(request, error)
+
+    store_control_session_credentials(
+        request.session,
+        owner_access_id=access.pk,
+        grant=grant,
+    )
+    return _temporary_placement_json_response({
+        'ok': True,
+        'status': 'held',
+        'expires_at': grant.expires_at.isoformat(),
+        'fencing_revision': grant.fencing_revision,
+    })
+
+
+# ---------------------------------------------------------------------------
+# T-029 этап C: панель жилфонда, включая арендованный у подрядчика.
+#
+# Экран /clerk/settlement/fund/ читает весь фонд и меняет только арендованный:
+# собственные КИС-5/6 панель только читает, карта КИС-5/6 не перерисовывается.
+# Шаблон templates/settlement/clerk_fund.html делает frontend; сервер отдаёт
+# уже собранный контекст и сообщение последнего действия.
+# ---------------------------------------------------------------------------
+
+FUND_MESSAGE_SESSION_KEY = 'settlement_fund_message'
+# n1 (review-8): управлять панелью может только делопроизводитель или админ —
+# те же роли, что пропускает settlement_clerk_access_from_request(allow_admin=True).
+FUND_MANAGE_ROLE_CODES = frozenset({'settlement_clerk', 'admin'})
+
+
+@never_cache
+@require_POST
+def settlement_room_transfer_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return JsonResponse({'error': 'Нет доступа к управлению жилфондом.'}, status=403)
+    try:
+        room = _fund_form_object(
+            PhysicalRoom, request.POST.get('room'), not_found_message='Комната не найдена.',
+        )
+        room = set_room_transfer_status(room=room, status=request.POST.get('status'), actor_access=access)
+    except ValidationError as error:
+        message, code = _validation_error_details(error)
+        status = 409 if code == 'settlement.fund.room_has_active_links' else 400
+        return JsonResponse({'error': message}, status=status)
+    except IntegrityError:
+        return JsonResponse({'error': 'Данные жилфонда изменились. Обновите карту и повторите действие.'}, status=409)
+
+    moment = timezone.now()
+    room = _clerk_map_rooms(moment).get(pk=room.pk)
+    _attach_occupancy_view([room], moment)
+    room.anchor_types = room_anchor_types_by_room(room_ids=[room.pk]).get(room.pk, frozenset())
+    side, _ = room_map_positions([room])[room.pk]
+    card = render_to_string('settlement/_room_card.html', {'room': _room_view(room), 'side': side})
+    return JsonResponse({'room_card': card})
+
+
+def _fund_redirect(request, *, level, text, errors=()):
+    request.session[FUND_MESSAGE_SESSION_KEY] = {
+        'level': level,
+        'text': text,
+        'errors': list(errors),
+    }
+    return redirect('settlement_fund')
+
+
+def _fund_form_object(model, raw_id, *, not_found_message):
+    try:
+        object_id = int(raw_id)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            not_found_message,
+            code='settlement.fund.value_not_integer',
+        )
+    instance = model.objects.filter(pk=object_id).first()
+    if instance is None:
+        raise ValidationError(
+            not_found_message,
+            code='settlement.fund.object_not_found',
+        )
+    return instance
+
+
+def _settlement_fund_post(request, access):
+    action = (request.POST.get('action') or '').strip()
+    reason = request.POST.get('reason', '')
+    try:
+        if action == 'create_dormitory':
+            create_fund_dormitory(
+                number=request.POST.get('number', ''),
+                kind=request.POST.get('kind') or Dormitory.Kind.RENTED,
+                contractor_organization=(
+                    request.POST.get('contractor_organization') or None
+                ),
+                note=request.POST.get('note', ''),
+                actor_access=access,
+                reason=reason,
+            )
+            success_text = 'Арендованное общежитие добавлено в жилфонд.'
+        elif action == 'create_room':
+            dormitory = _fund_form_object(
+                Dormitory,
+                request.POST.get('dormitory'),
+                not_found_message='Общежитие не найдено.',
+            )
+            room = create_fund_room(
+                dormitory=dormitory,
+                floor=request.POST.get('floor'),
+                number=request.POST.get('number'),
+                capacity=request.POST.get('capacity'),
+                corridor_side=request.POST.get('corridor_side', ''),
+                side_position=request.POST.get('side_position'),
+                room_type=(
+                    request.POST.get('room_type')
+                    or PhysicalRoom.RoomType.STANDARD
+                ),
+                actor_access=access,
+                reason=reason,
+            )
+            if dormitory.kind == Dormitory.Kind.OWN:
+                success_text = f'Добавлена комната № {room.number} в КИС-{dormitory.number}. Койко-мест создано {room.capacity}.'
+            else:
+                success_text = 'Комната добавлена и отмечена как переданная.'
+        elif action == 'create_bed':
+            room = _fund_form_object(
+                PhysicalRoom,
+                request.POST.get('room'),
+                not_found_message='Комната не найдена.',
+            )
+            create_fund_bed(
+                room=room,
+                block=(request.POST.get('block') or '').strip(),
+                position=request.POST.get('position'),
+                actor_access=access,
+                reason=reason,
+            )
+            success_text = 'Койко-место добавлено.'
+        elif action == 'close_dormitory':
+            dormitory = _fund_form_object(
+                Dormitory,
+                request.POST.get('dormitory'),
+                not_found_message='Общежитие не найдено.',
+            )
+            close_fund_dormitory(
+                dormitory=dormitory,
+                actor_access=access,
+                reason=reason,
+            )
+            success_text = 'Общежитие закрыто, записи фонда сохранены.'
+        elif action == 'reopen_dormitory':
+            dormitory = _fund_form_object(
+                Dormitory,
+                request.POST.get('dormitory'),
+                not_found_message='Общежитие не найдено.',
+            )
+            reopen_fund_dormitory(
+                dormitory=dormitory,
+                actor_access=access,
+                reason=reason,
+            )
+            success_text = 'Общежитие открыто заново.'
+        else:
+            raise ValidationError(
+                'Неизвестное действие панели жилфонда.',
+                code='settlement.fund.action_invalid',
+            )
+    except ValidationError as error:
+        message = _validation_error_details(error)[0]
+        return _fund_redirect(
+            request,
+            level='error',
+            text=message,
+            errors=[message],
+        )
+    except IntegrityError:
+        # m4 (review-8): проигранная гонка (дубль номера/комнаты/койки) ловится
+        # уникальным ограничением БД. Вместо HTTP 500 — понятное сообщение,
+        # данные не меняются: транзакция сервиса откатилась.
+        message = (
+            'Данные жилфонда уже изменились: запись не сохранена. '
+            'Обновите страницу и повторите действие.'
+        )
+        return _fund_redirect(
+            request,
+            level='error',
+            text=message,
+            errors=[message],
+        )
+    return _fund_redirect(request, level='success', text=success_text)
+
+
+@require_http_methods(['GET', 'POST'])
+def settlement_fund_view(request):
+    access = settlement_clerk_access_from_request(request, allow_admin=True)
+    if not access:
+        next_url = urlencode({'next': reverse('settlement_fund')})
+        return redirect(f'{reverse("clerk_login")}?{next_url}')
+    if request.method == 'POST':
+        return _settlement_fund_post(request, access)
+
+    stored_message = request.session.pop(FUND_MESSAGE_SESSION_KEY, None) or {}
+    fund_can_manage = access.role.code in FUND_MANAGE_ROLE_CODES
+    contractor_organizations = []
+    if fund_can_manage:
+        contractor_organizations = list(
+            ContractorOrganization.objects
+            .filter(is_active=True)
+            .order_by('name')
+            .values('id', 'name')
+        )
+    return render(
+        request,
+        'settlement/clerk_fund.html',
+        {
+            'access': access,
+            'fund_dormitories': fund_dormitory_list(),
+            'fund_can_manage': fund_can_manage,
+            'contractor_organizations': contractor_organizations,
+            'fund_form_errors': stored_message.get('errors') or [],
+            'fund_message': stored_message.get('text'),
+            'fund_message_level': stored_message.get('level'),
+            'clerk_active_section': 'fund',
+        },
+    )

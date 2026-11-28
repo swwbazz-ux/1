@@ -1,21 +1,12 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-
-const TEMPLATE_PATH = path.resolve(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "templates",
-    "trips",
-    "excavator_work.html"
-);
 const FACE_CSS_PATH = path.resolve(
     __dirname,
     "..",
@@ -23,7 +14,7 @@ const FACE_CSS_PATH = path.resolve(
     "css",
     "mobile-face-unified-v1.css"
 );
-const TEMPLATE_SOURCE = fs.readFileSync(TEMPLATE_PATH, "utf8").replace(/\r\n?/g, "\n");
+const TEMPLATE_SOURCE = excavatorScreenSource().replace(/\r\n?/g, "\n");
 const FACE_CSS_SOURCE = fs.readFileSync(FACE_CSS_PATH, "utf8");
 
 

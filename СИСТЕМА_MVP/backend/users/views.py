@@ -47,6 +47,7 @@ from core.models import (
     OperationalStateVersion,
     bump_operational_state,
     lock_production_state,
+    rotate_operational_journal_epoch,
 )
 from core.operational_fragments import operational_fragment_response
 from downtimes.driver_workflow import (
@@ -93,6 +94,7 @@ from shifts.services import (
     DriverShiftCloseConfirmationRequired,
     DriverShiftCloseIdempotencyConflict,
     driver_close_request_signature,
+    driver_open_shift_queryset,
     ensure_driver_close_action_matches,
     find_other_role_open_shift,
     open_driver_shift,
@@ -114,8 +116,8 @@ from .access_auth import (
     find_unactivated_accesses_by_phone,
 )
 from .app_catalog import (
-    APP_CATALOG_ROLE_CODES,
-    APP_CATALOG_ROLES,
+    PUBLIC_APP_CATALOG_ROLE_CODES,
+    PUBLIC_APP_CATALOG_ROLES,
     app_catalog_public_url,
     app_catalog_items,
     role_app_qr_asset_path,
@@ -169,8 +171,13 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
-from .live_monitor import attach_application_presence, application_presence_by_employee_ids
+from .live_monitor import (
+    attach_application_presence,
+    application_presence_by_employee_ids,
+    force_end_access_sessions,
+)
 from .registration_dashboard import build_registration_dashboard
+from .redaction import redact_log_values
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
@@ -245,7 +252,7 @@ INTERFACE_MAP = [
             {'title': 'Зам. начальника горного участка', 'url': '/deputy-mining-manager/', 'code': 'роль зам. начальника', 'note': 'Расстановка сотрудников по технике на две смены'},
             {'title': 'Отдел управления персоналом', 'url': '/oup/', 'code': '800000 / роль ОУП', 'note': 'Создание, ведение и увольнение сотрудников'},
             {'title': 'Табельщик', 'url': '/timekeeper/', 'code': '900000 / роль табельщика', 'note': 'Сбор данных перевахты, Excel и оформление одобренных продлений'},
-            {'title': 'Начальник участка', 'url': '/site-manager/extensions/', 'code': '910000 / роль начальника участка', 'note': 'Согласование заявок на продление вахты'},
+            {'title': 'Начальник участка', 'url': '/site-manager/', 'code': '910000 / роль начальника участка', 'note': 'Согласование заявок на продление вахты'},
             {'title': 'Ответ сотрудника по перевахте', 'url': '/my/rotation/', 'code': '920000 / любой активный доступ', 'note': 'Маршрут, даты, смена или запрос на продление'},
             {'title': 'Диспетчерский пульт', 'url': '/dispatcher/control/', 'code': '5000', 'note': 'Контроль активных рейсов и назначений'},
             {'title': 'Механическая служба', 'url': '/mechanic/downtimes/', 'code': '7000 / роль механика', 'note': 'Открытие и закрытие механических простоев по технике'},
@@ -283,7 +290,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v381'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v385'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -808,12 +815,21 @@ self.addEventListener("message", (event) => {{
 """.strip()
 
 
+def _session_generation_is_stale(request, access):
+    """Поколение сессии не совпадает с текущим у доступа (сессия отозвана)."""
+    session_generation = request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY)
+    if not access.last_login_at or not session_generation:
+        return False
+    parsed_generation = parse_datetime(str(session_generation))
+    return bool(parsed_generation and parsed_generation != access.last_login_at)
+
+
 def get_current_access(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    expire_due_temporary_work_transfers()
-    access_queryset = (
+    expired_transfers = expire_due_temporary_work_transfers()
+    access = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
         .filter(
@@ -824,11 +840,24 @@ def get_current_access(request):
             employee__status=Employee.Status.ACTIVE,
             role__is_active=True,
         )
+        .first()
     )
+    if (
+        access
+        and expired_transfers
+        and any(
+            transfer.employee_id == access.employee_id
+            for transfer in expired_transfers
+        )
+    ):
+        # Истечение перевода только что пересобрало доступ этого сотрудника и
+        # отозвало его сессии. Текущую сессию закрываем, иначе ответ на этот
+        # запрос сохранит её заново со старым поколением.
+        request.session.flush()
+        return None
     role_app = get_role_app_for_request(request)
-    if role_app:
-        access_queryset = access_queryset.filter(role__code=role_app.role_code)
-    access = access_queryset.first()
+    if access and role_app and access.role.code != role_app.role_code:
+        access = None
     if access and not employee_has_effective_access_role(access.employee, access.role.code):
         return None
     return access
@@ -960,15 +989,22 @@ def _phone_accesses_have_duplicate_role(candidates):
     return False
 
 
-def _phone_access_conflict_response(request, candidates, *, role_app, allowed_role_codes, login_role_app, phone):
+def _phone_access_conflict_response(
+    request, candidates, *, role_app, allowed_role_codes, login_role_app, phone,
+    allow_same_employee_multiple_roles=False,
+):
     """Номер с несколькими записями доступа.
 
     Дубли одной роли — «нужна помощь администратора». Разные роли на общем
     входе driverform.ru — не ошибка, а сотрудник с несколькими ролями: вход
     продолжается как обычно (номер → PIN), а после PIN он выбирает приложение
-    на экране /apps/choose/. Возвращает None, когда конфликта нет."""
-    if not _phone_accesses_have_duplicate_role(candidates) and role_app is None and not allowed_role_codes:
-        return None
+    на экране /apps/choose/. Для целевого входа можно разрешить переход к PIN
+    при нескольких действующих ролях одной карточки сотрудника."""
+    if not _phone_accesses_have_duplicate_role(candidates):
+        if role_app is None and not allowed_role_codes:
+            return None
+        if allow_same_employee_multiple_roles and len({access.employee_id for access in candidates}) == 1:
+            return None
     return render(
         request,
         'users/login_phone_not_found.html',
@@ -982,9 +1018,8 @@ def _phone_access_conflict_response(request, candidates, *, role_app, allowed_ro
     )
 
 
-def _own_catalog_apps(employee):
-    """Активированные роли сотрудника, у которых есть приложение в каталоге,
-    в порядке каталога: [(app, access), ...]."""
+def _own_catalog_apps(employee, *, include_admin_clerk=True):
+    """Доступные приложения сотрудника и запись для входа в каждое из них."""
     accesses = {
         access.role.code: access
         for access in EmployeeAccess.objects
@@ -994,12 +1029,15 @@ def _own_catalog_apps(employee):
             is_active=True,
             status=EmployeeAccess.Status.ACTIVATED,
             role__is_active=True,
-            role__code__in=APP_CATALOG_ROLE_CODES,
+            role__code__in=PUBLIC_APP_CATALOG_ROLE_CODES,
         )
         if employee_has_effective_access_role(access.employee, access.role.code)
     }
+    # Администратор уже допущен к /clerk/ со своей записью доступа.
+    if include_admin_clerk and 'admin' in accesses:
+        accesses.setdefault('settlement_clerk', accesses['admin'])
     result = []
-    for role_code in APP_CATALOG_ROLE_CODES:
+    for role_code in PUBLIC_APP_CATALOG_ROLE_CODES:
         app = get_role_app(role_code)
         if app is not None and role_code in accesses:
             result.append((app, accesses[role_code]))
@@ -1020,10 +1058,15 @@ def app_choose_view(request):
     own_apps = _own_catalog_apps(access.employee)
     if request.method == 'POST':
         role_code = (request.POST.get('role_code') or '').strip()
-        target = next((item_access for app, item_access in own_apps if app.role_code == role_code), None)
-        if target is None:
+        selected = next((item for item in own_apps if item[0].role_code == role_code), None)
+        if selected is None:
             messages.error(request, 'Это приложение вам не назначено.')
             return redirect('app_choose')
+        app, target = selected
+        if app.role_code == 'settlement_clerk' and access.role.code == 'admin':
+            return redirect(app.start_url)
+        if app.role_code != target.role.code and target.pk == access.pk:
+            return redirect(app.start_url)
         try:
             with transaction.atomic():
                 activate_role_session(request, target)
@@ -1031,7 +1074,7 @@ def app_choose_view(request):
             messages.error(request, '; '.join(error.messages))
             return redirect('app_choose')
         request.session.cycle_key()
-        return redirect(_role_landing_url(target))
+        return redirect(app.start_url)
     if not own_apps:
         return redirect(_role_landing_url(access))
     response = render(
@@ -1043,7 +1086,7 @@ def app_choose_view(request):
             'own_apps': [
                 {
                     'role_code': app.role_code,
-                    'label': dict(APP_CATALOG_ROLES).get(app.role_code, app.short_name),
+                    'label': dict(PUBLIC_APP_CATALOG_ROLES).get(app.role_code, app.short_name),
                     'description': app.description,
                     'icon_url': app.icon_192_url,
                     'theme_color': app.theme_color,
@@ -1083,7 +1126,7 @@ def app_catalog_view(request):
 
 @require_GET
 def app_catalog_qr_view(request, role_code):
-    if role_code not in APP_CATALOG_ROLE_CODES:
+    if role_code not in PUBLIC_APP_CATALOG_ROLE_CODES:
         raise Http404
     response = redirect(static(role_app_qr_asset_path(role_code)))
     response['Cache-Control'] = 'public, max-age=86400'
@@ -1183,6 +1226,7 @@ def login_view(
     allowed_role_codes=None,
     target_role_app=None,
     forced_next_url='',
+    allow_same_employee_multiple_active_roles=False,
 ):
     if request.session.get('mining_master_tablet_device'):
         return redirect('mining_master_tablet_login')
@@ -1214,6 +1258,13 @@ def login_view(
         ),
     )
     current_access = get_current_access(request) if request.method == 'GET' else None
+    if (
+        current_access
+        and role_app
+        and role_app.role_code == 'deputy_mining_manager'
+        and not role_session_state(request, current_access)['is_active']
+    ):
+        current_access = None
     rating_tv_reauthentication_required = bool(
         current_access
         and next_url == reverse('driver_rating_tv')
@@ -1298,6 +1349,7 @@ def login_view(
                 request, activated,
                 role_app=role_app, allowed_role_codes=allowed_role_codes,
                 login_role_app=login_role_app, phone=phone,
+                allow_same_employee_multiple_roles=allow_same_employee_multiple_active_roles,
             )
             if conflict is not None:
                 return conflict
@@ -1431,6 +1483,7 @@ def login_view(
                 else None
             ),
             role_codes=allowed_role_codes,
+            preferred_role_code='admin' if target_role_app and target_role_app.role_code == 'settlement_clerk' else None,
         )
         if access and not employee_has_effective_access_role(
             access.employee,
@@ -1546,13 +1599,13 @@ def login_view(
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
             landing_url = next_url or _role_landing_url(access)
-            # Единый вход, несколько ролей на одном номере и PIN: после PIN —
-            # выбор приложения одним нажатием, а не первая попавшаяся роль.
+            # Вход по телефону предлагает все рабочие места. Старый вход
+            # только по коду сохраняет стартовый экран своей назначенной роли.
             if (
                 not next_url
                 and role_app is None
                 and not allowed_role_codes
-                and len(_own_catalog_apps(locked_access.employee)) > 1
+                and len(_own_catalog_apps(locked_access.employee, include_admin_clerk=bool(phone))) > 1
             ):
                 landing_url = reverse('app_choose')
             response = _login_redirect_response(request, landing_url)
@@ -1847,6 +1900,8 @@ def activate_access_view(request):
 
 
 def logout_view(request):
+    from trips.dispatcher_duty import record_dispatcher_logout
+    record_dispatcher_logout(request)
     request.session.flush()
     return redirect('login')
 
@@ -1867,7 +1922,7 @@ def role_home_view(request):
     if access.role.code == 'timekeeper':
         return redirect('rotation_timekeeper_dashboard')
     if access.role.code == 'site_manager':
-        return redirect('rotation_site_manager_queue')
+        return redirect('rotation_site_manager_home')
     if access.role.code == 'employee_portal':
         return redirect('rotation_employee_home')
     if access.role.code == 'excavator_operator':
@@ -1980,6 +2035,7 @@ def system_admin_reset_shift_test_data_view(request):
         Trip.objects.all().delete()
         DowntimeEvent.objects.all().delete()
         OperationalStateEvent.objects.all().delete()
+        rotate_operational_journal_epoch()
         bump_operational_state(
             'SystemAdmin:test_shift_data_reset',
             event_type='test_shift_data_reset',
@@ -2202,9 +2258,9 @@ def get_system_admin_reference_configs():
             'model': PersonnelPosition,
             'form_class': PersonnelPositionReferenceForm,
             'description': 'Официальные должности из 1С. Одна должность действует у сотрудника одновременно; она определяет допустимые базовые специализации.',
-            'fields': ['name', 'code', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
+            'fields': ['name', 'code', 'settlement_category', 'requires_equipment', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
             'search_fields': ['name', 'code', 'allowed_specializations__name', 'default_specialization__name'],
-            'preview_fields': ['code', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
+            'preview_fields': ['code', 'settlement_category', 'requires_equipment', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
             'prefetch_related': ['allowed_specializations'],
             'select_related': ['default_specialization'],
             'initial': {'is_active': True},
@@ -3054,6 +3110,7 @@ def system_admin_logs_view(request):
     oup_total = AdminActionLog.objects.filter(action__startswith='ОУП:').count()
     logs = list(logs[:200])
     for log in logs:
+        redact_log_values(log)
         action_text = f'{log.action} {log.object_type}'.lower()
         if log.action.startswith('ОУП:'):
             log.type_label = 'ОУП'
@@ -3336,7 +3393,7 @@ def system_admin_employee_create_view(request):
                         employee,
                         new_value=(
                             f'Доступ: {role or "не требуется"}; '
-                            f'назначение: {assignment_label}; пинкод: {code}'
+                            f'назначение: {assignment_label}; пинкод выдан'
                         ),
                     )
                     messages.success(
@@ -3571,7 +3628,7 @@ def system_admin_generate_access_view(request, employee_id):
                         'block_reason': '',
                     },
                 )
-                log_admin_action(access.employee, 'Выдан новый первичный пинкод', employee_access, new_value=code)
+                log_admin_action(access.employee, 'Выдан новый первичный пинкод', employee_access, new_value='PIN изменён')
             messages.success(request, f'Новый первичный пинкод: {code}')
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
 
@@ -3643,6 +3700,8 @@ def system_admin_change_access_role_view(request, access_id):
         )
         employee_access.role = new_role
         employee_access.save(update_fields=['role'])
+        # Смена прав — новый вход: старые сессии этого доступа больше не действуют.
+        force_end_access_sessions(access=employee_access)
 
     log_admin_action(
         admin_access.employee,
@@ -3745,6 +3804,7 @@ def system_admin_access_action_view(request, access_id, action):
                     employee_access.blocked_at = timezone.now()
                     employee_access.block_reason = form.cleaned_data['reason']
                     employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason'])
+                    force_end_access_sessions(access=employee_access)
                     log_admin_action(admin_access.employee, 'Заблокирован доступ', employee_access, comment=employee_access.block_reason)
                     messages.success(request, 'Доступ заблокирован.')
             elif action == 'unblock':
@@ -3764,6 +3824,9 @@ def system_admin_access_action_view(request, access_id, action):
                 employee_access.block_reason = ''
                 employee_access.deactivated_at = None
                 employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason', 'deactivated_at'])
+                # Исторические блокировки не удаляли строки сессий: не даём
+                # старой cookie ожить после разблокировки.
+                force_end_access_sessions(access=employee_access)
                 if employee.status in {
                     Employee.Status.NOT_ACTIVATED,
                     Employee.Status.DEACTIVATED,
@@ -3778,6 +3841,7 @@ def system_admin_access_action_view(request, access_id, action):
                 employee_access.is_active = False
                 employee_access.deactivated_at = timezone.now()
                 employee_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+                force_end_access_sessions(access=employee_access)
                 clear_active_equipment_assignment(
                     employee=employee,
                     assigned_by=admin_access.employee,
@@ -3849,6 +3913,8 @@ def restore_employee_access(employee, requested_access_id=None):
             'block_reason',
         ]
     )
+    # Восстановление старого доступа — тоже новый вход: снимаем прежние сессии.
+    force_end_access_sessions(access=employee_access)
     return employee_access, 'restored'
 
 
@@ -3977,6 +4043,8 @@ def system_admin_employee_status_action_view(request, employee_id, action):
                 employee.status = Employee.Status.DEACTIVATED
                 employee.is_active = False
                 employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
+                for employee_access in employee.accesses.select_related('role'):
+                    force_end_access_sessions(access=employee_access)
                 clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
                 messages.success(request, 'Сотрудник деактивирован.')
                 log_admin_action(access.employee, 'Сотрудник деактивирован', employee)
@@ -3984,6 +4052,8 @@ def system_admin_employee_status_action_view(request, employee_id, action):
                 employee.status = Employee.Status.ARCHIVED
                 employee.is_active = False
                 employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
+                for employee_access in employee.accesses.select_related('role'):
+                    force_end_access_sessions(access=employee_access)
                 clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
                 messages.success(request, 'Сотрудник отправлен в архив.')
                 log_admin_action(access.employee, 'Сотрудник отправлен в архив', employee)
@@ -4607,17 +4677,6 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version, op
         'selection': active_item,
     }
     return catalog, state, active_acceptance
-
-
-def driver_open_shift_queryset(employee):
-    return (
-        EmployeeShift.objects
-        .filter(employee=employee, closed_at__isnull=True)
-        .filter(
-            Q(workplace_code='driver')
-            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
-        )
-    )
 
 
 def driver_assignment_countdown_label(assignment):
@@ -5453,9 +5512,7 @@ def driver_shift_view(request):
         driver_dial_note = (
             'ПОГРУЖЕН'
             if driver_free_bucket_acceptance.status == 'used'
-            else 'ПРИНЯТ МАШИНИСТОМ'
-            if driver_free_bucket_acceptance.status == 'accepted'
-            else 'ОЖИДАНИЕ ПРИЁМА'
+            else 'ПОД СВОБОДНЫЙ КОВШ'
         )
     elif driver_loading_wait_active:
         # Во время ожидания сохраняем полезный ориентир погрузки в крупной
@@ -6144,6 +6201,10 @@ def driver_downtime_action_view(request):
 
     payload = driver_json_payload(request)
     action = (payload.get('action') or '').strip()
+    # Порядок блокировок: журнал производства, затем техника (как в
+    # завершении рейса, trips/views.py:6998). Обратный порядок давал дедлок с
+    # опросом состояния/reconciler (T-016, PostgreSQL).
+    lock_production_state()
     locked_equipment = Equipment.objects.select_for_update().get(pk=open_shift.equipment_id)
     open_shift.equipment = locked_equipment
     if action == 'close':

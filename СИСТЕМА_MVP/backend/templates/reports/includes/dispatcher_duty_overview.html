@@ -1,0 +1,56 @@
+{% load l10n %}
+<section class="duty-overview" aria-label="Обзор смены">
+  <dl class="duty-metrics">
+    <div class="duty-metric duty-metric-operations"><dt>Операции</dt><dd>{{ slot.count }}</dd></div>
+    {% for total in slot.overview_totals %}{% if total.state != 'no-shift' %}
+      <div class="duty-metric duty-metric-{{ total.state }}"><dt>{{ total.label }}</dt><dd>{{ total.duration }}</dd></div>
+    {% endif %}{% endfor %}
+  </dl>
+  <div class="duty-overview-chart">
+    <div class="duty-scale">
+      <h3 class="duty-visually-hidden">Время смены и состояние пульта</h3>
+      {% include "reports/includes/dispatcher_duty_tracks.html" %}
+      <div class="duty-axis duty-scale-axis" aria-hidden="true">
+        {% for tick in slot.ticks %}<span style="left:{{ tick.left|unlocalize }}%">{{ tick.label }}</span>{% endfor %}
+      </div>
+    </div>
+    <div class="duty-operations-head">
+      <h3>Операции по времени</h3>
+      {% if slot.last_op %}<p>Последняя в {{ slot.last_op }}{% if slot.last_op_age %} · {{ slot.last_op_age }} назад{% endif %}</p>{% endif %}
+    </div>
+    <div class="duty-operation-bands">
+      {% for band in slot.bands %}
+        {% if band.count %}
+          <button type="button" class="duty-operation-band" data-duty-band="{{ band.index }}" data-band-hours="{{ band.hours }}"
+                  style="--bar-height:{{ band.height|unlocalize }}%"
+                  aria-label="{{ band.hours }} · операций {{ band.count }}. Открыть записи" aria-pressed="false" title="{{ band.hours }} · операций {{ band.count }}">
+            <span class="duty-bar-value">{{ band.count }}</span>
+            <span class="duty-bar" aria-hidden="true"></span>
+          </button>
+        {% else %}
+          <span class="duty-operation-band duty-operation-empty" aria-label="{{ band.hours }} · 0 операций" role="img" title="{{ band.hours }} · 0 операций">
+            <span class="duty-bar-value">0</span>
+          </span>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <div class="duty-axis duty-overview-axis" aria-hidden="true">
+      {% for tick in slot.ticks %}<span style="left:{{ tick.left|unlocalize }}%">{{ tick.label }}</span>{% endfor %}
+    </div>
+    <details class="duty-intervals">
+      <summary>Точное время интервалов</summary>
+      <ul>
+        {% for part in slot.parts %}
+          <li>
+            <span class="duty-interval-color duty-{{ part.overview_state }}" aria-hidden="true"></span>
+            <div>
+              <strong>{{ part.exact_start }}–{{ part.exact_end }}</strong>
+              <span>{{ part.overview_label }} · {{ part.exact_duration }}</span>
+              <small>{{ part.reason }}{% if part.person %} · {{ part.person }}{% endif %}</small>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  </div>
+</section>

@@ -1,0 +1,92 @@
+{% extends "reports/management_linked_base.html" %}
+{% load static management_workplace %}
+{% block title %}Работа диспетчеров за период{% endblock %}
+{% block body_class %}dispatcher-control-screen dispatcher-duty-screen{% endblock %}
+{% block extra_head %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=7">
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-period.css' %}?v=1">
+{% endblock %}
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme data-duty-report>
+  <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board">
+    {% management_workplace_header 'dispatcher_duty' export_url %}
+    <section class="duty-report duty-period">
+      <header class="duty-heading">
+        <h2>Работа диспетчеров за период</h2>
+        <a class="duty-period-link" href="{% url 'management_dispatcher_duty' %}">К списку смен</a>
+      </header>
+      <form class="period-form" method="get" action="{% url 'management_dispatcher_period' %}">
+        <div><label for="{{ form.date_from.id_for_label }}">Начало периода</label>{{ form.date_from }}{{ form.date_from.errors }}</div>
+        <div><label for="{{ form.date_to.id_for_label }}">Конец периода</label>{{ form.date_to }}{{ form.date_to.errors }}</div>
+        <button type="submit">Сформировать</button>
+      </form>
+      <p class="period-note">Производственные сутки начинаются в 07:00 по Владивостоку. Ночная смена входит в дату её начала.</p>
+      {% if report %}
+      <div class="period-caption"><strong>{{ report.date_from|date:"d.m.Y" }} — {{ report.date_to|date:"d.m.Y" }}</strong><span>Срез на {{ report.now|date:"d.m.Y H:i" }}</span></div>
+      <section aria-labelledby="period-people">
+        <h3 id="period-people">По диспетчерам</h3>
+        {% if report.people %}
+        <table class="period-table">
+          <thead><tr><th scope="col">Диспетчер</th><th scope="col">Личных смен</th><th scope="col">В смене</th><th scope="col">На экране</th><th scope="col">В фоне</th><th scope="col">Закрыто / выход</th><th scope="col">Нет данных</th><th scope="col">Операций</th></tr></thead>
+          <tbody>{% for person in report.people %}<tr>
+            <th scope="row">{{ person.person }}</th>
+            <td data-label="Личных смен">{{ person.duties }}</td><td data-label="В смене">{{ person.duration|duty_duration }}</td>
+            <td data-label="На экране">{{ person.seconds.visible|duty_duration }}</td><td data-label="В фоне">{{ person.seconds.background|duty_duration }}{% if person.background_percent != None %} <small>({{ person.background_percent|floatformat:"-1" }}%)</small>{% endif %}</td>
+            <td data-label="Закрыто / выход">{{ person.seconds.away|duty_duration }}</td><td data-label="Нет данных">{{ person.seconds.unknown|duty_duration }}</td>
+            <td data-label="Операций">{{ person.count }}</td>
+          </tr>{% endfor %}</tbody>
+        </table>
+        {% else %}<p>{% if report.future %}Выбранный период ещё не начался.{% else %}В выбранном периоде нет записей о личных сменах диспетчеров.{% endif %}</p>{% endif %}
+        <p class="period-note">«На экране» означает, что браузер сообщал о видимой вкладке. «В фоне» — все наблюдаемые окна пульта скрыты. Процент показывает долю фона от всего времени в смене за период. При потере сигналов время попадает в «Нет данных».</p>
+        {% if report.tracking %}<p class="period-note">Подробный учёт положения окна ведётся с {{ report.tracking|date:"d.m.Y H:i" }}.</p>{% endif %}
+      </section>
+      {% if page.object_list %}
+      <section class="period-shifts" aria-labelledby="period-shifts">
+        <h3 id="period-shifts">Личные смены</h3>
+        {% for row in page %}
+        <details class="period-shift">
+          <summary>
+            <span class="period-person"><strong>{{ row.person }}</strong><small>{{ row.kind }} смена</small></span>
+            <span><small>Открытие</small><time>{{ row.opened|date:"d.m.Y H:i" }}</time></span>
+            <span><small>Завершение</small>{% if row.closed %}<time>{{ row.closed|date:"d.m.Y H:i" }}</time>{% else %}Смена открыта{% endif %}</span>
+            <span><small>В фоне</small>{{ row.seconds.background|duty_duration }}{% if row.background_percent != None %} ({{ row.background_percent|floatformat:"-1" }}%){% endif %}</span>
+            <span><small>Операций</small>{{ row.count }}</span>
+          </summary>
+          <div class="period-detail">
+            <p>В расчёте {{ row.span.start|date:"d.m.Y H:i" }} — {{ row.span.end|date:"d.m.Y H:i" }}.
+              {% if row.shift.opened_by_id and row.shift.opened_by_id != row.shift.employee_id %}Смену открыл другой сотрудник ({{ row.shift.opened_by.full_name }}).{% endif %}
+              {% if row.closure %}{{ row.closure }}.{% endif %}
+              {% if row.closed and row.shift.closed_by_id and row.shift.closed_by_id != row.shift.employee_id and row.shift.service_close_kind != 'auto_expired' %}Закрыл {{ row.shift.closed_by.full_name }}.{% endif %}</p>
+            <dl class="period-metrics">
+              <div><dt>Пульт на экране</dt><dd>{{ row.seconds.visible|duty_duration }}</dd></div>
+              <div><dt>Окна закрыты или выполнен выход</dt><dd>{{ row.seconds.away|duty_duration }}</dd></div>
+              <div><dt>Нет данных</dt><dd>{{ row.seconds.unknown|duty_duration }}</dd></div>
+              <div><dt>Первая / последняя операция</dt><dd>{% if row.first_op %}{{ row.first_op|date:"d.m H:i" }} / {{ row.last_op|date:"d.m H:i" }}{% else %}Нет операций{% endif %}</dd></div>
+              <div><dt>Дольше всего непрерывно в фоне</dt><dd>{% if row.longest_background %}{{ row.longest_background.seconds|duty_duration }}<small>{{ row.longest_background.start|date:"d.m H:i" }} — {{ row.longest_background.end|date:"d.m H:i" }}</small>{% else %}Нет подтверждённого интервала{% endif %}</dd></div>
+              <div><dt>Самый долгий период на экране без команд</dt><dd>{% if row.visible_gap %}{{ row.visible_gap.seconds|duty_duration }}<small>{{ row.visible_gap.start|date:"d.m H:i" }} — {{ row.visible_gap.end|date:"d.m H:i" }}</small>{% else %}Нет подтверждённого интервала{% endif %}</dd></div>
+            </dl>
+            <p class="period-note">Наблюдение за пультом и переговоры по рации могут проходить без зарегистрированных команд.</p>
+            {% if row.intervals %}<details class="period-log"><summary>Интервалы состояния пульта</summary><ol>
+              {% for span,label in row.intervals %}<li><time>{{ span.start|date:"d.m H:i:s" }} — {{ span.end|date:"d.m H:i:s" }}</time> · {{ label }} · {{ span.seconds|duty_duration }}</li>{% endfor %}
+            </ol></details>{% endif %}
+            {% if row.commands %}<details class="period-log"><summary>Журнал операций ({{ row.count }})</summary><ol>
+              {% for event in row.commands %}<li><time>{{ event.when|date:"d.m H:i:s" }}</time> · <strong>{{ event.title }}</strong>{% if event.detail %} · {{ event.detail }}{% endif %}</li>{% endfor %}
+            </ol></details>{% endif %}
+          </div>
+        </details>
+        {% endfor %}
+        {% if page.has_other_pages %}<nav class="period-pages" aria-label="Страницы личных смен">{% if page.has_previous %}<a href="{{ period_url }}&amp;page={{ page.previous_page_number }}#period-shifts">Новее</a>{% endif %}<span>Страница {{ page.number }} из {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="{{ period_url }}&amp;page={{ page.next_page_number }}#period-shifts">Раньше</a>{% endif %}</nav>{% endif %}
+      </section>
+      {% endif %}
+      {% if report.covers_post %}<section aria-labelledby="period-post"><h3 id="period-post">Пост без открытой смены</h3>
+        {% if report.gaps %}<details class="period-log"><summary>Всего {{ report.gap_seconds|duty_duration }} · Интервалов {{ report.gaps|length }}</summary><ol>
+          {% for gap in report.gaps %}<li>{{ gap.start|date:"d.m.Y H:i" }} — {{ gap.end|date:"d.m.Y H:i" }} · {{ gap.seconds|duty_duration }}</li>{% endfor %}
+        </ol></details>{% else %}<p>В течение всего учтённого времени была открыта хотя бы одна смена.</p>{% endif %}
+      </section>{% endif %}
+      {% endif %}
+    </section>
+  </section>
+</main>
+{% include 'reports/includes/management_report_theme.html' %}
+{% endblock %}

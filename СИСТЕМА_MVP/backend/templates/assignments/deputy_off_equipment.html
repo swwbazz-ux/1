@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Без техники{% endblock %}
+{% block body_class %}deputy-mining-manager-screen deputy-reports-screen deputy-duty-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/deputy_mining_manager_pwa_head.html" %}
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261128-duty-overview">
+<link rel="stylesheet" href="{% static 'css/deputy-duty-overview.css' %}?v=1">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell deputy-shell admin-day" data-admin-theme>
+    {% include "includes/deputy_mining_manager_header.html" with active_section="placement" screen_title="Без техники" screen_subtitle="Состояние сотрудников на производственные сутки." %}
+    <main class="admin-console-page deputy-duty-page">
+        <nav class="deputy-category-nav" aria-label="Категории расстановки">
+            {% for category in categories %}<a href="{{ category.url }}"><strong>{{ category.label }}</strong></a>{% endfor %}
+            <a href="{% url 'deputy_off_equipment' %}" class="is-active" aria-current="page"><strong>Без техники</strong></a>
+        </nav>
+        {% include 'assignments/includes/deputy_duty_overview.html' %}
+    </main>
+</div>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261128-employee-duty" defer></script>
+<script src="{% static 'js/deputy-duty-overview.js' %}?v=1" defer></script>
+{% endblock %}

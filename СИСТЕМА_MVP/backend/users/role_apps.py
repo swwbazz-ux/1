@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v184'
+STATIC_ASSET_RELEASE = 'field-delivery-v185'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -237,7 +237,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v381',
+        shell_version='driver-mobile-shell-v385',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -254,7 +254,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v264',
+        shell_version='excavator-mobile-shell-v282',
     ),
     RoleApp(
         role_code='mining_master',
@@ -271,7 +271,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v165',
+        shell_version='mining-master-mobile-shell-v167',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -291,7 +291,7 @@ ROLE_APPS = (
         icon_slug='deputy-mining-manager',
         manifest_url='/deputy-mining-manager.webmanifest',
         service_worker_url='/deputy-mining-manager-sw.js',
-        shell_version='deputy-mining-manager-desktop-shell-v17',
+        shell_version='deputy-mining-manager-desktop-shell-v26',
     ),
     RoleApp(
         role_code='dispatcher',
@@ -308,7 +308,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v166',
+        shell_version='dispatcher-desktop-shell-v171',
     ),
     RoleApp(
         role_code='settlement_clerk',
@@ -368,9 +368,10 @@ ROLE_APPS = (
         subdomain='site-manager',
         name='Начальник участка',
         short_name='Начальник участка',
-        description='Согласование запросов сотрудников на продление вахты.',
-        start_url='/site-manager/extensions/',
+        description='Витрина руководства и согласование продлений вахты.',
+        start_url='/site-manager/',
         legacy_scope='/site-manager/',
+        manifest_id='/site-manager/extensions/',
         orientation='any',
         theme_color='#8A5A23',
         background_color='#101820',
@@ -378,7 +379,7 @@ ROLE_APPS = (
         icon_slug='site-manager',
         manifest_url='/site-manager.webmanifest',
         service_worker_url='/site-manager-sw.js',
-        shell_version='site-manager-shell-v8',
+        shell_version='site-manager-shell-v10',
     ),
     RoleApp(
         role_code='mechanic',

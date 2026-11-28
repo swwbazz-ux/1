@@ -1,0 +1,1243 @@
+.housing-import {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: max-content;
+    align-content: start;
+    gap: 0.875rem;
+    width: min(100%, 84rem);
+    min-width: 0;
+    min-height: 0;
+    margin-inline: auto;
+    padding: 1rem;
+    overflow-y: auto;
+}
+
+.housing-import h1,
+.housing-import h2,
+.housing-import p {
+    margin: 0;
+}
+
+.housing-import h1 {
+    font-size: clamp(1.35rem, 4vw, 2rem);
+}
+
+.housing-import__back {
+    justify-self: start;
+    color: inherit;
+}
+
+.housing-import__form {
+    padding: 0.875rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    background: var(--admin-panel);
+}
+
+.housing-import__inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(9.5rem, max-content) max-content;
+    align-items: end;
+    gap: 0.75rem;
+}
+
+.housing-import__inputs > div {
+    display: grid;
+    min-width: 0;
+    gap: 0.375rem;
+}
+
+.housing-import__saved {
+    display: grid;
+    gap: 0.25rem;
+    overflow-wrap: anywhere;
+}
+
+.housing-import__replace {
+    margin-top: 0.55rem;
+}
+
+.housing-import__replace summary {
+    width: fit-content;
+    padding-block: 0.35rem;
+    cursor: pointer;
+}
+
+.housing-import__replace .housing-import__inputs {
+    margin-top: 0.4rem;
+}
+
+.housing-import__form label {
+    margin: 0;
+}
+
+.housing-import__form input,
+.housing-import__review-fields input {
+    width: 100%;
+    min-width: 0;
+    min-height: 2.75rem;
+    padding: 0.4rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    color: inherit;
+    background: var(--admin-panel-soft);
+    font: inherit;
+}
+
+.housing-import__form button,
+.housing-import__apply button {
+    width: auto;
+    min-height: 2.75rem;
+    padding: 0.55rem 1rem;
+    border: 1px solid var(--admin-green);
+    border-radius: 0.375rem;
+    background: var(--admin-green-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.housing-import__apply button {
+    flex: none;
+    border-color: transparent;
+    background: #15834e;
+    color: #fff;
+}
+
+#housing-import-feedback:empty,
+#housing-import-response:empty {
+    display: none;
+}
+
+.housing-import__apply {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.75rem 0.875rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    background: var(--admin-panel);
+}
+
+.housing-import__apply span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.housing-import__errors {
+    margin-bottom: 0.75rem;
+}
+
+.housing-import__report {
+    display: grid;
+    gap: 0.625rem;
+}
+
+.housing-import__group {
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    min-width: 0;
+    background: var(--admin-panel);
+}
+
+.housing-import__group > summary {
+    padding: 0.7rem 0.85rem;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.housing-import__group > summary strong {
+    margin-left: 0.5rem;
+}
+
+.housing-import__group--conflict > summary {
+    border-left: 3px solid #c77724;
+}
+
+.housing-import__group--interwatch > summary {
+    border-left: 3px solid #437eb0;
+}
+
+.housing-import__rows {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.housing-import__rows > li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.6fr);
+    gap: 0.5rem 0.875rem;
+    padding: 0.6rem 0.85rem;
+    border-top: 1px solid var(--admin-line);
+    overflow-wrap: anywhere;
+}
+
+.housing-import__rows small {
+    display: block;
+    margin-top: 0.25rem;
+}
+
+.housing-import__issues {
+    margin: 0.25rem 0 0;
+    padding-left: 1.15rem;
+}
+
+.housing-import__review {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 0.5rem;
+    justify-items: start;
+    min-width: 0;
+}
+
+.housing-review {
+    --review-control-height: 2.25rem;
+    padding: 0.25rem 0.75rem 0.75rem;
+    overflow-wrap: anywhere;
+    container-type: inline-size;
+}
+
+.housing-review__row-count,
+.housing-review__origin,
+.housing-review__source {
+    font-size: 0.875rem;
+    font-weight: 400;
+}
+
+.housing-review__cases,
+.housing-review__options {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.housing-review__cases {
+    margin-top: 0.5rem;
+    border-block-start: 1px solid var(--admin-line);
+}
+
+.housing-review__case {
+    min-width: 0;
+    padding: 0.75rem 0.25rem;
+}
+
+.housing-review__case + .housing-review__case {
+    border-block-start: 1px solid var(--admin-line);
+}
+
+.housing-review__case h3 {
+    margin: 0;
+    font-size: 1.0625rem;
+    line-height: 1.3;
+}
+
+.housing-review__case header p,
+.housing-review__facts p,
+.housing-review__evidence {
+    font-size: 0.9375rem;
+}
+
+.housing-review__option {
+    display: grid;
+    min-width: 0;
+    gap: 0.5rem 1rem;
+    align-items: start;
+}
+
+.housing-review__option + .housing-review__option {
+    border-top: 1px solid var(--admin-line);
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+}
+
+.housing-review__record {
+    display: grid;
+    align-content: start;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.housing-review__facts strong {
+    display: block;
+}
+
+.housing-review__origin {
+    margin-right: 0.25rem;
+}
+
+.housing-review__evidence {
+    padding-inline-start: 0.5rem;
+    border-inline-start: 3px solid var(--admin-line);
+}
+
+.housing-review__evidence--interwatch {
+    border-color: #437eb0;
+}
+
+.housing-review__decisions,
+.housing-review__actions,
+.housing-import__review-fields {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    min-width: 0;
+}
+
+.housing-import__review-fields {
+    align-items: end;
+}
+
+.housing-review__decisions > p,
+.housing-review__decisions > .housing-import__review-fields {
+    flex-basis: 100%;
+}
+
+.housing-review__identity {
+    display: grid;
+    width: 100%;
+    gap: 0.45rem;
+}
+
+.housing-review__identity-option {
+    min-width: 0;
+    padding: 0.45rem 0.65rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+}
+
+.housing-review__identity-option summary {
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.housing-review__identity-option[open] summary {
+    margin-bottom: 0.55rem;
+}
+
+.housing-review__identity-option label {
+    flex: 1 1 11rem;
+    max-width: 19rem;
+}
+
+.housing-review__identity-option select {
+    width: 100%;
+    min-height: var(--review-control-height);
+    padding: 0.35rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    color: inherit;
+    background: var(--admin-panel-soft);
+}
+
+.housing-review__identity-option button[type="button"] {
+    width: auto;
+    min-height: var(--review-control-height);
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    color: inherit;
+    background: var(--admin-panel-soft);
+    font: inherit;
+    cursor: pointer;
+}
+
+.housing-review__identity-option > button,
+.housing-review__identity-option [data-identity-status]:not(:empty) {
+    margin-top: 0.55rem;
+}
+
+.housing-review__identity-results {
+    display: grid;
+    gap: 0.4rem;
+    margin: 0.55rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.housing-review__identity-results:empty {
+    display: none;
+}
+
+.housing-review .housing-review__identity-results button[type="submit"] {
+    display: grid;
+    width: 100%;
+    gap: 0.15rem;
+    justify-content: start;
+    text-align: start;
+}
+
+.housing-review__identity-results button span {
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
+
+.housing-review__error {
+    font-weight: 700;
+}
+
+.housing-import__review button,
+.housing-review button[type="submit"],
+.housing-review [data-open-housing-map] {
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    min-height: var(--review-control-height, 2.75rem);
+    padding: 0.375rem 0.7rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    background: var(--admin-panel);
+    color: inherit;
+    font: inherit;
+    line-height: 1.3;
+    cursor: pointer;
+}
+
+.housing-review button.housing-review__primary[type="submit"] {
+    border-color: var(--admin-green);
+    background: var(--admin-green-soft);
+    color: var(--admin-ink);
+    font-weight: 700;
+}
+
+.housing-review__source summary {
+    width: fit-content;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+.housing-review [hidden] {
+    display: none;
+}
+
+.housing-import__review-fields label {
+    display: grid;
+    gap: 0.125rem;
+    width: min(100%, 11rem);
+    min-width: 0;
+    margin: 0;
+}
+
+.housing-import__review-fields :is(input, select) {
+    min-height: var(--review-control-height);
+    box-sizing: border-box;
+    font: inherit;
+}
+
+.housing-review__intro {
+    font-size: 0.9375rem;
+    color: var(--admin-muted);
+}
+
+.housing-review__workspace {
+    margin-block-start: 0.5rem;
+}
+
+.housing-review__queue {
+    align-self: start;
+    min-width: 0;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    background: var(--admin-panel-soft);
+}
+
+.housing-review__queue summary {
+    padding: 0.65rem 0.75rem;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.housing-review__queue summary strong {
+    margin-inline-start: 0.25rem;
+    color: var(--admin-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.housing-review__queue input {
+    box-sizing: border-box;
+    width: calc(100% - 1rem);
+    margin: 0 0.5rem 0.5rem;
+    padding: 0.45rem 0.6rem;
+    min-height: var(--review-control-height);
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    color: inherit;
+    background: var(--admin-panel);
+    font: inherit;
+}
+
+.housing-review__queue nav {
+    display: grid;
+    max-height: min(48vh, 24rem);
+    overflow-y: auto;
+    scroll-padding-block: 0.25rem;
+}
+
+.housing-review__queue button {
+    display: grid;
+    gap: 0.125rem;
+    min-height: 2.875rem;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 0;
+    border-top: 1px solid var(--admin-line);
+    border-inline-start: 3px solid transparent;
+    border-radius: 0;
+    background: var(--admin-panel);
+    color: inherit;
+    text-align: start;
+    justify-content: stretch;
+    justify-items: start;
+    font: inherit;
+    cursor: pointer;
+}
+
+.housing-review__queue button[aria-current="true"] {
+    border-inline-start-color: var(--admin-green);
+    background: var(--admin-green-soft);
+}
+
+.housing-review__queue button span {
+    color: var(--admin-muted);
+    font-size: 0.8125rem;
+}
+
+.housing-review .housing-review__empty {
+    padding: 0.25rem 0.75rem 0.75rem;
+}
+
+.housing-import__saved-choice {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-inline-start: 3px solid var(--admin-green);
+    background: var(--admin-green-soft);
+}
+
+.housing-import__saved-choice button {
+    width: auto;
+    min-height: 2.25rem;
+    padding-inline: 0.5rem;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+}
+
+.housing-review__case > header {
+    display: grid;
+    gap: 0.25rem;
+    margin-bottom: 0.625rem;
+    padding-bottom: 0.625rem;
+    border-bottom: 1px solid var(--admin-line);
+}
+.housing-review__case header p {
+    color: var(--admin-muted);
+}
+
+.housing-review__answers {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+    gap: 0.5rem;
+}
+
+.housing-review__answers button[type="submit"] {
+    display: grid;
+    justify-items: start;
+    justify-content: stretch;
+    align-content: start;
+    gap: 0.25rem;
+    padding: 0.75rem 0.875rem;
+    text-align: start;
+    background: var(--admin-panel-soft);
+}
+
+.housing-review__answers button:hover,
+.housing-review__answers button:focus-visible {
+    border-color: var(--admin-green);
+    background: var(--admin-green-soft);
+}
+
+.housing-review__answers strong {
+    color: var(--admin-ink);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.housing-review__answers small {
+    color: var(--admin-muted);
+    font-size: 0.8125rem;
+}
+
+.housing-review__actions:empty {
+    display: none;
+}
+
+@container (min-width: 45rem) {
+    .housing-review__workspace:has(.housing-review__queue:not([hidden])) {
+        display: grid;
+        grid-template-columns: minmax(13rem, 25%) minmax(0, 1fr);
+        align-items: start;
+        gap: 1rem;
+    }
+
+    .housing-review__cases {
+        margin-top: 0;
+        border-top: 0;
+    }
+    .housing-review__case {
+        padding-top: 0.25rem;
+    }
+    .housing-review__case + .housing-review__case {
+        border-block-start: 0;
+    }
+    .housing-review__options:has(> :nth-child(2)) {
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+        gap: 0.75rem;
+    }
+    .housing-review__options:has(> :nth-child(2)) .housing-review__option {
+        margin: 0;
+        padding: 0.65rem;
+        border: 1px solid var(--admin-line);
+        border-radius: 0.375rem;
+        align-content: start;
+    }
+}
+
+@container (min-width: 68rem) {
+    .housing-review__option:only-child:has(.housing-review__decisions) {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    }
+}
+@media (max-width: 650px), (pointer: coarse) {
+    .housing-review {
+        --review-control-height: 2.75rem;
+    }
+}
+
+
+@media (max-width: 650px) {
+    .housing-import {
+        padding: 0.75rem;
+    }
+
+    .housing-import__inputs {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .housing-import__form button,
+    .housing-import__apply button {
+        width: 100%;
+    }
+
+    .housing-import__rows > li {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.settlement-map-entry {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.settlement-map-entry__excel {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.375rem;
+    max-inline-size: 100%;
+}
+
+.settlement-map-entry__excel a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: var(--settlement-control-height);
+    padding: 0.25rem 0.65rem;
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(8 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-size: calc(14 * var(--settlement-density-unit));
+    font-weight: 700;
+    line-height: 1.15;
+    text-decoration: none;
+}
+
+.settlement-map-entry__excel svg {
+    flex: none;
+    width: 1.65em;
+    height: 1.5em;
+    fill: none;
+    stroke: var(--settlement-accent);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.settlement-map-entry__excel a:hover {
+    border-color: var(--settlement-accent);
+    background: var(--admin-panel-soft);
+}
+
+.settlement-map-entry__excel a:focus-visible {
+    outline: 2px solid var(--settlement-accent);
+    outline-offset: 2px;
+}
+
+.housing-map-picker[open] {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    width: 98vw;
+    height: 96dvh;
+    max-width: none;
+    max-height: none;
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.75rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    box-shadow: 0 1rem 3rem #0005;
+    overflow: hidden;
+}
+
+.housing-map-picker::backdrop {
+    background: #101b24b8;
+}
+
+.housing-map-picker__header,
+.housing-map-picker__filters,
+.housing-map-picker__footer {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.75rem 1rem;
+}
+
+.housing-map-picker__header {
+    grid-row: 1;
+    justify-content: space-between;
+    align-items: start;
+    background: var(--admin-green-soft);
+    border-bottom: 1px solid var(--admin-line);
+}
+
+.housing-map-picker__header h2 {
+    font-size: 1.125rem;
+}
+
+.housing-map-picker__header p {
+    font-size: 0.875rem;
+    overflow-wrap: anywhere;
+}
+
+.housing-map-picker__filters {
+    grid-row: 2;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--admin-line);
+}
+
+.housing-map-picker [hidden] {
+    display: none;
+}
+
+.housing-map-picker__filters label {
+    display: grid;
+    gap: 0.125rem;
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
+
+.housing-map-picker__header button,
+.housing-map-picker__footer button,
+.housing-map-picker select {
+    width: auto;
+    min-height: 2.6rem;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+}
+
+.housing-map-picker button:not(:disabled) {
+    cursor: pointer;
+}
+
+.housing-map-picker button:focus-visible,
+.housing-map-picker select:focus-visible {
+    outline: 2px solid var(--admin-green);
+    outline-offset: 2px;
+}
+
+.housing-map-picker__header button {
+    flex-shrink: 0;
+}
+
+.housing-map-picker__body {
+    grid-row: 3;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+    background: var(--admin-panel-soft);
+}
+
+.housing-map-picker [data-map-status]:not(:empty) {
+    padding: 0.5rem 1rem;
+    border-block-end: 1px solid var(--admin-line);
+}
+
+.housing-map-picker [data-map-summary] {
+    grid-row: 1;
+    padding: 0.25rem;
+}
+
+.housing-map-picker [data-map-status] {
+    grid-row: 2;
+}
+
+.housing-map-picker__plan {
+    grid-row: 3;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    padding: 0.25rem;
+}
+
+.housing-map-picker .settlement-room[data-origin-room] {
+    border-color: var(--admin-green);
+}
+
+.housing-map-picker .settlement-bed[data-review-bed-status="draft"] {
+    border-color: var(--admin-orange);
+}
+
+.housing-map-picker .settlement-bed[data-review-bed-status="unavailable"]:not(.is-occupied) {
+    background: var(--settlement-untransferred-bed-surface);
+}
+
+.housing-map-picker__bed-badge {
+    position: absolute;
+    inset: auto 0.15rem 0.15rem;
+    padding: 0.1rem;
+    border-radius: 0.2rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-size: 0.6875rem;
+    line-height: 1;
+    text-align: center;
+    pointer-events: none;
+}
+
+.housing-map-picker__footer {
+    grid-row: 4;
+    justify-content: space-between;
+    border-top: 1px solid var(--admin-line);
+}
+
+.housing-map-picker [data-map-selection] {
+    display: grid;
+    gap: 0.1rem;
+    max-height: 7rem;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    font-size: 0.875rem;
+}
+
+.housing-map-picker [data-map-save]:enabled {
+    background: #15834e;
+    border-color: #15834e;
+    color: white;
+    font-weight: 700;
+}
+
+.housing-map-picker [data-map-save]:disabled {
+    opacity: 0.6;
+}
+
+@media (max-width: 650px) {
+    .housing-map-picker[open] {
+        width: 100vw;
+        height: 100dvh;
+        border: 0;
+        border-radius: 0;
+    }
+
+    .housing-map-picker__header,
+    .housing-map-picker__filters,
+    .housing-map-picker__footer {
+        gap: 0.5rem;
+        padding: 0.5rem 0.65rem;
+    }
+
+    .housing-map-picker__header button {
+        white-space: normal;
+        max-width: 7rem;
+    }
+
+    .housing-map-picker__filters label {
+        flex: 1 1 5rem;
+        min-width: 0;
+    }
+
+    .housing-map-picker__header button,
+    .housing-map-picker__footer button,
+    .housing-map-picker select {
+        min-height: 2.75rem;
+    }
+
+    .housing-map-picker__footer {
+        flex-wrap: wrap;
+    }
+
+    .housing-map-picker__footer button {
+        width: 100%;
+    }
+}
+
+.settlement-swap-notice {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    background: var(--admin-panel);
+}
+
+.settlement-swap-dialog {
+    --swap-gutter: clamp(1.75rem, 7vw, 4.5rem);
+    box-sizing: border-box;
+    width: min(45rem, calc(100vw - 1rem));
+    max-height: calc(100dvh - 1rem);
+    margin: auto;
+    padding: clamp(0.85rem, 2.8vw, 1.75rem);
+    overflow-y: auto;
+    border: 1px solid var(--admin-line);
+    border-radius: 1rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 22%);
+}
+
+.settlement-swap-dialog::backdrop {
+    background: rgb(10 20 25 / 60%);
+}
+
+.settlement-swap-heading,
+.settlement-swap-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.settlement-swap-heading {
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.settlement-swap-heading h2 {
+    margin: 0;
+    font-size: clamp(1.2rem, 3vw, 1.65rem);
+    line-height: 1.15;
+}
+
+.settlement-swap-dialog .settlement-swap-close {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--admin-muted);
+    border: 1px solid var(--admin-line);
+    border-radius: 50%;
+}
+
+.settlement-swap-close svg,
+.settlement-swap-arrows {
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.settlement-swap-close svg {
+    width: 18px;
+    stroke-width: 2;
+}
+
+.settlement-swap-dialog [hidden] {
+    display: none;
+}
+
+.settlement-swap-picked {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem;
+    margin-bottom: 1rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.7rem;
+    background: var(--admin-panel-soft);
+}
+
+.settlement-swap-picked .settlement-swap-badge {
+    display: block;
+    width: 3.75rem;
+    height: 3.5rem;
+    min-height: 0;
+    pointer-events: none;
+}
+
+.settlement-swap-picked strong,
+.settlement-swap-picked [data-swap-picked-address] {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.settlement-swap-caption,
+.settlement-swap-picked [data-swap-picked-address],
+.settlement-swap-match span {
+    color: var(--admin-muted);
+    font-size: 0.85rem;
+}
+
+.settlement-swap-caption {
+    margin: 0.3rem 0;
+}
+
+.settlement-swap-search {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-weight: 700;
+}
+
+.settlement-swap-dialog #settlement-swap-search {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 44px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+}
+
+.settlement-swap-dialog #settlement-swap-search:focus-visible,
+.settlement-swap-dialog .settlement-swap-match:focus-visible {
+    outline: 2px solid var(--admin-green);
+    outline-offset: -2px;
+}
+
+.settlement-swap-results {
+    list-style: none;
+    max-height: min(42dvh, 18rem);
+    overflow: auto;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+}
+
+.settlement-swap-results li + li {
+    border-top: 1px solid var(--admin-line);
+}
+
+.settlement-swap-dialog .settlement-swap-match {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    justify-content: stretch;
+    gap: 0.15rem 0.75rem;
+    padding: 0.65rem 0.75rem;
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    text-align: start;
+    font: inherit;
+    overflow-wrap: anywhere;
+}
+
+.settlement-swap-match strong,
+.settlement-swap-match span {
+    grid-column: 1;
+}
+
+.settlement-swap-match::after {
+    content: "";
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    width: 0.5rem;
+    height: 0.5rem;
+    border: solid var(--admin-muted);
+    border-width: 1.5px 1.5px 0 0;
+    transform: rotate(45deg);
+}
+
+.settlement-swap-dialog .settlement-swap-match:hover {
+    background: var(--admin-panel-soft);
+}
+
+.settlement-swap-actions .settlement-swap-back {
+    margin-inline-end: auto;
+}
+
+.settlement-swap-plan {
+    position: relative;
+}
+
+.settlement-swap-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 0;
+}
+
+.settlement-swap-person {
+    display: grid;
+    grid-row: span 4;
+    grid-template-rows: subgrid;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding-top: 0.65rem;
+}
+
+.settlement-swap-person .settlement-swap-badge {
+    width: 4.5rem;
+    height: 4.25rem;
+    margin: 0 auto;
+    pointer-events: none;
+}
+
+.settlement-swap-arrows {
+    position: absolute;
+    top: 1.8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(var(--swap-gutter) - 0.25rem);
+    max-width: 3.25rem;
+    height: 2.4rem;
+    color: var(--admin-green);
+    stroke-width: 3;
+    pointer-events: none;
+}
+
+.settlement-swap-person h3 {
+    margin: 0.7rem 0.5rem 1.1rem;
+    font-size: clamp(1rem, 2vw, 1.15rem);
+    line-height: 1.2;
+    text-align: center;
+    align-self: start;
+}
+
+.settlement-swap-route {
+    display: grid;
+    grid-row: span 2;
+    grid-template-rows: subgrid;
+    margin: 0;
+}
+
+.settlement-swap-route div {
+    padding: 0.75rem clamp(0.5rem, 2vw, 1.1rem);
+    border-top: 1px solid var(--admin-line);
+}
+
+.settlement-swap-route div + div {
+    border: 0;
+    background: color-mix(in srgb, var(--admin-green) 12%, var(--admin-panel));
+}
+
+.settlement-swap-person:first-child .settlement-swap-route div:last-child {
+    border-radius: 0.7rem 0 0 0.7rem;
+}
+
+.settlement-swap-person:last-child .settlement-swap-route div:last-child {
+    border-radius: 0 0.7rem 0.7rem 0;
+}
+
+.settlement-swap-heading,
+.settlement-swap-person h3,
+.settlement-swap-route,
+.settlement-swap-actions button {
+    font-family: system-ui, sans-serif;
+}
+
+.settlement-swap-route dt {
+    color: var(--admin-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.settlement-swap-route dd {
+    margin: 0.2rem 0 0;
+    font-size: 0.95rem;
+    line-height: 1.3;
+}
+
+.settlement-swap-route .swap-place,
+.settlement-swap-route .swap-floor {
+    display: block;
+}
+
+.settlement-swap-route .swap-floor {
+    font-size: 0.82rem;
+    color: var(--admin-muted);
+}
+
+.settlement-swap-route div:last-child .swap-place {
+    font-weight: 700;
+}
+
+.settlement-swap-actions {
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+.settlement-swap-actions button {
+    width: auto;
+    min-width: 5.5rem;
+    min-height: 44px;
+    padding-inline: 1.1rem;
+}
+
+.settlement-swap-dialog [data-swap-error]:not([hidden]) {
+    margin: 0.75rem 0 0;
+    color: var(--admin-red);
+}
+
+@media (max-width: 480px) {
+    .settlement-swap-actions {
+        flex-wrap: wrap;
+    }
+
+    .settlement-swap-actions .settlement-swap-back {
+        flex-basis: 100%;
+    }
+
+    .settlement-swap-actions button {
+        flex: 1;
+    }
+}

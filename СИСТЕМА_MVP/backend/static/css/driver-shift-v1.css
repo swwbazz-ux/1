@@ -4134,3 +4134,12 @@ body.driver-mobile-screen .driver-haptic-level__hint {
     line-height: 1.35;
     color: rgba(255, 255, 255, 0.45);
 }
+
+/* При закрытой смене назначение и точка разгрузки доступны для просмотра. */
+body.driver-mobile-screen [data-driver-shift-open="false"] [data-driver-tab-panel="work"] {
+    filter: grayscale(1);
+}
+
+body.driver-mobile-screen [data-driver-shift-open="false"] [data-driver-tab-panel="work"] :is(button, [role="button"]) {
+    cursor: default;
+}

@@ -1,0 +1,12 @@
+<p><strong>Строк расселения {{ snapshot.entries|length }} · Требуют сверки {{ snapshot.conflicts }}</strong></p>
+<div class="admin-console-table-wrap">
+    <table><thead><tr><th>Жилец</th><th>Место в Excel</th><th>Смена</th><th>Результат проверки</th></tr></thead>
+        <tbody>{% for row in snapshot.entries %}<tr>
+            <td>{{ row.name }} {% if row.personnel_number %}<small>Таб. № {{ row.personnel_number }}</small>{% endif %}</td>
+            <td>{{ row.place }}<br><small>{{ row.source }}</small></td><td>{{ row.shift|default:"—" }}</td>
+            <td>{% for issue in row.issues %}<div>{{ issue }}</div>{% empty %}Проверено{% endfor %}</td>
+        </tr>{% empty %}<tr><td colspan="4">На выбранную дату нет строк проживания. Проверьте дату прошлого расселения.</td></tr>{% endfor %}</tbody>
+    </table>
+</div>
+{% if snapshot.excluded %}<details><summary>Вне расселения на эту дату · {{ snapshot.excluded|length }}</summary>
+<ul>{% for row in snapshot.excluded %}<li>{{ row.name }} · {{ row.place }} · {{ row.reason }} ({{ row.source }})</li>{% endfor %}</ul></details>{% endif %}

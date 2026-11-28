@@ -65,5 +65,56 @@
         ]).catch(function () {});
     }
 
+    function initWorkplaceTheme() {
+        var shell = document.querySelector(".clerk-workplace-shell");
+        var toggle = shell && shell.querySelector("[data-admin-theme-toggle]");
+        if (!toggle) return;
+
+        function applyTheme(isNight) {
+            shell.classList.toggle("admin-night", isNight);
+            shell.classList.toggle("admin-day", !isNight);
+            toggle.dataset.themeIcon = isNight ? "moon" : "sun";
+            toggle.title = isNight ? "Включить дневную тему" : "Включить ночную тему";
+            toggle.setAttribute("aria-label", toggle.title);
+        }
+
+        var savedTheme;
+        try { savedTheme = window.localStorage.getItem("clerk-theme"); } catch (error) {}
+        applyTheme(savedTheme === "night");
+        toggle.addEventListener("click", function () {
+            var isNight = !shell.classList.contains("admin-night");
+            applyTheme(isNight);
+            try { window.localStorage.setItem("clerk-theme", isNight ? "night" : "day"); } catch (error) {}
+        });
+    }
+
+    function initConnectionIndicator() {
+        function setState(state) {
+            if (document.body.dataset.connectionState === state) return;
+            document.body.dataset.connectionState = state;
+            window.dispatchEvent(new CustomEvent("operational-state-connection", {
+                detail: {state: state}
+            }));
+        }
+
+        window.addEventListener("web-heartbeat-success", function (event) {
+            var detail = event.detail || {};
+            if (detail.source === "application-session-heartbeat" && detail.status === 204) {
+                setState("ok");
+            }
+        });
+        window.addEventListener("app:connectiondiagnostic", function (event) {
+            var detail = event.detail || {};
+            if (detail.owner !== "web_heartbeat" || detail.cause === "planned_abort") return;
+            setState(detail.cause === "network_error" || detail.cause === "timeout" ? "lost" : "weak");
+        });
+        window.addEventListener("offline", function () { setState("lost"); });
+        window.addEventListener("online", function () { setState("weak"); });
+        if (navigator.onLine === false) setState("lost");
+        else if (window.AppSessionHeartbeat && window.AppSessionHeartbeat.lastSuccessAtMs > 0) setState("ok");
+    }
+
+    window.addEventListener("DOMContentLoaded", initWorkplaceTheme);
+    window.addEventListener("DOMContentLoaded", initConnectionIndicator);
     window.addEventListener("load", retireLegacySettlementPwa);
 }());

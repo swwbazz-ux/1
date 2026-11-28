@@ -7,6 +7,7 @@ from assignments.models import (
     AssignmentStatus,
     CrewPlan,
     CrewPlanSlot,
+    CrewPlanStatus,
     EquipmentAssignment,
     WorkShiftType,
 )
@@ -85,11 +86,12 @@ def _watch_period_start(period):
     )
 
 
-def _eligible_official_assignments(*, employee_id, period):
+def eligible_official_assignments(*, employee_ids, period, using=None):
     effective_at = _watch_period_start(period)
-    return list(
-        EquipmentAssignment.objects.filter(
-            employee_id=employee_id,
+    return (
+        EquipmentAssignment.objects.using(using)
+        .filter(
+            employee_id__in=employee_ids,
             status=AssignmentStatus.ACCEPTED,
             shift__isnull=True,
             role__isnull=False,
@@ -102,9 +104,23 @@ def _eligible_official_assignments(*, employee_id, period):
         .filter(Q(accepted_at__isnull=True) | Q(accepted_at__lte=effective_at))
         .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=effective_at))
         .select_related(
-            'employee', 'equipment', 'role', 'source_crew_plan_slot__plan',
+            'employee', 'equipment__equipment_type', 'equipment__model', 'role',
+            'source_crew_plan_slot__plan',
         )
         .order_by('pk')
+    )
+
+
+def official_assignment_matches_period(assignment, period):
+    slot = assignment.source_crew_plan_slot
+    return (
+        slot.plan.status in (CrewPlanStatus.PUBLISHED, CrewPlanStatus.SUPERSEDED)
+        and slot.employee_id == assignment.employee_id
+        and slot.equipment_id == assignment.equipment_id
+        and slot.plan.role_id == assignment.role_id
+        and slot.shift_type == assignment.shift_type
+        and slot.plan.work_date == period.starts_on
+        and assignment.shift_type in WorkShiftType.values
     )
 
 
@@ -119,10 +135,9 @@ def resolve_internal_official_shift_source(
         raise _shift_review_required('внутренний жилец не связан с Employee.')
     if require_expected_assignment and expected_assignment_id is None:
         raise _shift_review_required('не указано точное официальное назначение.')
-    assignments = _eligible_official_assignments(
-        employee_id=resident.employee_id,
-        period=period,
-    )
+    assignments = list(eligible_official_assignments(
+        employee_ids=(resident.employee_id,), period=period, using=resident._state.db,
+    )[:2])
     if len(assignments) != 1:
         raise _shift_review_required(
             'на начало WatchPeriod требуется ровно одно официальное назначение.',
@@ -134,14 +149,7 @@ def resolve_internal_official_shift_source(
     ):
         raise _shift_review_required('переданное назначение не является единственным действующим.')
     slot = assignment.source_crew_plan_slot
-    if (
-        slot.employee_id != resident.employee_id
-        or slot.equipment_id != assignment.equipment_id
-        or slot.plan.role_id != assignment.role_id
-        or slot.shift_type != assignment.shift_type
-        or slot.plan.work_date != period.starts_on
-        or assignment.shift_type not in WorkShiftType.values
-    ):
+    if not official_assignment_matches_period(assignment, period):
         raise _shift_review_required('назначение не соответствует Employee, технике, роли, смене или периоду.')
     try:
         assignment.full_clean()
@@ -920,6 +928,10 @@ ERROR_PROVENANCE_INCONSISTENT = 'provenance_inconsistent'
 ERROR_COHORT_GRAPH_INCOMPLETE = 'cohort_graph_incomplete'
 ERROR_COHORT_GRAPH_INCONSISTENT = 'cohort_graph_inconsistent'
 
+# T-029: владелец (администратор) действует вместо делопроизводителя по тому же
+# точному доступу; остальные проверки доступа не меняются.
+COHORT_ACTOR_ROLE_CODES = frozenset({'settlement_clerk', 'admin'})
+
 _ROUTING_SOURCE_TYPE = 'arrival_roster_routing'
 _ROUTING_BASIS_TYPE = 'arrival_roster_routing_row'
 
@@ -1172,7 +1184,7 @@ def _lock_settlement_clerk_access(plan):
         raise _creation_error(ERROR_ACCESS_INACTIVE, 'Сотрудник делопроизводителя неактивен.')
     if not access.role.is_active:
         raise _creation_error(ERROR_ACCESS_INACTIVE, 'Роль доступа неактивна.')
-    if access.role.code != 'settlement_clerk':
+    if access.role.code not in COHORT_ACTOR_ROLE_CODES:
         raise _creation_error(
             ERROR_ACCESS_WRONG_ROLE,
             'Точный доступ не принадлежит роли делопроизводителя.',
@@ -1564,12 +1576,8 @@ def _trusted_save_routing_member(member):
     return member
 
 
-def _validated_ready_watch_profile(*, ready, employee, graph):
-    schedules = {schedule.pk: schedule for schedule in graph['schedules']}
-    changes = {change.pk: change for change in graph['watch_profile_changes']}
+def _validate_ready_watch_profile(*, ready, employee, period, schedule, change):
     source_kind = ready.watch_profile_source_kind
-    change = changes.get(ready.employee_watch_profile_change_id)
-    schedule = schedules.get(ready.watch_profile_work_schedule_id)
     if (
         employee is None
         or source_kind
@@ -1579,7 +1587,7 @@ def _validated_ready_watch_profile(*, ready, employee, graph):
         }
         or schedule is None
         or ready.watch_profile_watch_composition_id
-        != graph['period'].watch_composition_id
+        != period.watch_composition_id
         or not isinstance(ready.watch_profile_fingerprint, str)
         or len(ready.watch_profile_fingerprint) != 64
         or any(character not in '0123456789abcdef' for character in ready.watch_profile_fingerprint)
@@ -1598,13 +1606,12 @@ def _validated_ready_watch_profile(*, ready, employee, graph):
         change is None
         or change.employee_id != employee.pk
         or change.status != EmployeeWatchProfileChange.Status.APPLIED
-        or change.effective_on > graph['period'].starts_on
+        or change.effective_on > period.starts_on
     ):
         raise _creation_error(
             ERROR_PROVENANCE_INCONSISTENT,
             'Exact применённое изменение профиля больше не действует.',
         )
-    return schedule, change
 
 
 def _new_routing_member(*, cohort, ready, graph):
@@ -1620,10 +1627,18 @@ def _new_routing_member(*, cohort, ready, graph):
     employee = employees.get(ready.employee_id)
     phase_row = phases.get(ready.brigade_phase_row_id)
     assignment = assignments.get(ready.equipment_assignment_id)
-    schedule, change = _validated_ready_watch_profile(
-        ready=ready,
-        employee=employee,
-        graph=graph,
+    return _routing_member_from_sources(
+        cohort=cohort, ready=ready, row=row, event=event, resident=resident, employee=employee,
+        phase_row=phase_row, assignment=assignment,
+        schedule=next((s for s in graph['schedules'] if s.pk == ready.watch_profile_work_schedule_id), None),
+        change=next((c for c in graph['watch_profile_changes'] if c.pk == ready.employee_watch_profile_change_id), None),
+    )
+
+
+def _routing_member_from_sources(*, cohort, ready, row, event, resident, employee,
+                                 phase_row, assignment, schedule, change):
+    _validate_ready_watch_profile(
+        ready=ready, employee=employee, period=cohort.watch_period, schedule=schedule, change=change,
     )
     if (
         row is None
@@ -1631,11 +1646,11 @@ def _new_routing_member(*, cohort, ready, graph):
         or resident is None
         or employee is None
         or phase_row is None
-        or row.batch_id != graph['batch'].pk
+        or row.batch_id != cohort.routing_batch_id
         or row.resident_id != resident.pk
         or row.employee_id != employee.pk
         or event.routing_row_id != row.pk
-        or phase_row.version.watch_period_id != graph['period'].pk
+        or phase_row.version.watch_period_id != cohort.watch_period_id
         or phase_row.version.work_schedule_id != ready.watch_profile_work_schedule_id
         or phase_row.brigade_number != ready.watch_profile_brigade_number
         or phase_row.phase != ready.work_shift
@@ -1700,6 +1715,46 @@ def _new_routing_member(*, cohort, ready, graph):
             'equipment_assignment_id': ready.equipment_assignment_id,
         },
     )
+
+
+def build_provisional_members(*, batch, readiness, rows):
+    """Adapt checked routing rows to the normal resolver, without saving a cohort."""
+    period = batch.watch_period
+    cohort = SettlementCohort(
+        pk=-batch.pk, watch_period=period,
+        watch_composition=period.watch_composition, routing_batch=batch,
+    )
+    ready_members = readiness.ready_members
+    events = ArrivalRosterRoutingEvent.objects.select_related(
+        'equipment_assignment__equipment',
+    ).in_bulk(item.routing_event_id for item in ready_members)
+    phases = WatchPeriodBrigadePhaseRow.objects.select_related('version').in_bulk(
+        item.brigade_phase_row_id for item in ready_members
+    )
+    schedules = WorkSchedule.objects.in_bulk(item.watch_profile_work_schedule_id for item in ready_members)
+    changes = EmployeeWatchProfileChange.objects.in_bulk(
+        item.employee_watch_profile_change_id for item in ready_members if item.employee_watch_profile_change_id
+    )
+    members = []
+    contexts = {}
+    for item in ready_members:
+        row = rows[item.routing_row_id]
+        event = events[item.routing_event_id]
+        assignment = event.equipment_assignment
+        member = _routing_member_from_sources(
+            cohort=cohort, ready=item, row=row, event=event, resident=row.resident,
+            employee=row.employee, phase_row=phases[item.brigade_phase_row_id],
+            assignment=assignment, schedule=schedules.get(item.watch_profile_work_schedule_id),
+            change=changes.get(item.employee_watch_profile_change_id),
+        )
+        # Negative keys keep provisional identities distinct from persisted memberships.
+        member.pk = -row.pk
+        members.append(member)
+        contexts[member.pk] = {
+            'watch_profile': _ready_watch_profile_snapshot(item),
+            'official_equipment_assignment': assignment,
+        }
+    return cohort, members, contexts
 
 
 def _source_snapshot(*, graph, readiness):

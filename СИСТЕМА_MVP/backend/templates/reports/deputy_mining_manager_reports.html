@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-reports-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20260904-2">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261125-dispatcher-nav">
 {% endblock %}
 
 {% block body %}
@@ -33,7 +33,7 @@
                                 <span>Категория</span>
                                 <strong>{{ publication.category_label|default:publication.role.name|default:"—" }}</strong>
                             </div>
-                            <div>
+                            <div class="deputy-publication-time">
                                 <span>Опубликовано</span>
                                 <strong>{{ publication.published_at_label|default:"—" }}</strong>
                                 {% if publication.published_by_label %}<small>{{ publication.published_by_label }}</small>{% endif %}

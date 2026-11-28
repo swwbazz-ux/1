@@ -1,5 +1,6 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -10,10 +11,7 @@ const SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "mobile-operational-sounds-v1.js"),
     "utf8"
 );
-const EXCAVATOR_TEMPLATE = fs.readFileSync(
-    path.resolve(__dirname, "..", "..", "..", "templates", "trips", "excavator_work.html"),
-    "utf8"
-);
+const EXCAVATOR_TEMPLATE = excavatorScreenSource();
 const DRIVER_TEMPLATE = fs.readFileSync(
     path.resolve(__dirname, "..", "..", "..", "templates", "users", "driver_shift.html"),
     "utf8"

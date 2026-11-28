@@ -20,6 +20,7 @@ def dispatcher_employee_for_equipment(
     equipment_id,
     open_shifts,
     work_assignments,
+    reported_crew=None,
 ):
     open_shift = open_shifts.get(equipment_id)
     if open_shift:
@@ -30,6 +31,9 @@ def dispatcher_employee_for_equipment(
     if work_assignment:
         shift_label = work_assignment.get_shift_type_display().lower()
         return work_assignment.employee, f'Назначен на {shift_label}'
+    reported_slot = (reported_crew or {}).get(equipment_id)
+    if reported_slot:
+        return reported_slot.reported_employee, f'По опубликованной расстановке · {reported_slot.get_shift_type_display().lower()}'
     return None, 'Сотрудник не назначен'
 
 

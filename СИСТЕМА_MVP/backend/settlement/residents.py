@@ -299,7 +299,7 @@ def _locked_control_access(*, control_context, using):
     return locked_rows.access_by_id(control_context.owner_access_id)
 
 
-def _locked_external_resident(*, resident_id, expected_revision, using):
+def _locked_resident_card(*, resident_id, expected_revision, using):
     if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
         raise _validation_error('invalid_revision', 'Ожидаемая ревизия должна быть целым числом.')
     resident = (
@@ -307,13 +307,20 @@ def _locked_external_resident(*, resident_id, expected_revision, using):
         .select_for_update(of=('self',))
         .get(pk=resident_id)
     )
+    if resident.revision != expected_revision:
+        raise _validation_error('stale_revision', 'Карточка уже изменена. Откройте её заново.')
+    return resident
+
+
+def _locked_external_resident(*, resident_id, expected_revision, using):
+    resident = _locked_resident_card(
+        resident_id=resident_id, expected_revision=expected_revision, using=using,
+    )
     if not resident.is_external:
         raise _validation_error(
             'internal_read_only',
             'Внутренний Employee нельзя редактировать через сервис внешних карточек.',
         )
-    if resident.revision != expected_revision:
-        raise _validation_error('stale_revision', 'Карточка жильца уже изменена.')
     authoritative_resident_sex(resident)
     return resident
 
@@ -358,20 +365,35 @@ def _validate_external_sex_against_open_occupancies(*, resident, using):
     if tuple((item.pk, item.physical_bed_id) for item in occupancies) != snapshot:
         raise _validation_error('stale_occupancy', 'Фактическое проживание изменилось.')
 
-    room_by_id = {room.pk: room for room in rooms}
     bed_room_by_id = {bed.pk: bed.room_id for bed in beds}
     sex = authoritative_resident_sex(resident)
+    # T-036 backend-15: совместимость считается по фактическим жильцам комнаты
+    # на период проживания, а не по legacy-атрибуту `sex_restriction`.
+    from .room_sex import (
+        classify_sexes,
+        occupancy_sex,
+        room_occupancies,
+    )
+
     for occupancy in occupancies:
-        restriction = room_by_id[bed_room_by_id[occupancy.physical_bed_id]].sex_restriction
-        if restriction == PhysicalRoom.SexRestriction.MALE_ONLY and sex != Employee.Sex.MALE:
+        room_id = bed_room_by_id[occupancy.physical_bed_id]
+        others = room_occupancies(
+            room_ids=(room_id,),
+            starts_at=occupancy.starts_at,
+            ends_at=occupancy.ends_at,
+            using=using,
+            exclude_occupancy_ids=(occupancy.pk,),
+            for_update=True,
+        )
+        state, room_sex = classify_sexes(
+            occupancy_sex(row) for row in others
+        )
+        if state in {'unknown_occupant', 'mixed'} or (
+            state == 'fixed' and room_sex != sex
+        ):
             raise _validation_error(
                 'sex_occupancy_conflict',
-                'Новый пол несовместим с текущей комнатой жильца.',
-            )
-        if restriction == PhysicalRoom.SexRestriction.FEMALE_ONLY and sex != Employee.Sex.FEMALE:
-            raise _validation_error(
-                'sex_occupancy_conflict',
-                'Новый пол несовместим с текущей комнатой жильца.',
+                'Новый пол несовместим с фактическими жильцами комнаты.',
             )
 
 
@@ -410,6 +432,7 @@ def create_external_resident(
     phone,
     control_context,
     sex=_UNSET,
+    require_phone=True,
     photo=None,
     using=DEFAULT_DB_ALIAS,
 ):
@@ -423,9 +446,9 @@ def create_external_resident(
     resident = SettlementResident(
         resident_type=resident_type,
         full_name=_normalized_required(full_name, 'ФИО'),
-        position_title=_normalized_required(position_title, 'Должность или профессия'),
+        position_title=' '.join(str(position_title or '').split()),
         organization=_normalized_required(organization, 'Организация'),
-        phone=_normalized_required(phone, 'Телефон'),
+        phone=_normalized_required(phone, 'Телефон') if require_phone else ' '.join(str(phone or '').split()),
         external_sex=_normalized_external_sex(sex),
         photo=photo,
         created_by_access=actor_access,
@@ -436,7 +459,7 @@ def create_external_resident(
 
 
 @transaction.atomic
-def update_external_resident(
+def update_resident_card(
     *,
     resident_id,
     expected_revision,
@@ -447,10 +470,13 @@ def update_external_resident(
     phone=_UNSET,
     sex=_UNSET,
     photo=_UNSET,
+    external_personnel_number=_UNSET,
+    housing_note=_UNSET,
+    external_only=False,
     using=DEFAULT_DB_ALIAS,
 ):
     actor_access = _locked_control_access(control_context=control_context, using=using)
-    resident = _locked_external_resident(
+    resident = _locked_resident_card(
         resident_id=resident_id,
         expected_revision=expected_revision,
         using=using,
@@ -463,15 +489,28 @@ def update_external_resident(
         'position_title': position_title,
         'organization': organization,
         'phone': phone,
+        'external_personnel_number': external_personnel_number,
         'external_sex': sex,
         'photo': photo,
     }
+    if resident.is_external:
+        authoritative_resident_sex(resident)
+    elif external_only or any(value is not _UNSET for value in updates.values()):
+        raise _validation_error(
+            'internal_read_only',
+            'Кадровые данные сотрудника редактируются в справочнике сотрудников.',
+        )
+    updates['housing_note'] = housing_note
     changed_fields = []
     for field_name, value in updates.items():
         if value is _UNSET:
             continue
         if field_name == 'external_sex':
             value = _normalized_external_sex(value)
+        elif field_name in {'position_title', 'phone', 'external_personnel_number'}:
+            value = ' '.join(str(value or '').split())
+        elif field_name == 'housing_note':
+            value = value.strip()
         elif field_name != 'photo':
             value = _normalized_required(value, resident._meta.get_field(field_name).verbose_name)
         if getattr(resident, field_name) != value:
@@ -493,6 +532,10 @@ def update_external_resident(
         update_fields=[*changed_fields, 'revision', 'updated_by_access', 'updated_at'],
     )
     return resident
+
+
+def update_external_resident(**kwargs):
+    return update_resident_card(external_only=True, **kwargs)
 
 
 @transaction.atomic

@@ -1,6 +1,7 @@
 import mimetypes
 from decimal import Decimal
 
+from django.db.models import Q
 from django.http import FileResponse, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -45,9 +46,14 @@ def achievement_access_from_request(request):
 def achievement_current_shift(access):
     if not access:
         return None
+    equipment_type = 'Самосвал' if access.role.code == 'driver' else 'Экскаватор'
     return (
         EmployeeShift.objects
         .filter(employee=access.employee, closed_at__isnull=True)
+        .filter(
+            Q(workplace_code=access.role.code)
+            | Q(workplace_code='', equipment__equipment_type__name=equipment_type)
+        )
         .select_related('equipment', 'equipment__equipment_type', 'plan_group')
         .order_by('-opened_at')
         .first()

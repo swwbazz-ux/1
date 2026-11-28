@@ -1,31 +1,12 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
 
-const driverTemplatePath = path.resolve(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "templates",
-    "users",
-    "driver_shift.html"
-);
-const excavatorTemplatePath = path.resolve(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "templates",
-    "trips",
-    "excavator_work.html"
-);
 
 
 function extractMarkedSource(source, startMarker, endMarker, label) {
@@ -124,7 +105,7 @@ function loadDriverUnloadRecoveryRuntime() {
 }
 
 
-async function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, submissions) {
+async function executeDriverSharedUnloadSubmit(template, recovery, input, pathLabel, submissions) {
     const submitSource = extractBraceBlock(
         template,
         "function submitDriverUnloadOnce()",
@@ -133,7 +114,10 @@ async function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, su
     const classNames = new Set(["is-loaded"]);
     const holdForm = {
         dataset: {driverTripId: "42"}, isConnected: true,
-        querySelector() { return {value: recovery.ensureActionId()}; },
+        querySelector(selector) {
+            assert.equal(selector, "[data-driver-client-action]");
+            return input;
+        },
     };
     const holdButton = {
         classList: {
@@ -148,6 +132,9 @@ async function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, su
         disabled: false,
     };
     const executable = {};
+    const notices = [];
+    let confirmed = 0;
+    let flushes = 0;
 
     vm.runInNewContext(
         `
@@ -156,16 +143,14 @@ async function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, su
             var unloadRecovery = context.recovery;
             var holdForm = context.holdForm;
             var holdButton = context.holdButton;
-            var dialLabel = null;
-            var shell = {dataset: {driverHasLoadedTrip: "true"}};
+            var shell = {dataset: {driverShiftOpen: "true", driverHasLoadedTrip: "true"}};
             var driverOfflineEvents = [];
             var driverOfflineOutbox = context.outbox;
             function driverOfflineContext() {return {shiftId: 3, equipmentId: 4};}
             function applyDriverOfflineProjection() {}
             function driverRoleIsReadonly() { return false; }
-            function showDriverToast() {}
-            function renderDriverDialLabel() {}
-            function scheduleDriverDialLabelFit() {}
+            var showDriverToast = context.showNotice;
+            var showDriverDialConfirmed = context.confirmDial;
             ${submitSource}
             context.executable.submit = submitDriverUnloadOnce;
         })();
@@ -176,6 +161,8 @@ async function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, su
                 holdButton,
                 holdForm,
                 recovery,
+                showNotice: message => notices.push(message),
+                confirmDial: () => { confirmed++; },
                 outbox: {
                     pending() {return Promise.resolve([]);},
                     enqueue(event) {
@@ -184,7 +171,10 @@ async function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, su
                         assert.equal(event.trip_id, "42");
                         return Promise.resolve(event);
                     },
-                    flush() {return Promise.resolve([]);},
+                    flush() {
+                        flushes++;
+                        return Promise.resolve([]);
+                    },
                 },
             },
             window: {
@@ -202,6 +192,9 @@ async function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, su
     assert.equal(holdButton.disabled, true);
     assert.equal(classNames.has("is-pending"), true);
     await flushPromiseChain();
+    assert.deepEqual(notices, ["Разгрузка сохранена на телефоне."]);
+    assert.equal(confirmed, 1);
+    assert.equal(flushes, 1);
 }
 
 
@@ -231,6 +224,7 @@ test("production Driver unload recovery keeps one action id across hold, one-tap
     await executeDriverSharedUnloadSubmit(
         template,
         firstRuntime,
+        firstInput,
         "one-tap-before-lost-response",
         submissions
     );
@@ -260,6 +254,7 @@ test("production Driver unload recovery keeps one action id across hold, one-tap
     await executeDriverSharedUnloadSubmit(
         template,
         reloadRuntime,
+        reloadInput,
         "hold-after-reload-and-bfcache",
         submissions
     );
@@ -280,6 +275,7 @@ test("production Driver unload recovery keeps one action id across hold, one-tap
     await executeDriverSharedUnloadSubmit(
         template,
         realtimeRuntime,
+        realtimeInput,
         "one-tap-after-realtime-rebind",
         submissions
     );
@@ -329,15 +325,18 @@ function flushPromiseChain() {
 }
 
 function createExcavatorLoadFixture({loseFirstResponse = false, completed = false} = {}) {
-    const template = fs.readFileSync(excavatorTemplatePath, "utf8");
+    const template = excavatorScreenSource();
     const createOutbox = require("../excavator-field-outbox-v1.js");
     const local = new MemoryStorage();
     const serverActions = new Set(), requests = [], reconcile = [];
     let serverTripCount = 0, idCount = 0, fragmentCount = 0, failFragment = false;
     let pendingCount = 0, restoredCards = 0;
     const classNames = new Set();
+    const truckLoadProjections = new WeakMap();
+    const notices = [];
+    const voiceCalls = [];
     const card = {
-        dataset: {truckId: "7", assignmentId: "8", eoCanLoad: "1", eoEquipmentState: "assigned"},
+        dataset: {truckId: "7", assignmentId: "8", eoTruckNumber: "21", eoCanLoad: "1", eoEquipmentState: "assigned"},
         className: "eo-truck-card", hidden: false,
         classList: {add: (...keys) => keys.forEach(key => classNames.add(key)), remove: (...keys) => keys.forEach(key => classNames.delete(key))},
         querySelector: () => null,
@@ -384,14 +383,17 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
     const context = {
         window, document, navigator: {onLine: true}, Promise, shell: initialShell,
         freeBucketController: null, downtimeCard: null, downtimeInput: {value: ""}, transportDistanceInput: {value: "3.5"},
+        truckLoadProjections,
         canTruckLoad: () => true, truckLoadBlockReason: () => "",
         snapshotTruckCard: () => ({className: card.className}),
         applyTruckPending(node) {node.dataset.eoEquipmentState = "loaded_waiting_unload";},
         addPendingTruckBadge: () => badge,
         confirmTruckLoaded(node) {node.dataset.eoEquipmentState = "loaded_waiting_unload"; node.classList.remove("is-pending");},
         restoreTruckCard() {restoredCards++;},
-        playExcavatorEquipmentVoice() {}, playExcavatorVoice() {}, playExcavatorSound() {},
-        markLastDumpTarget() {}, showExcavatorNotice() {},
+        playExcavatorEquipmentVoice(action, number, options) {voiceCalls.push({action, number, ...options});},
+        playExcavatorVoice() {}, playExcavatorSound() {},
+        markLastDumpTarget() {},
+        showExcavatorNotice: message => notices.push(message),
         newExcavatorFieldId: prefix => prefix + "-" + (++idCount), excavatorInstallDeviceId: () => "device-A",
         legacyExcavatorFieldSequence: () => 0,
         cardByTruckId: () => card,
@@ -420,8 +422,10 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
         ...[
             "function invalidateExcavatorWorkRefresh()", "function isExcavatorRefreshUnsafe(options)",
             "function storeExcavatorRealtimeVersion(version)", "function refreshExcavatorWorkFromServer(options)",
+            "function hasExcavatorRelevantEvents(events)",
             "window.applyOperationalStateRefresh = function (context)",
             "window.confirmExcavatorFieldEvent = function (event, result)",
+            "function rememberTruckLoadProjection(card, eventId, snapshot)",
             "function postTruckLoaded(card, dumpTarget)",
         ].map(signature => extractBraceBlock(template, signature, signature)),
     ];
@@ -430,7 +434,8 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
         load: () => context.postTruckLoaded(card, dumpTarget), outbox, restartOutbox: newOutbox,
         refresh: () => window.applyOperationalStateRefresh({version: 101}),
         failRefresh(value) {failFragment = value;},
-        requests, reconcile, card, badge, document,
+        requests, reconcile, card, badge, document, notices, voiceCalls,
+        loadProjection: () => truckLoadProjections.get(card),
         serverTripCount: () => serverTripCount, serverActionCount: () => serverActions.size,
         generated: () => idCount, restoredCards: () => restoredCards,
         fragmentCount: () => fragmentCount, terminal: () => currentShell.terminal,
@@ -440,25 +445,34 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
 test("production Excavator load survives a lost response and a restarted durable outbox retries the identical event", async () => {
     const r = createExcavatorLoadFixture({loseFirstResponse: true});
     r.load(); await flushPromiseChain();
-    assert.equal(r.requests.length, 1);
+    assert.equal(r.requests.length, 1, r.notices.join("; "));
     assert.equal(r.serverTripCount(), 1);
     assert.equal((await r.outbox.pending()).length, 1);
     assert.equal(r.card.dataset.eoEquipmentState, "loaded_waiting_unload");
     assert.equal(r.restoredCards(), 0, "A committed durable load must not restore an actionable truck after a transport failure");
     const event = r.requests[0][0];
+    assert.equal(r.loadProjection().eventId, event.event_id);
     assert.equal(event.event_type, "excavator.trip.loaded");
     assert.equal(event.payload.assignment_id, "8");
     assert.equal(event.payload.dump_point_id, "9");
+    assert.equal(r.voiceCalls.length, 1);
+    assert.equal(r.voiceCalls[0].action, "excavator_truck_sent");
+    assert.equal(r.voiceCalls[0].number, "21");
+    assert.equal(r.voiceCalls[0].dumpPointId, 9);
+    assert.equal(r.voiceCalls[0].dumpPointName, "ККД");
+    assert.equal(r.voiceCalls[0].operationKey, "excavator-load:" + event.event_id);
 
     const restarted = r.restartOutbox();
     await restarted.ready(); await restarted.retryNow(); await flushPromiseChain();
     assert.equal(r.requests.length, 2);
     assert.deepEqual(r.requests[1][0], event, "Retry keeps ID, fact time, sequence, dependencies and immutable payload");
     assert.equal(r.serverTripCount(), 1); assert.equal(r.serverActionCount(), 1);
+    assert.equal(r.voiceCalls.length, 1, "Retry must not announce the same load again");
     assert.equal(r.generated(), 2, "One event ID and one local trip ID are allocated only once");
     assert.deepEqual(await restarted.pending(), []);
     assert.equal(r.badge.dataset.tripId, "501");
     assert.equal(r.card.dataset.eoOpenTripId, "501");
+    assert.equal(r.loadProjection(), undefined);
     assert.equal(r.reconcile.length, 1);
     assert.equal(r.reconcile[0].version, 101);
     assert.equal(r.document.body.dataset.operationalStateVersion, "100", "ACK is not DOM proof");
@@ -469,7 +483,8 @@ test("production Excavator load survives a lost response and a restarted durable
 test("production Excavator late deduplicated completed load reconciles from server and never revives the optimistic trip", async () => {
     const r = createExcavatorLoadFixture({completed: true});
     r.load(); await flushPromiseChain();
-    assert.equal(r.requests.length, 1); assert.equal(r.serverTripCount(), 1);
+    assert.equal(r.requests.length, 1, r.notices.join("; "));
+    assert.equal(r.serverTripCount(), 1);
     assert.deepEqual(await r.outbox.pending(), []);
     assert.equal(r.reconcile.length, 1);
     assert.equal(r.reconcile[0].reason, "offline_excavator_events_confirmed");

@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20260906-2">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261128-employee-duty">
 {% endblock %}
 
 {% block body %}
@@ -14,52 +14,68 @@
 
     <main class="admin-console-page deputy-planning-page" data-deputy-planning-root>
         <section class="deputy-planning-toolbar" aria-label="Управление расстановкой">
+            <nav class="deputy-category-nav" data-category-nav data-placement-url="{% url 'deputy_mining_manager_placement_data' %}"
+                 data-off-equipment-url="{% url 'deputy_off_equipment' %}"
+                 data-access-id="{{ access.pk }}" data-current-date="{{ current_production_date|date:'Y-m-d' }}" aria-label="Категории техники" hidden></nav>
             <div class="deputy-planning-scope">
                 <div class="deputy-work-date" aria-label="Выбранные производственные сутки">
                     <span>Производственные сутки</span>
                     <strong data-work-date>{{ selected_date|date:"d.m.Y" }}</strong>
                 </div>
-                <nav class="deputy-category-nav" data-category-nav aria-label="Категории техники" hidden></nav>
                 <div class="deputy-brigade-switch" role="group" aria-label="Фильтр сотрудников по бригаде">
                     <span>Бригада</span>
+                    {% if planning_payload.brigades|length == 2 %}
+                    <button type="button" class="is-active" data-brigade-filter="watch" aria-pressed="true">Моя вахта</button>
+                    <button type="button" data-brigade-filter="all" aria-pressed="false">Все</button>
+                    {% else %}
                     <button type="button" class="is-active" data-brigade-filter="all" aria-pressed="true">Все</button>
-                    <button type="button" data-brigade-filter="1" aria-pressed="false">1</button>
-                    <button type="button" data-brigade-filter="2" aria-pressed="false">2</button>
-                    <button type="button" data-brigade-filter="3" aria-pressed="false">3</button>
-                    <button type="button" data-brigade-filter="4" aria-pressed="false">4</button>
+                    {% endif %}
+                    {% for brigade in planning_payload.brigades %}
+                    <button type="button" data-brigade-filter="{{ brigade }}" aria-pressed="false">{{ brigade }}</button>
+                    {% endfor %}
                 </div>
             </div>
 
-            <label class="deputy-search-field" for="deputy-planning-search">
-                <span>Поиск</span>
+            <div class="deputy-search-field">
+                <label for="deputy-planning-search">Поиск по ФИО или технике</label>
                 <input id="deputy-planning-search"
                        type="search"
                        autocomplete="off"
-                       placeholder="Сотрудник или техника"
-                       data-planning-search>
-            </label>
-
+                       spellcheck="false"
+                       placeholder="Введите ФИО или номер машины"
+                       data-people-url="{% url 'deputy_placement_people' %}?date={{ selected_date|date:'Y-m-d' }}"
+                       aria-controls="deputy-search-results" data-planning-search>
+                <output class="deputy-search-announcement" aria-live="polite" data-search-announcement></output>
+            </div>
             <div class="deputy-toolbar-actions">
                 <span class="deputy-autosave-state" data-autosave-state role="status" aria-live="polite">
                     <span class="deputy-autosave-dot" aria-hidden="true"></span>
                     <span data-autosave-text>Все изменения сохранены</span>
                 </span>
+                <a class="admin-button admin-button-secondary deputy-export-button"
+                   href="#"
+                   data-export-excel
+                   aria-label="Скачать текущую расстановку в Excel для печати"
+                   aria-disabled="true"
+                   title="Скачать Excel для печати">Скачать Excel</a>
+                {% if selected_date == current_production_date %}
+                    <a class="admin-button admin-button-secondary"
+                       href="{% url 'deputy_mining_manager_import' %}">Импорт расстановки</a>
+                {% endif %}
                 <button class="admin-button admin-button-secondary deputy-transfer-button"
                         type="button"
                         data-temporary-transfer-open
                         title="Запросить ОУП временный перевод сотрудника на эту вахту">
                     Запросить перевод
                 </button>
-                <a class="admin-button admin-button-secondary deputy-export-button"
-                   href="#"
-                   data-export-excel
-                   aria-label="Скачать текущую расстановку в Excel для печати"
-                   aria-disabled="true"
-                   title="Скачать Excel для печати">Excel</a>
                 <button class="admin-button admin-button-primary deputy-publish-button"
                         type="button"
                         data-publish-button>Опубликовать</button>
             </div>
+            <section class="deputy-search-results" id="deputy-search-results" aria-label="Результаты поиска" hidden>
+                <div role="status" data-search-status></div>
+                <div data-search-choices></div>
+            </section>
         </section>
 
         <section class="deputy-filter-counts" aria-label="Фильтры расстановки">
@@ -149,6 +165,10 @@
         </div>
         <span class="deputy-candidate-count" data-candidate-count role="status" aria-live="polite"></span>
     </div>
+    <label class="deputy-factual-candidates" data-factual-candidates-control hidden>
+        <input type="checkbox" data-factual-candidates>
+        Показать сотрудников с другой специализацией
+    </label>
     <div class="deputy-candidate-list" id="deputy-candidate-list" data-candidate-list></div>
     <div class="deputy-dialog-actions">
         <button type="button" class="admin-button admin-button-secondary" data-clear-slot hidden>Снять назначение</button>
@@ -165,7 +185,11 @@
 </dialog>
 
 <dialog class="deputy-dialog deputy-record-dialog" data-record-dialog aria-labelledby="deputy-record-title">
-    <button type="button" class="deputy-dialog-close deputy-record-close" data-record-close aria-label="Закрыть">×</button>
+    <button type="button" class="deputy-dialog-close deputy-record-close" data-record-close aria-label="Закрыть">
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+            <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+        </svg>
+    </button>
     <div class="deputy-record-head">
         <div class="deputy-record-visual" data-record-visual aria-hidden="true"></div>
         <div>
@@ -174,10 +198,42 @@
             <p data-record-subtitle></p>
         </div>
     </div>
+    <dl class="deputy-record-assignment" data-record-assignment hidden>
+        <div><dt>Назначение на <time></time></dt><dd data-record-posting></dd></div>
+        <div><dt>Бригада</dt><dd data-record-brigade></dd></div>
+    </dl>
     <dl class="deputy-record-fields" data-record-fields></dl>
-    <div class="deputy-dialog-actions">
+    <div class="deputy-dialog-actions" data-record-actions>
         <button type="button" class="admin-button admin-button-secondary" data-record-close>Закрыть</button>
     </div>
+    <form class="deputy-record-duty deputy-record-form" data-record-duty data-record-duty-form hidden>
+        <fieldset class="deputy-duty-options">
+            <legend>Перевод в раздел «Без техники»</legend>
+            <label><input type="radio" name="status" value="reserve" required><span><strong>Резерв</strong><small>На выбранную смену</small></span></label>
+            <label><input type="radio" name="status" value="other_work" required><span><strong>Работа без техники</strong><small>На производственные сутки</small></span></label>
+            <label><input type="radio" name="status" value="suspended" required><span><strong>Отстранён от управления</strong><small>До подтверждения возврата</small></span></label>
+        </fieldset>
+        <div class="deputy-record-duty-inputs">
+            <label><span>Смена <small data-duty-shift-hint></small></span>
+                <select name="shift_type">
+                    <option value="">Требует уточнения</option>
+                    <option value="day">Первая смена</option>
+                    <option value="night">Вторая смена</option>
+                </select>
+            </label>
+            <label><span>Где и чем занят <small data-duty-location-hint></small></span>
+                <input name="location" maxlength="180" placeholder="Например, помогает слесарям на сборке">
+            </label>
+            <div class="deputy-record-duty-confirm">
+                <div class="deputy-record-duty-feedback" aria-live="polite">
+                    <p data-record-duty-prompt>Выберите состояние для перевода.</p>
+                    <p data-record-duty-removal hidden>При публикации сотрудник будет снят с машины.</p>
+                </div>
+                <button type="submit" class="admin-button admin-button-primary" disabled>Перевести и опубликовать</button>
+            </div>
+            <p class="deputy-record-duty-error" data-record-duty-error role="alert" hidden></p>
+        </div>
+    </form>
 </dialog>
 
 <dialog class="deputy-dialog deputy-publish-dialog" data-publish-dialog aria-labelledby="deputy-publish-title">
@@ -254,6 +310,7 @@
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20260906-2" defer></script>
+<script src="{% static 'js/deputy-people-search.js' %}?v=3" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261128-employee-duty" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

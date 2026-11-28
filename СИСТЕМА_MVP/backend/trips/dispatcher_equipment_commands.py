@@ -3,8 +3,19 @@
 from django.db import transaction
 from django.http import JsonResponse
 
+from assignments.models import ExcavatorPlacement
 from core.models import bump_operational_state, lock_production_state
 from references.models import DumpPoint, Equipment, RockType
+from .dispatcher_duty import log_dispatcher_action
+
+
+def duty_settings_summary(settings, rock):
+    points = ', '.join(
+        f"{row['name']} ({row['transport_distance_km']} км)" if row['transport_distance_km'] else row['name']
+        for row in settings['destinations']
+    )
+    return (f"Горизонт {settings['loading_horizon'] or '—'}, блок {settings['loading_block'] or '—'}"
+            f" · Порода {rock or '—'} · Разгрузка {points or '—'}")
 
 
 def execute_dispatcher_equipment_settings(
@@ -70,6 +81,10 @@ def execute_dispatcher_equipment_settings(
             .select_related('equipment_type')
             .get(pk=equipment.pk)
         )
+        if access.role.code == 'dispatcher':
+            previous = ExcavatorPlacement.objects.select_related('work_rock_type').filter(excavator=equipment).first()
+            before = duty_settings_summary(build_settings(equipment, previous, rock_types=(), dump_points=()),
+                                           previous.work_rock_type if previous else None)
         placement = save_work_context(
             current_excavator=equipment,
             actor=access.employee,
@@ -79,6 +94,15 @@ def execute_dispatcher_equipment_settings(
             loading_block=loading_block,
             destination_settings=destinations,
         )
+        settings = build_settings(equipment, placement, rock_types=RockType.objects.filter(is_active=True).order_by('name'),
+                                  dump_points=DumpPoint.objects.filter(is_active=True).order_by('name'))
+        if access.role.code == 'dispatcher':
+            after = duty_settings_summary(settings, rock_type)
+            log_dispatcher_action(
+                actor=access.employee, access=access, request=request, action_type='equipment_settings',
+                target_summary=f'Изменены настройки экскаватора № {equipment.garage_number}',
+                duty_detail=f'{before} → {after}' if before != after else f'Сохранено без изменений · {after}',
+            )
         state = bump_operational_state(
             'Dispatcher:excavator_work_settings',
             event_type='equipment_changed',
@@ -111,10 +135,5 @@ def execute_dispatcher_equipment_settings(
         'contract': 'dispatcher-equipment-settings-v2',
         'equipment_id': equipment.id,
         'version': state.version,
-        'settings': build_settings(
-            equipment,
-            placement,
-            rock_types=RockType.objects.filter(is_active=True).order_by('name'),
-            dump_points=DumpPoint.objects.filter(is_active=True).order_by('name'),
-        ),
+        'settings': settings,
     }))

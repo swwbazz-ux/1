@@ -1,9 +1,27 @@
 /*
  * Единая вкладка «Забой» Машиниста экскаватора.
  * Заголовок, поля настроек и основное действие используют тот же визуальный
- * контракт, что и общий экран «Смена». Центральная сетка всегда получает
- * только оставшееся место и не создаёт прокрутку страницы.
+ * контракт, что и общий экран «Смена». Точки прокручиваются между
+ * настройками и основной кнопкой.
  */
+
+/* Some Android vendors replace the generic sans-serif including the Roboto
+   family alias. The installed face names keep point labels at Redmi's width. */
+@font-face {
+    font-family: "Excavator Roboto";
+    src: local("Roboto Regular"), local("Roboto-Regular");
+    font-weight: 400;
+}
+
+@font-face {
+    font-family: "Excavator Roboto";
+    src: local("Roboto Bold"), local("Roboto-Bold");
+    font-weight: 600 900;
+}
+
+body.excavator-operator-screen .eo-shell .eo-screen.mobile-work-screen.mobile-face[data-eo-screen="face"] {
+    font-family: "Excavator Roboto", Roboto, Arial, sans-serif;
+}
 
 .mobile-face,
 .mobile-face *,
@@ -12,9 +30,24 @@
     box-sizing: border-box;
 }
 
-.mobile-face {
+.mobile-work-screen.mobile-face {
     container-name: mobile-face;
-    --mobile-face-settings-pad: clamp(3px, .9vw, 6px);
+    --ms-screen-rows: minmax(min-content, .12fr) minmax(0, 1fr) auto;
+    --ms-screen-rows-landscape: minmax(min-content, .12fr) minmax(0, 1fr) auto;
+    --mobile-face-title-min: 38px;
+    --mobile-face-setting-h: 48px;
+    /* Middle track of «Простой» with its 12 standard reasons, allowing
+       for its 38px title and 48px action minimums on short screens. */
+    --mobile-face-tracks: calc(100cqh - 2 * var(--ms-gap));
+    --mobile-face-downtime-content: min(calc(var(--mobile-face-tracks) / 1.24),
+        calc((var(--mobile-face-tracks) - 48px) / 1.12), calc(var(--mobile-face-tracks) - 86px));
+    --mobile-face-option-h: max(44px, calc((var(--mobile-face-downtime-content) - var(--ms-standard-field-h)) / var(--mobile-face-reason-rows, 6) - var(--ms-gap)));
+}
+
+@media (orientation: portrait) and (max-height: 620px) {
+    .mobile-face {
+        --mobile-face-reason-rows: 4;
+    }
 }
 
 .mobile-face__titlebar,
@@ -29,9 +62,43 @@
 .mobile-face__content {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: calc(var(--ms-standard-field-h) + var(--ms-standard-field-h) + var(--ms-gap) + var(--mobile-face-settings-pad) + var(--mobile-face-settings-pad) + 2px) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     gap: var(--ms-gap);
     overflow: hidden;
+}
+
+.mobile-face .mobile-face__titlebar {
+    block-size: auto;
+    min-block-size: var(--mobile-face-title-min);
+    column-gap: clamp(3px, .8vw, 6px);
+}
+
+.mobile-face__titlebar > .mobile-shift__title,
+.mobile-face__titlebar > .mobile-shift__update-group {
+    flex: none;
+}
+
+.mobile-face__titlebar > .eo-offline-sync {
+    position: static !important;
+    transform: none;
+    min-inline-size: 0;
+    padding-inline: clamp(4px, 1.2vw, 8px);
+    gap: 4px;
+    font-family: inherit;
+    font-size: clamp(11px, 3vw, 12px);
+    letter-spacing: normal;
+    text-align: center;
+    white-space: normal;
+}
+
+.mobile-face__titlebar [data-eo-offline-sync-label] {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+}
+
+.mobile-face__titlebar > .eo-offline-sync::before,
+.mobile-face__titlebar .eo-offline-sync__count {
+    flex-shrink: 0;
 }
 
 .mobile-face__content.is-shift-inactive > .mobile-face__settings,
@@ -43,14 +110,9 @@
 .mobile-face__settings {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, var(--mobile-face-setting-h));
+    align-content: start;
     gap: var(--ms-gap);
-    padding: var(--mobile-face-settings-pad);
-    overflow: hidden;
-    border: 1px solid var(--mobile-shift-border);
-    border-radius: clamp(8px, 2.2vw, 11px);
-    background: var(--mobile-shift-panel);
-    box-shadow: inset 0 0 16px rgba(70, 196, 107, .04);
 }
 
 .mobile-face .mobile-face__setting--rock {
@@ -58,16 +120,10 @@
 }
 
 .mobile-face .mobile-face__setting.mobile-shift__field {
-    block-size: 100%;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    align-content: center;
-    align-items: stretch;
-    gap: clamp(3px, .8vw, 6px);
-}
-
-.mobile-face__setting .mobile-shift__field-label {
-    align-content: end;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    align-items: center;
+    gap: var(--ms-gap);
 }
 
 .mobile-face__setting .mobile-shift__metric-value {
@@ -102,16 +158,16 @@
 
 .mobile-face__setting .mobile-shift__metric-value select {
     appearance: none;
-    padding-inline: clamp(24px, 6vw, 34px);
-    text-align: center !important;
-    text-align-last: center;
+    padding-inline: 0 20px;
+    font-size: clamp(17px, 4.8vw, 21px) !important;
+    text-align-last: right;
     white-space: nowrap;
 }
 
 .mobile-face .mobile-face__setting--rock .mobile-shift__metric-value::after {
     content: "";
     position: absolute;
-    inset-inline-end: clamp(9px, 2.5vw, 14px);
+    inset-inline-end: 3px;
     top: 50%;
     inline-size: 7px;
     block-size: 7px;
@@ -124,11 +180,14 @@
 .mobile-face__destinations {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-rows: minmax(0, 1fr);
-    align-content: stretch;
+    grid-auto-rows: var(--mobile-face-option-h);
+    align-content: start;
     align-items: stretch;
     gap: var(--ms-gap);
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
 }
 
 .mobile-face .mobile-face__destination.eo-unload-card {
@@ -199,7 +258,6 @@
 
 .mobile-face__empty {
     grid-column: 1 / -1;
-    grid-row: 1 / -1;
     min-inline-size: 0;
     min-block-size: 0;
     block-size: 100%;
@@ -208,32 +266,50 @@
 
 .mobile-face__actions.mobile-shift__actions {
     grid-template-columns: minmax(0, 1fr);
+    block-size: var(--mobile-face-option-h);
 }
 
 .mobile-face__apply.mobile-shift__action {
     touch-action: manipulation;
 }
 
-html[data-mobile-shift-orientation="landscape"] body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"] {
-    grid-template-rows: var(--ms-screen-rows-landscape) !important;
+body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .eo-screen.mobile-face[data-eo-screen="face"] {
+    max-block-size: calc(var(--eo-visible-height) - env(safe-area-inset-top, 0px) - var(--mobile-shift-role-header-h)) !important;
+}
+
+/* Only scroll the settings with the list when even one choice won't fit. */
+@container mobile-face (max-height: 250px) and (max-width: 519px) {
+    .mobile-face__content {
+        grid-template-rows: auto auto;
+        align-content: start;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+    }
+
+    .mobile-face__destinations {
+        overflow: visible;
+    }
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
-    body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"] {
-        grid-template-rows: var(--ms-screen-rows-landscape) !important;
+    .mobile-work-screen.mobile-face {
+        --mobile-face-title-min: 30px;
+        --mobile-face-option-h: 44px;
     }
+}
 
+@media (orientation: landscape) and (max-height: 500px) and (min-width: 520px) {
     .mobile-face__content {
         grid-template-columns: minmax(0, .42fr) minmax(0, .58fr);
         grid-template-rows: minmax(0, 1fr);
     }
 
-    .mobile-face {
-        --mobile-face-settings-pad: 3px;
+    .mobile-face__settings {
+        overflow-y: auto;
     }
 
     .mobile-face__destinations {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 7.5rem), 1fr));
     }
 
     .mobile-face .mobile-face__setting.mobile-shift__field {
@@ -241,7 +317,7 @@ html[data-mobile-shift-orientation="landscape"] body.excavator-operator-screen .
     }
 
     .mobile-face .mobile-face__destination.eo-unload-card strong {
-        font-size: 11px !important;
+        font-size: 14px !important;
         white-space: normal !important;
     }
 }

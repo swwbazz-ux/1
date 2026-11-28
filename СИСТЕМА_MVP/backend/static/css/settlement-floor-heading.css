@@ -1,0 +1,140 @@
+.settlement-floor > .settlement-floor-heading {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: center;
+    justify-content: normal;
+    min-height: 44px;
+    gap: 8px clamp(12px, 1.3vw, 24px);
+    padding: 4px 12px;
+}
+
+.settlement-floor-heading h2 {
+    white-space: nowrap;
+}
+
+.settlement-floor-heading .settlement-floor-totals {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding-inline-start: 12px;
+    border-inline-start: 1px solid var(--admin-line);
+}
+
+.settlement-floor-totals article {
+    display: inline-flex;
+    gap: 4px;
+    align-items: baseline;
+    line-height: 1.2;
+}
+
+.settlement-floor > header .settlement-floor-totals span,
+.settlement-floor > .settlement-floor-heading .settlement-shift-legend span {
+    display: inline-flex;
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.settlement-floor-totals strong {
+    color: var(--admin-ink);
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+}
+
+.settlement-floor-totals small,
+.settlement-floor-legend-toggle {
+    display: none;
+}
+
+.settlement-floor-heading .settlement-shift-legend {
+    justify-content: flex-end;
+    gap: 6px 12px;
+}
+
+@media (max-width: 1380px) {
+    .settlement-floor > .settlement-floor-heading {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .settlement-floor-heading .settlement-floor-legend-toggle {
+        display: inline-flex;
+        gap: 7px;
+        align-items: center;
+        justify-content: center;
+        width: auto;
+        min-height: 36px;
+        padding: 4px 9px;
+        border: 1px solid var(--admin-line);
+        border-radius: 6px;
+        background: var(--admin-panel);
+        color: var(--admin-ink);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .settlement-floor-legend-toggle::after {
+        content: "";
+        border: 4px solid transparent;
+        border-bottom: 0;
+        border-top-color: currentColor;
+    }
+
+    .settlement-floor-legend-toggle[aria-expanded="true"]::after {
+        rotate: 180deg;
+    }
+
+    .settlement-floor-legend-toggle:focus-visible {
+        outline: 2px solid var(--settlement-accent);
+        outline-offset: 1px;
+    }
+
+    .settlement-floor-legend-toggle[aria-expanded="false"] + .settlement-shift-legend {
+        display: none;
+    }
+
+    .settlement-floor-heading .settlement-shift-legend {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+        padding-block: 5px;
+        border-top: 1px solid var(--admin-line-soft);
+    }
+}
+
+@media (max-width: 720px) {
+    .settlement-floor > .settlement-floor-heading {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 8px;
+        padding: 4px 8px 8px;
+    }
+
+    .settlement-floor-heading .settlement-floor-legend-toggle {
+        grid-column: 2;
+        grid-row: 1;
+        min-height: 44px;
+    }
+
+    .settlement-floor-heading .settlement-floor-totals {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0,1fr));
+        grid-column: 1 / -1;
+        gap: 2px;
+        padding: 0;
+        border: 0;
+    }
+
+    .settlement-floor-totals article {
+        display: grid;
+        gap: 2px;
+        align-content: start;
+    }
+
+    .settlement-floor > header .settlement-floor-totals span {
+        font-size: 11px;
+        overflow-wrap: anywhere;
+    }
+}

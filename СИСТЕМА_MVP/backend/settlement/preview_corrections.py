@@ -30,6 +30,10 @@ from .models import (
     SettlementPreviewRun,
     SettlementPreviewUnresolved,
 )
+from .personnel_categories import (
+    ROOM_CATEGORY_CONFLICT_MESSAGE,
+    employee_settlement_category,
+)
 from .residents import (
     build_settlement_resident_lock_plan,
     lock_settlement_residents_after_access,
@@ -448,7 +452,8 @@ def _create_correction(*, action, run_id, resident_id, reason, control_context,
             EmployeeBedOccupancy._base_manager.using(using)
             .select_for_update(of=('self',))
             .select_related(
-                'resident', 'physical_bed__room', 'source_application__preview_run',
+                'resident__employee__personnel_position', 'physical_bed__room',
+                'source_application__preview_run',
                 'source_preview_placement', 'source_preview_correction__source_placement',
                 'source_preview_correction__source_unresolved', 'cohort_member',
             )
@@ -506,7 +511,11 @@ def _create_correction(*, action, run_id, resident_id, reason, control_context,
                         'target_conflict',
                         'Койка уже используется другим решением плана.',
                     )
-            target_external = residents_by_id[resident_id].is_external
+            target_resident = residents_by_id[resident_id]
+            target_external = target_resident.is_external
+            target_category = employee_settlement_category(
+                target_resident.employee,
+            )
             bed_by_id = {row.pk: row for row in beds}
             for decision in current_plan.decisions:
                 if decision.resident_id == resident_id or not decision.physical_bed_id:
@@ -516,12 +525,25 @@ def _create_correction(*, action, run_id, resident_id, reason, control_context,
                 other_member = members_by_resident.get(decision.resident_id)
                 if (
                     other_bed and other_bed.room_id == validation_bed.room_id
-                    and other_resident and other_resident.is_external != target_external
+                    and other_resident
                     and other_member
                     and member.arrival_at < other_member.departure_at
                     and other_member.arrival_at < member.departure_at
                 ):
-                    raise _error('target_conflict', 'Внутренние и внешние жильцы не смешиваются.')
+                    if other_resident.is_external != target_external:
+                        raise _error(
+                            'target_conflict',
+                            'Внутренние и внешние жильцы не смешиваются.',
+                        )
+                    # Решение владельца 22.11.2026: рабочие и ИТР не в одной комнате.
+                    if not target_external and (
+                        employee_settlement_category(other_resident.employee)
+                        != target_category
+                    ):
+                        raise _error(
+                            'target_conflict',
+                            ROOM_CATEGORY_CONFLICT_MESSAGE,
+                        )
             for occupancy in occupancies:
                 overlaps = (
                     occupancy.starts_at < member.departure_at
@@ -542,9 +564,23 @@ def _create_correction(*, action, run_id, resident_id, reason, control_context,
                         raise _error('target_conflict', 'Целевое место конфликтует с фактическим проживанием.')
                 if (
                     occupancy.physical_bed.room_id == validation_bed.room_id
-                    and occupancy.resident.is_external != target_external
+                    and occupancy.resident_id != resident_id
+                    and occupancy.replaced_by_application_id is None
+                    and occupancy.replaced_by_occupancy_id is None
                 ):
-                    raise _error('target_conflict', 'Комната занята жильцами другого типа.')
+                    if occupancy.resident.is_external != target_external:
+                        raise _error(
+                            'target_conflict',
+                            'Комната занята жильцами другого типа.',
+                        )
+                    if not target_external and (
+                        employee_settlement_category(occupancy.resident.employee)
+                        != target_category
+                    ):
+                        raise _error(
+                            'target_conflict',
+                            ROOM_CATEGORY_CONFLICT_MESSAGE,
+                        )
             if action == SettlementPreviewCorrection.Action.MOVE:
                 target_slot = validation_slot
                 target_bed = validation_bed

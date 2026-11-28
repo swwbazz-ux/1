@@ -409,20 +409,16 @@
             setNode("[data-driver-context-horizon]", "Горизонт " + (item.loading_horizon || "—"));
             setNode("[data-driver-context-block]", "Блок " + (item.loading_block || "—"));
             setNode("[data-driver-context-rock]", item.rock_type || "—");
-            // Погружен под ковшом — круг принадлежит рейсу (точка разгрузки и её
-            // подпись рисует сервер/барабан точек), номер экскаватора и «ОЖИДАНИЕ
-            // ПРИЁМА» поверх него были бы неправдой (29.09.2026).
+            // После погрузки круг показывает точку разгрузки текущего рейса.
             if (state.status === "used" || shell.dataset.driverHasOpenTrip === "true") {
-                // Подпись этапа выбора («ОЖИДАНИЕ ПРИЁМА») сразу меняется на подпись
-                // рейса, не дожидаясь ответа сервера.
                 var tripNote = shell.querySelector(".driver-work-note");
-                if (tripNote && /ОЖИДАНИЕ ПРИЁМА|ПРИНЯТ МАШИНИСТОМ/.test(tripNote.textContent)) {
+                if (tripNote && tripNote.textContent === "ПОД СВОБОДНЫЙ КОВШ") {
                     tripNote.textContent = "ТОЧКА РАЗГРУЗКИ";
                 }
                 return;
             }
             setDialLabel(item.label);
-            setNode(".driver-work-note", state.status === "accepted" ? "ПРИНЯТ МАШИНИСТОМ" : "ОЖИДАНИЕ ПРИЁМА");
+            setNode(".driver-work-note", "ПОД СВОБОДНЫЙ КОВШ");
         }
 
         function renderState() {
@@ -458,9 +454,7 @@
             if (sync) {
                 sync.textContent = state.sync_mode === "local"
                     ? "Действие сохранено"
-                    : state.status === "accepted"
-                        ? "Принят машинистом"
-                        : state.status === "used" ? "Погружен" : "Ожидание приёма машинистом";
+                    : state.status === "used" ? "Погружен" : "Свободный ковш активен";
             }
             var remove = shell.querySelector("[data-driver-free-bucket-remove]");
             if (remove) remove.hidden = !active || state.status === "used";

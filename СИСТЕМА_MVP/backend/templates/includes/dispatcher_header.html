@@ -5,12 +5,16 @@
 
     <section class="dispatcher-command-main" aria-label="{% if dispatcher_main_label %}{{ dispatcher_main_label }}{% else %}Текущий раздел{% endif %}">
         <div class="dispatcher-command-context">
-            <strong>{% if dispatcher_header_screen %}{{ dispatcher_header_screen }}{% else %}Пульт смены{% endif %}</strong>
+            <strong>{% if deputy_dispatcher_viewer %}Диспетчерский пульт{% elif dispatcher_header_screen %}{{ dispatcher_header_screen }}{% else %}Пульт смены{% endif %}</strong>
             <span class="dispatcher-command-shift-name">{% if dispatcher_header_shift_label %}{{ dispatcher_header_shift_label }}{% elif dispatcher_header.shift_label %}{{ dispatcher_header.shift_label }}{% elif shift_label %}{{ shift_label }}{% else %}Первая смена{% endif %}</span>
             <span class="dispatcher-command-date">{% if dispatcher_header_shift_date %}{{ dispatcher_header_shift_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% elif current_date %}{{ current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
             <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% elif dispatcher_header.dispatcher_header_time_range %}{{ dispatcher_header.dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
         </div>
-        {% include "includes/dispatcher_nav.html" %}
+        {% if deputy_dispatcher_viewer %}
+            <span>Зам. начальника горного участка · Только просмотр</span>
+        {% else %}
+            {% include "includes/dispatcher_nav.html" %}
+        {% endif %}
         {% if dispatcher_nav_active == "control" and not mining_master_mobile_enabled %}
         {# Живой поиск техники: набранный номер подсвечивает машину везде, где она стоит на пульте. Только на пульте смены — на других экранах доски нет. #}
         <label class="dispatcher-equipment-search" data-dispatcher-equipment-search-box>
@@ -21,6 +25,11 @@
         {% endif %}
     </section>
 
+    {% if deputy_dispatcher_viewer %}
+    <nav class="dispatcher-command-actions deputy-board-navigation" aria-label="Навигация замначальника">
+        <a class="dispatcher-utility-link" href="{% url 'deputy_mining_manager_placement' %}">← Вернуться в расстановку</a>
+    </nav>
+    {% else %}
     <section class="dispatcher-command-actions" aria-label="{% if dispatcher_actions_label %}{{ dispatcher_actions_label }}{% else %}Действия смены{% endif %}">
         <span class="dispatcher-shift-slot">
             {% include "includes/dispatcher_shift_action.html" %}
@@ -63,6 +72,7 @@
         {% endif %}
     </section>
 
+    {% endif %}
     <section class="dispatcher-clock dispatcher-radial-clock" aria-label="{% if dispatcher_clock_label %}{{ dispatcher_clock_label }}{% else %}Текущее время{% endif %}">
         <svg class="dispatcher-radial-clock-ring" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
             <circle class="dispatcher-radial-clock-base" cx="60" cy="60" r="52"></circle>

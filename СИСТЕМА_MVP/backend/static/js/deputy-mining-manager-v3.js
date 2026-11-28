@@ -42,6 +42,8 @@
         state = {};
     }
 
+    var nameOrder = new Intl.Collator("ru", { sensitivity: "base" });
+
     function normalizeState(payload) {
         payload = payload && typeof payload === "object" ? payload : {};
         payload.plan = payload.plan || {};
@@ -51,10 +53,15 @@
         payload.temporary_transfer = payload.temporary_transfer || {};
         payload.categories = Array.isArray(payload.categories) ? payload.categories : [];
         payload.employees = Array.isArray(payload.employees) ? payload.employees : [];
+        payload.factual_candidates = Array.isArray(payload.factual_candidates) ? payload.factual_candidates : [];
         payload.employees.forEach(function (employee) {
             employee.eligible_positions = Array.isArray(employee.eligible_positions)
                 ? employee.eligible_positions
                 : ["primary"];
+        });
+        var otherWatchEmployees = Array.isArray(payload.other_watch_employees) ? payload.other_watch_employees : [];
+        payload.allWatchEmployees = payload.employees.concat(otherWatchEmployees).sort(function (left, right) {
+            return nameOrder.compare(employeeName(left), employeeName(right));
         });
         payload.rows = Array.isArray(payload.rows) ? payload.rows : [];
         payload.temporary_transfer.candidates = Array.isArray(payload.temporary_transfer.candidates)
@@ -95,6 +102,8 @@
     var candidateCount = document.querySelector("[data-candidate-count]");
     var candidateList = document.querySelector("[data-candidate-list]");
     var clearSlotButton = document.querySelector("[data-clear-slot]");
+    var factualCandidatesControl = document.querySelector("[data-factual-candidates-control]");
+    var factualCandidates = document.querySelector("[data-factual-candidates]");
     var photoDialog = document.querySelector("[data-photo-dialog]");
     var photoImage = document.querySelector("[data-photo-image]");
     var photoCaption = document.querySelector("[data-photo-caption]");
@@ -103,7 +112,14 @@
     var recordTitle = document.querySelector("[data-record-title]");
     var recordSubtitle = document.querySelector("[data-record-subtitle]");
     var recordVisual = document.querySelector("[data-record-visual]");
+    var recordAssignment = document.querySelector("[data-record-assignment]");
     var recordFields = document.querySelector("[data-record-fields]");
+    var recordActions = document.querySelector("[data-record-actions]");
+    var recordDutyForm = document.querySelector("[data-record-duty-form]");
+    var recordDutySubmit = recordDutyForm && recordDutyForm.querySelector("button[type=submit]");
+    var recordDutyPrompt = document.querySelector("[data-record-duty-prompt]");
+    var recordDutyRemoval = document.querySelector("[data-record-duty-removal]");
+    var recordDutyError = document.querySelector("[data-record-duty-error]");
     var publishDialog = document.querySelector("[data-publish-dialog]");
     var publishSummary = document.querySelector("[data-publish-summary]");
     var publishConfirm = document.querySelector("[data-publish-confirm]");
@@ -120,10 +136,18 @@
     var noticeMessage = notice && notice.querySelector("[data-notice-message]");
     var noticeAction = notice && notice.querySelector("[data-notice-action]");
     var noticeClose = notice && notice.querySelector("[data-notice-close]");
+    var categoryRequest = null;
+    var peopleSearch = null;
+    var pausedPanels = [];
     var currentFilter = "all";
-    var currentBrigade = "all";
+    var currentBrigade = state.brigades && state.brigades.length === 2 ? "watch" : "all";
     var currentSlot = null;
     var candidateEmployees = [];
+    var equipmentRowNodes = new Map();
+    var employeeCardNodes = new Map();
+    var rosterExpiryTimer;
+    var nextRosterExpiry = Infinity;
+    var boardBody = null;
     var activeEquipmentId = "";
     var dragSourceEquipmentId = "";
     var dragTargetEquipmentId = "";
@@ -131,6 +155,10 @@
     var toastTimer = null;
     var dragPayload = null;
     var dragPreview = null;
+    var dragPreviewFrame = null;
+    var dragPreviewPoint = null;
+    var dragPreviewWidth = 0;
+    var dragPreviewHeight = 0;
     var transparentDragImage = null;
     var noticeActionHandler = null;
 
@@ -179,7 +207,7 @@
         };
     }
 
-    function createPresenceBadge(employee) {
+    function createPresenceBadge(employee, showClients) {
         var presence = employeePresence(employee);
         var wrapper = createElement("span", "application-presence is-compact deputy-presence");
         wrapper.setAttribute("data-application-presence", presence.status);
@@ -194,7 +222,7 @@
         }
         wrapper.appendChild(line);
 
-        if (presence.clientBadges.length) {
+        if (showClients !== false && presence.clientBadges.length) {
             var clients = createElement(
                 "small",
                 "application-presence__clients admin-live-client-badges"
@@ -258,13 +286,30 @@
             return match.rank !== null;
         }).sort(function (left, right) {
             return left.rank - right.rank
-                || employeeName(left.employee).localeCompare(employeeName(right.employee), "ru", { sensitivity: "base" })
+                || nameOrder.compare(employeeName(left.employee), employeeName(right.employee))
                 || left.index - right.index;
         });
     }
 
+    function activeRosterExtensionUntil(employee) {
+        return Date.parse(employee.extension_expires_at) <= Date.now() ? "" : employee.extension_until;
+    }
+
+    function inDeputyRoster(employee) {
+        var brigades = state.brigades || [];
+        return brigades.length !== 2 || Boolean(activeRosterExtensionUntil(employee)) || brigades.includes(employee.brigade_code);
+    }
+
+    function appendExtensionBadge(container, extensionUntil) {
+        if (extensionUntil) {
+            container.appendChild(createElement("span", "deputy-extension-badge", "На продлении до " + extensionUntil));
+        }
+    }
+
     function employeeMatchesBrigade(employee) {
-        if (currentBrigade === "all") return true;
+        if (currentBrigade === "all") return Boolean(employee.brigade_code) || inDeputyRoster(employee);
+        if (!inDeputyRoster(employee)) return false;
+        if (currentBrigade === "watch") return true;
         return textValue(employee && employee.brigade_code) === currentBrigade;
     }
 
@@ -295,15 +340,56 @@
         var ranks = [equipmentSearchRank(row, query)];
         (row.slots || []).forEach(function (slot) {
             if (slot.employee) ranks.push(employeeSearchRank(slot.employee, query));
+            if (slot.reported_name) ranks.push(employeeSearchRank({full_name: slot.reported_name}, query));
             if (slot.secondary_employee) ranks.push(employeeSearchRank(slot.secondary_employee, query));
         });
         ranks = ranks.filter(function (rank) { return rank !== null; });
         return ranks.length ? Math.min.apply(Math, ranks) : null;
     }
 
+    function personMatchesSearch(employee, query) {
+        return employee && peopleSearch.matches(employeeName(employee), query);
+    }
+
+    function crewMatchesSearch(slot, query) {
+        return personMatchesSearch(slot.employee, query)
+            || personMatchesSearch(slot.secondary_employee, query)
+            || (slot.reported_name && peopleSearch.matches(slot.reported_name, query));
+    }
+
     function searchContext() {
         var query = currentQuery();
-        var brigadeEmployees = state.employees.filter(employeeMatchesBrigade);
+        var source = currentBrigade === "all" ? state.allWatchEmployees : state.employees;
+        var brigadeEmployees = source.filter(employeeMatchesBrigade);
+        var hit = peopleSearch && peopleSearch.target();
+        if (hit && hit.place.role === state.role.code) {
+            var free = state.allWatchEmployees.find(function (employee) {
+                return employee.id === hit.person.id && (inDeputyRoster(employee) || employee.brigade_code);
+            });
+            return {
+                query: query, brigadeEmployees: brigadeEmployees, employeeMode: !hit.place.equipment,
+                employeeMatches: free ? [{employee: free}] : [],
+                rowMatches: state.rows.filter(function (row) {
+                    return row.equipment.id === hit.place.equipment;
+                }).map(function (row) { return {row: row}; })
+            };
+        }
+        if (query && peopleSearch) {
+            var matchingFree = brigadeEmployees.filter(function (employee) {
+                return personMatchesSearch(employee, query);
+            });
+            var matchingRows = state.rows.filter(rowMatchesFilter).filter(function (row) {
+                return equipmentSearchRank(row, query) !== null || row.slots.some(function (slot) {
+                    return crewMatchesSearch(slot, query);
+                });
+            });
+            return {
+                query: query, brigadeEmployees: brigadeEmployees,
+                employeeMode: matchingFree.length > 0,
+                employeeMatches: matchingFree.map(function (employee) { return {employee: employee}; }),
+                rowMatches: matchingRows.map(function (row) { return {row: row}; })
+            };
+        }
         var employeeMatches = query ? rankedEmployeeMatches(brigadeEmployees, query) : [];
         var rowMatches = query ? state.rows.filter(rowMatchesFilter).map(function (row) {
             return { row: row, rank: rowSearchRank(row, query) };
@@ -366,52 +452,54 @@
         return textValue(row && row.equipment && row.equipment.id);
     }
 
-    function syncEquipmentRowStates() {
-        if (!board) return;
-        Array.prototype.slice.call(board.querySelectorAll(".deputy-equipment-row")).forEach(function (rowNode) {
-            var rowId = textValue(rowNode.getAttribute("data-equipment-id"));
-            var isActive = Boolean(activeEquipmentId) && rowId === activeEquipmentId;
-            var isDragSource = Boolean(dragSourceEquipmentId) && rowId === dragSourceEquipmentId;
-            var isDropTarget = Boolean(dragTargetEquipmentId) && rowId === dragTargetEquipmentId;
-            var interactionLabel = isDropTarget ? "Сюда" : (isDragSource ? "Отсюда" : (isActive ? "Выбрано" : ""));
-            var stateBadge = rowNode.querySelector(".deputy-equipment-state");
-            rowNode.classList.toggle("is-active-equipment", isActive);
-            rowNode.classList.toggle("is-drag-source", isDragSource);
-            rowNode.classList.toggle("is-drop-target", isDropTarget);
-            if (isActive) {
-                rowNode.setAttribute("aria-current", "true");
-            } else {
-                rowNode.removeAttribute("aria-current");
-            }
-            if (stateBadge) {
-                stateBadge.textContent = interactionLabel || "Выбрано";
-                stateBadge.classList.toggle("is-visible", Boolean(interactionLabel));
-            }
-        });
+    function syncEquipmentRowState(rowId) {
+        var entry = equipmentRowNodes.get(rowId);
+        if (!entry) return;
+        var rowNode = entry.node;
+        var isActive = rowId === activeEquipmentId;
+        var isDragSource = rowId === dragSourceEquipmentId;
+        var isDropTarget = rowId === dragTargetEquipmentId;
+        var interactionLabel = isDropTarget ? "Сюда" : (isDragSource ? "Отсюда" : (isActive ? "Выбрано" : ""));
+        var stateBadge = rowNode.querySelector(".deputy-equipment-state");
+        rowNode.classList.toggle("is-active-equipment", isActive);
+        rowNode.classList.toggle("is-drag-source", isDragSource);
+        rowNode.classList.toggle("is-drop-target", isDropTarget);
+        if (isActive) {
+            rowNode.setAttribute("aria-current", "true");
+        } else {
+            rowNode.removeAttribute("aria-current");
+        }
+        if (stateBadge) {
+            stateBadge.textContent = interactionLabel || "Выбрано";
+            stateBadge.classList.toggle("is-visible", Boolean(interactionLabel));
+        }
     }
 
     function setActiveEquipmentRow(row) {
-        activeEquipmentId = equipmentRowId(row);
-        syncEquipmentRowStates();
+        var nextId = equipmentRowId(row);
+        var previousId = activeEquipmentId;
+        if (previousId === nextId) return;
+        activeEquipmentId = nextId;
+        syncEquipmentRowState(previousId);
+        syncEquipmentRowState(nextId);
     }
 
     function clearActiveEquipmentRow() {
-        if (!activeEquipmentId) return;
-        activeEquipmentId = "";
-        syncEquipmentRowStates();
+        setActiveEquipmentRow(null);
     }
 
     function setDragTargetEquipmentRow(row) {
         var nextId = equipmentRowId(row);
-        if (dragTargetEquipmentId === nextId) return;
+        var previousId = dragTargetEquipmentId;
+        if (previousId === nextId) return;
         dragTargetEquipmentId = nextId;
-        syncEquipmentRowStates();
+        syncEquipmentRowState(previousId);
+        syncEquipmentRowState(nextId);
     }
 
     function clearDragTargetEquipmentRow(row) {
         if (row && dragTargetEquipmentId !== equipmentRowId(row)) return;
-        dragTargetEquipmentId = "";
-        syncEquipmentRowStates();
+        setDragTargetEquipmentRow(null);
     }
 
     function temporaryTransferData() {
@@ -634,49 +722,201 @@
         return avatar;
     }
 
-    function appendRecordField(label, value) {
+    function appendRecordField(label, value, modifier) {
         value = textValue(value).trim();
         if (!recordFields || !value) return;
-        var item = createElement("div", "deputy-record-field");
+        var item = createElement("div", "deputy-record-field" + (modifier ? " " + modifier : ""));
         item.appendChild(createElement("dt", "", label));
         item.appendChild(createElement("dd", "", value));
         recordFields.appendChild(item);
+        return item.lastElementChild;
     }
 
     function prepareRecordDialog(kicker, title, subtitle) {
         if (!recordDialog || !recordFields || !recordVisual) return false;
         closeDialog(candidateDialog);
         closeDialog(photoDialog);
+        recordDialog.classList.remove("is-specialization", "is-employee");
+        recordAssignment.hidden = true;
+        if (recordDutyForm) recordDutyForm.hidden = true;
         recordVisual.replaceChildren();
         recordFields.replaceChildren();
+        if (recordActions) {
+            recordActions.querySelectorAll("[data-review-action]").forEach(function (action) { action.remove(); });
+        }
         if (recordKicker) recordKicker.textContent = kicker;
         if (recordTitle) recordTitle.textContent = title;
         if (recordSubtitle) recordSubtitle.textContent = subtitle || "";
         return true;
     }
 
-    function openEmployeeRecord(employee, assignmentLabel) {
+    function updateRecordDutyFields() {
+        var fields = recordDutyForm.elements;
+        var status = fields.status.value;
+        fields.shift_type.required = status === "reserve";
+        fields.location.required = status === "other_work";
+        var shiftHint = fields.shift_type.required ? "обязательно" : "можно уточнить позже";
+        var locationHint = fields.location.required ? "обязательно" : "по желанию";
+        recordDutyForm.querySelector("[data-duty-shift-hint]").textContent = status ? shiftHint : "";
+        recordDutyForm.querySelector("[data-duty-location-hint]").textContent = status ? locationHint : "";
+        var prompt = "";
+        if (!status) prompt = "Выберите состояние для перевода.";
+        else if (fields.shift_type.required && !fields.shift_type.value) prompt = "Укажите смену для резерва.";
+        else if (fields.location.required && !fields.location.value.trim()) prompt = "Укажите, где и чем занят сотрудник.";
+        if (recordDutyPrompt.textContent !== prompt) recordDutyPrompt.textContent = prompt;
+        recordDutyPrompt.hidden = !prompt;
+        recordDutySubmit.disabled = Boolean(prompt) || saving || !planEditable();
+    }
+
+    function prepareRecordDuty(employeeId, shiftType) {
+        if (!recordDutyForm || !employeeId || !planEditable() || !state.endpoints.off_equipment_transfer) return;
+        recordDutyForm.reset();
+        recordDutyForm.dataset.employeeId = employeeId;
+        recordDutyForm.dataset.planId = state.plan.id;
+        recordDutyForm.dataset.planVersion = state.plan.version;
+        recordDutyForm.dataset.workDate = state.plan.work_date;
+        recordDutyForm.elements.shift_type.value = shiftType || "";
+        recordDutyRemoval.hidden = !shiftType;
+        recordDutyError.hidden = true;
+        recordDutyForm.hidden = false;
+        updateRecordDutyFields();
+    }
+
+    function openEmployeeRecord(employee, assignmentLabel, shiftType) {
         if (!employee || !prepareRecordDialog("Карточка сотрудника", employeeName(employee), employeeMeta(employee))) return;
+        recordDialog.classList.add("is-employee");
         recordVisual.appendChild(createAvatar(employee, false));
-        appendRecordField("Телефон", employee.phone || "Не указан");
-        appendRecordField("Бригада", employee.brigade_label || "Не указана");
+        recordAssignment.hidden = false;
+        var date = recordAssignment.querySelector("time");
+        date.dateTime = state.plan.work_date;
+        date.textContent = state.plan.work_date_label || state.plan.work_date;
+        recordAssignment.querySelector("[data-record-posting]").textContent = assignmentLabel || "Свободен";
+        recordAssignment.querySelector("[data-record-brigade]").textContent = employee.brigade_label || "Не указана";
         var rotation = textValue(employee.rotation_label).trim();
-        if (rotation && rotation.toLocaleLowerCase("ru") !== textValue(employee.brigade_label).toLocaleLowerCase("ru")) {
-            appendRecordField("График работы", rotation);
+        if (rotation.toLocaleLowerCase("ru") === textValue(employee.brigade_label).trim().toLocaleLowerCase("ru")) rotation = "";
+        appendRecordField("График работы", rotation || "Не указан");
+        var phone = appendRecordField("Телефон", employee.phone || "Не указан");
+        if (employee.phone && /\d/.test(employee.phone)) {
+            var link = createElement("a", "", employee.phone);
+            link.href = "tel:" + employee.phone.replace(/[^\d+]/g, "");
+            phone.replaceChildren(link);
         }
-        appendRecordField("Назначение", assignmentLabel || "Свободен");
-        appendRecordField("Статус", employee.status_label || "Активен");
+        appendRecordField("Кадровый статус", employee.status_label || "Активен");
         var presence = employeePresence(employee);
-        appendRecordField("Связь с приложением", presence.label);
+        var connection = appendRecordField("Связь с приложением", presence.label);
         if (presence.clientBadges.length) {
-            appendRecordField(
-                "Вариант приложения",
+            connection.appendChild(createElement("small", "deputy-record-clients",
                 presence.clientBadges.map(function (client) {
                     return (textValue(client.label) || "Приложение")
                         + (client.version ? " · " + textValue(client.version) : "");
                 }).join(", ")
-            );
+            ));
         }
+        if (employee.can_change_off_equipment && inDeputyRoster(employee)) prepareRecordDuty(employee.id, shiftType);
+        openDialog(recordDialog);
+    }
+
+    function addReviewAction(label, callback, primary) {
+        if (!recordActions) return;
+        var action = createElement("button", "admin-button " + (primary ? "admin-button-primary" : "admin-button-secondary"), label);
+        action.type = "button";
+        action.setAttribute("data-review-action", "");
+        action.addEventListener("click", function () {
+            if (!planEditable() || saving) return;
+            closeDialog(recordDialog);
+            callback();
+        });
+        recordActions.insertBefore(action, recordActions.lastElementChild);
+    }
+
+    function choicesForCrewPosition(employee, position) {
+        return (employee.specialization_choices || []).filter(function (choice) {
+            return choice.positions.indexOf(position) !== -1;
+        });
+    }
+
+    function openSpecializationChoice(employee, target, choices) {
+        var context = [target.row.equipment.label, target.slot.label].join(" · ");
+        if (!prepareRecordDialog("Специализация", employeeName(employee), context)) return;
+        recordDialog.classList.add("is-specialization");
+        recordVisual.appendChild(createAvatar(employee, false));
+        appendRecordField("Кадровая должность", employee.position_label);
+        appendRecordField("Производственная специализация", "Выбранная специализация сохранится в карточке сотрудника для следующих смен.", "is-summary");
+        choices.forEach(function (choice) {
+            addReviewAction("Сохранить «" + choice.name + "» и назначить", function () {
+                setActiveEquipmentRow(target.row);
+                saveSlot(target.row, target.slot, employee.id, null, target.position, false, choice.id);
+            }, choices.length === 1);
+        });
+        if (target.position === "primary") {
+            addReviewAction("Назначить на смену без сохранения специализации", function () {
+                setActiveEquipmentRow(target.row);
+                saveSlot(target.row, target.slot, employee.id, null, target.position, true);
+            });
+        }
+        openDialog(recordDialog);
+    }
+
+    function openSpecializationReview(row, slot) {
+        var review = slot.specialization_review || {};
+        var choices = choicesForCrewPosition(review, "primary");
+        var equipment = row.equipment || {};
+        var context = [equipment.type_label, equipment.label, slot.label].filter(Boolean).join(" · ");
+        if (!prepareRecordDialog("Специализация", slot.reported_name, context)) return;
+        recordDialog.classList.add("is-specialization");
+        recordVisual.appendChild(createAvatar({full_name: slot.reported_name}, false));
+
+        var required = review.required || state.role.label;
+        if (review.warning) {
+            var reason = review.current
+                ? "Действующая специализация не подходит для этого места."
+                : "В карточке сотрудника не сохранена производственная специализация.";
+            appendRecordField("Почему появилась пометка", reason + " Для этой техники требуется «" + required + "».", "is-summary is-warning");
+        } else {
+            appendRecordField("Результат проверки", review.issue || (review.employee_id
+                ? "Сотрудник подходит для этого места." : "Требуется сверка карточки сотрудника."), "is-summary");
+        }
+        appendRecordField("Штатная должность", review.position || "Не указана");
+        var savedSpecialization = review.base === undefined ? review.current : review.base;
+        appendRecordField("Специализация в карточке", savedSpecialization || "Не указана");
+        if (review.current && review.current !== savedSpecialization) {
+            appendRecordField("Действующая специализация", review.current);
+        }
+        if (review.suggested) appendRecordField("По умолчанию для должности", review.suggested);
+        if (!review.warning) appendRecordField("Требуется для техники", required);
+        if (review.warning) {
+            var help = choices.length
+                ? "Если это постоянная работа сотрудника, сохраните специализацию в его карточке. Для подмены можно оставить текущее назначение."
+                : "Если сотрудник действительно работает на этой машине, оставьте его в смене. Расстановку с этой пометкой можно сохранить и опубликовать. Чтобы убрать пометку, попросите ОУП проверить карточку и указать подходящую специализацию.";
+            appendRecordField("Что делать", help, "is-summary");
+        }
+        if (planEditable()) {
+            if (review.can_assign) {
+                addReviewAction("Назначить сотрудника", function () {
+                    saveSlot(row, slot, review.employee_id, null, "primary");
+                });
+            } else if (choices.length) {
+                choices.forEach(function (choice) {
+                    addReviewAction("Сохранить «" + choice.name + "» и назначить", function () {
+                        saveSlot(row, slot, review.employee_id, null, "primary", false, choice.id);
+                    }, choices.length === 1);
+                });
+            } else if (canRequestTemporaryTransfer() && temporaryTransferData().candidates.some(function (employee) {
+                return employee.id === review.employee_id;
+            })) {
+                addReviewAction("Запросить перевод", function () {
+                    openTemporaryTransferDialog();
+                    temporaryTransferEmployee.value = textValue(review.employee_id);
+                    if (temporaryTransferData().target_specializations.length === 1) {
+                        temporaryTransferSpecialization.value = textValue(temporaryTransferData().target_specializations[0].id);
+                    }
+                });
+            }
+            addReviewAction("Заменить сотрудника", function () {
+                openCandidatePicker(row, slot, "primary");
+            });
+        }
+        if (review.can_change_off_equipment) prepareRecordDuty(review.employee_id, slot.shift_type);
         openDialog(recordDialog);
     }
 
@@ -697,7 +937,8 @@
         appendRecordField("Серийный номер", equipment.serial_number || "Не указан");
         appendRecordField("Принадлежность", equipment.ownership_label || "Не указана");
         (row.slots || []).forEach(function (slot) {
-            appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : "Не назначен");
+            appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : (slot.reported_name ? slot.reported_name + (slot.specialization_review && slot.specialization_review.warning ? " · Специализация отличается" : "") : "Не назначен"));
+            if (state.role.supports_secondary === false) return;
             appendRecordField(
                 (slot.label || "Смена") + " · " + (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник"),
                 slot.secondary_employee ? employeeName(slot.secondary_employee) : "Не назначен"
@@ -706,10 +947,101 @@
         openDialog(recordDialog);
     }
 
+    function pauseCategoryControls() {
+        if (pausedPanels.length) return;
+        var toolbar = categoryNav.parentElement;
+        var panels = Array.from(root.children).concat(Array.from(toolbar.children));
+        pausedPanels = panels.filter(function (panel) {
+            return panel !== toolbar && panel !== categoryNav && panel !== searchInput?.parentElement && !panel.inert;
+        });
+        pausedPanels.forEach(function (panel) { panel.inert = true; });
+        root.setAttribute("aria-busy", "true");
+    }
+
+    function resumeCategoryControls() {
+        pausedPanels.forEach(function (panel) { panel.inert = false; });
+        pausedPanels = [];
+        root.removeAttribute("aria-busy");
+    }
+
+    async function switchCategory(url, fromHistory) {
+        if (categoryRequest) categoryRequest.abort();
+        var controller = new AbortController();
+        categoryRequest = controller;
+        var api = new URL(categoryNav.dataset.placementUrl, location.origin);
+        api.search = url.search;
+        pauseCategoryControls();
+        updateAutosave("saving", "Загружаю расстановку…");
+        try {
+            var response = await fetch(api, {credentials: "same-origin", cache: "no-store",
+                headers: {"Accept": "application/json"}, signal: controller.signal});
+            if (controller !== categoryRequest) return;
+            if (response.status === 403 || response.redirected) {
+                location.assign(url.href);
+                return;
+            }
+            if (!response.ok) throw Error();
+            var result = await response.json();
+            if (controller !== categoryRequest) return;
+            var payload = result.payload;
+            if (textValue(result.access_id) !== categoryNav.dataset.accessId ||
+                result.current_date !== categoryNav.dataset.currentDate ||
+                JSON.stringify(payload.brigades) !== JSON.stringify(state.brigades)) {
+                location.assign(url.href);
+                return;
+            }
+            clearActiveEquipmentRow();
+            currentSlot = null;
+            hideNotice();
+            applyPayload(payload, false);
+            if (!fromHistory && url.href !== location.href) history.pushState(null, "", url.href);
+            updateAutosave("saved", state.plan.updated_at_label ? "Сохранено · " + state.plan.updated_at_label : "Все изменения сохранены");
+            return true;
+        } catch (error) {
+            if (controller !== categoryRequest || controller.signal.aborted) return;
+            if (fromHistory) {
+                location.reload();
+                return;
+            }
+            updateAutosave("error", "Не удалось загрузить вкладку");
+            showNotice("Проверьте связь и попробуйте ещё раз.", {title: "Вкладка не открылась"});
+        } finally {
+            if (controller === categoryRequest) {
+                categoryRequest = null;
+                resumeCategoryControls();
+            }
+        }
+    }
+
+    if (categoryNav && categoryNav.dataset.placementUrl) {
+        categoryNav.addEventListener("click", function (event) {
+            var link = event.target.closest("a[href]");
+            if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey ||
+                event.shiftKey || event.altKey || link.target || !window.AbortController) return;
+            if (saving) {
+                event.preventDefault();
+                showToast("Дождитесь сохранения расстановки.");
+                return;
+            }
+            if (link.hasAttribute("data-off-equipment-link")) return;
+            event.preventDefault();
+            if (peopleSearch) peopleSearch.clear(true);
+            switchCategory(new URL(link.href), false);
+        });
+        window.addEventListener("popstate", function () {
+            if (saving || document.querySelector("dialog[open]") || !window.AbortController) {
+                location.reload();
+                return;
+            }
+            if (peopleSearch) peopleSearch.clear(true);
+            switchCategory(new URL(location.href), true);
+        });
+    }
+
     function renderCategories() {
         if (!categoryNav) return;
         categoryNav.replaceChildren();
-        categoryNav.hidden = state.categories.length === 0;
+        categoryNav.hidden = false;
         state.categories.forEach(function (category) {
             var link = createElement("a", "", "");
             link.href = category.url || "#";
@@ -731,6 +1063,20 @@
             }
             categoryNav.appendChild(link);
         });
+        if (categoryNav.dataset.offEquipmentUrl) {
+            var offEquipmentLink = createElement("a", "", "");
+            offEquipmentLink.href = categoryNav.dataset.offEquipmentUrl;
+            offEquipmentLink.setAttribute("data-off-equipment-link", "");
+            offEquipmentLink.appendChild(createElement("strong", "", "Без техники"));
+            categoryNav.appendChild(offEquipmentLink);
+        }
+        var current = categoryNav.querySelector('[aria-current="page"]');
+        if (current && categoryNav.scrollWidth > categoryNav.clientWidth) {
+            var navBox = categoryNav.getBoundingClientRect();
+            var currentBox = current.getBoundingClientRect();
+            if (currentBox.right > navBox.right) categoryNav.scrollLeft += currentBox.right - navBox.right;
+            else if (currentBox.left < navBox.left) categoryNav.scrollLeft += currentBox.left - navBox.left;
+        }
     }
 
     function renderSummary() {
@@ -743,13 +1089,19 @@
 
     function moveDragPreview(event) {
         if (!dragPreview || !event || typeof event.clientX !== "number" || typeof event.clientY !== "number") return;
+        dragPreviewPoint = { x: event.clientX, y: event.clientY };
+        if (dragPreviewFrame === null) {
+            dragPreviewFrame = window.requestAnimationFrame(paintDragPreview);
+        }
+    }
+
+    function paintDragPreview() {
+        dragPreviewFrame = null;
+        if (!dragPreview || !dragPreviewPoint) return;
         var padding = 8;
-        var width = dragPreview.offsetWidth || 280;
-        var height = dragPreview.offsetHeight || 56;
-        var left = Math.min(event.clientX - width / 2, window.innerWidth - width - padding);
-        var top = Math.min(event.clientY - height / 2, window.innerHeight - height - padding);
-        dragPreview.style.left = Math.max(padding, left) + "px";
-        dragPreview.style.top = Math.max(padding, top) + "px";
+        var left = Math.min(dragPreviewPoint.x - dragPreviewWidth / 2, window.innerWidth - dragPreviewWidth - padding);
+        var top = Math.min(dragPreviewPoint.y - dragPreviewHeight / 2, window.innerHeight - dragPreviewHeight - padding);
+        dragPreview.style.transform = "translate3d(" + Math.max(padding, left) + "px, " + Math.max(padding, top) + "px, 0)";
     }
 
     function clearDropHighlights() {
@@ -759,6 +1111,9 @@
     }
 
     function removeDragPreview() {
+        if (dragPreviewFrame !== null) window.cancelAnimationFrame(dragPreviewFrame);
+        dragPreviewFrame = null;
+        dragPreviewPoint = null;
         if (dragPreview) {
             dragPreview.remove();
             dragPreview = null;
@@ -786,13 +1141,15 @@
     }
 
     function finishDrag() {
+        if (!dragPayload && !dragPreview && !dragSourceEquipmentId && !dragTargetEquipmentId) return;
         Array.prototype.slice.call(root.querySelectorAll(".is-dragging")).forEach(function (node) {
             node.classList.remove("is-dragging");
         });
         clearDropHighlights();
+        var previousSourceId = dragSourceEquipmentId;
         dragSourceEquipmentId = "";
-        dragTargetEquipmentId = "";
-        syncEquipmentRowStates();
+        clearDragTargetEquipmentRow();
+        syncEquipmentRowState(previousSourceId);
         removeDragPreview();
         dragPayload = null;
     }
@@ -804,11 +1161,15 @@
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
         main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
-        main.appendChild(createPresenceBadge(employee));
+        main.appendChild(createPresenceBadge(employee, false));
         preview.appendChild(main);
         applyDragPreviewTheme(preview);
         document.body.appendChild(preview);
         dragPreview = preview;
+        dragPreviewWidth = preview.offsetWidth || 280;
+        dragPreviewHeight = preview.offsetHeight || 56;
+        preview.style.left = "0px";
+        preview.style.top = "0px";
         moveDragPreview(event);
 
         transparentDragImage = createElement("span", "deputy-transparent-drag-image");
@@ -816,14 +1177,16 @@
         return transparentDragImage;
     }
 
-    function bindDragSource(node, employee, visualNode) {
-        var canDrag = planEditable() && !employee.disabled && !employee.busy;
-        var visual = visualNode || node;
-        node.draggable = canDrag;
-        visual.classList.toggle("is-disabled", !canDrag && Boolean(employee.disabled || employee.busy));
-        if (!canDrag) return;
+    function bindDragSource(node, employee) {
+        var assigned = Boolean(sourceForEmployee(employee).source_equipment_id);
+        function canDrag() {
+            return planEditable() && (assigned || inDeputyRoster(employee)) && !employee.disabled && !employee.busy;
+        }
+        node.draggable = canDrag();
+        node.classList.toggle("is-disabled", !node.draggable && Boolean(employee.disabled || employee.busy));
+        if (!node.draggable) return;
         node.addEventListener("dragstart", function (event) {
-            if (!planEditable() || saving) {
+            if (!canDrag() || saving) {
                 if (event.preventDefault) event.preventDefault();
                 finishDrag();
                 return;
@@ -836,8 +1199,8 @@
                 sourcePosition: source.source_position
             };
             dragSourceEquipmentId = textValue(source.source_equipment_id);
-            syncEquipmentRowStates();
-            visual.classList.add("is-dragging");
+            syncEquipmentRowState(dragSourceEquipmentId);
+            node.classList.add("is-dragging");
             if (event.dataTransfer) {
                 event.dataTransfer.effectAllowed = "move";
                 event.dataTransfer.setData("application/json", JSON.stringify(dragPayload));
@@ -851,46 +1214,75 @@
 
     function createEmployeeCard(employee) {
         var card = createElement("article", "deputy-employee-card");
+        card.setAttribute("data-search-employee", employee.id);
         card.setAttribute("role", "listitem");
-        card.tabIndex = 0;
-        card.title = "Двойной клик — открыть карточку сотрудника";
+        var canAssign = inDeputyRoster(employee);
         card.appendChild(createAvatar(employee));
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
-        main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
+        var positionLabel = employeeMeta(employee) || "Сотрудник";
+        var position = createElement("small", "", positionLabel);
+        position.title = positionLabel;
+        main.appendChild(position);
+        appendExtensionBadge(main, activeRosterExtensionUntil(employee));
         card.appendChild(main);
-        card.appendChild(createPresenceBadge(employee));
+        if (!canAssign) {
+            main.appendChild(createElement("small", "", "Бригада " + employee.brigade_code + " · только просмотр"));
+            return card;
+        }
+        card.tabIndex = 0;
+        card.title = "Двойной клик — открыть карточку сотрудника";
+        main.appendChild(createPresenceBadge(employee, false));
         card.appendChild(createElement("span", "deputy-drag-mark", "⠿"));
         bindDragSource(card, employee);
         card.addEventListener("dblclick", function (event) {
             event.preventDefault();
-            openEmployeeRecord(employee, "Свободен");
+            openEmployeeRecord(employee);
         });
         card.addEventListener("keydown", function (event) {
             if (event.key !== "Enter") return;
             event.preventDefault();
-            openEmployeeRecord(employee, "Свободен");
+            openEmployeeRecord(employee);
         });
         return card;
     }
 
-    function renderEmployees() {
+    function reconcileChildren(container, nodes) {
+        var wanted = new Set(nodes);
+        Array.from(container.children).forEach(function (node) {
+            if (!wanted.has(node)) node.remove();
+        });
+        nodes.forEach(function (node, index) {
+            var current = container.children[index] || null;
+            if (current !== node) container.insertBefore(node, current);
+        });
+    }
+
+    function renderEmployees(reuseNodes, context) {
         if (!employeeList) return;
-        var context = searchContext();
+        context = context || searchContext();
         var visible = context.brigadeEmployees;
         if (context.query && context.employeeMode) {
             visible = context.employeeMatches.map(function (match) { return match.employee; });
         } else if (context.query && !context.rowMatches.length) {
             visible = [];
         }
-        employeeList.replaceChildren();
-        visible.forEach(function (employee) {
-            employeeList.appendChild(createEmployeeCard(employee));
+        var nextEmployeeNodes = new Map();
+        var cards = visible.map(function (employee) {
+            var id = textValue(employee.id);
+            var fingerprint = JSON.stringify([employee, activeRosterExtensionUntil(employee)]);
+            var previous = reuseNodes && employeeCardNodes.get(id);
+            var node = previous && previous.fingerprint === fingerprint ? previous.node : createEmployeeCard(employee);
+            nextEmployeeNodes.set(id, { node: node, fingerprint: fingerprint });
+            return node;
         });
+        employeeCardNodes = nextEmployeeNodes;
+        if (reuseNodes) reconcileChildren(employeeList, cards);
+        else employeeList.replaceChildren.apply(employeeList, cards);
         employeeList.hidden = visible.length === 0;
         if (availableCount) {
             availableCount.textContent = context.query && context.employeeMode
-                ? visible.length + " из " + context.brigadeEmployees.length
+                ? (peopleSearch && peopleSearch.target() ? textValue(visible.length) : visible.length + " из " + context.brigadeEmployees.length)
                 : (context.query && !context.rowMatches.length
                     ? "0 из " + context.brigadeEmployees.length
                     : textValue(context.brigadeEmployees.length));
@@ -898,9 +1290,30 @@
         if (employeeEmpty) {
             employeeEmpty.hidden = visible.length !== 0;
             employeeEmpty.textContent = context.query
-                ? "Поиск не дал результатов."
-                : (currentBrigade === "all" ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " свободных сотрудников нет.");
+                ? "Среди свободных сотрудников совпадений нет."
+                : ((currentBrigade === "all" || currentBrigade === "watch") ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " свободных сотрудников нет.");
         }
+    }
+
+    function scheduleRosterExpiry() {
+        window.clearTimeout(rosterExpiryTimer);
+        nextRosterExpiry = Infinity;
+        var now = Date.now();
+        state.employees.concat(state.factual_candidates).forEach(function (employee) {
+            var expiry = Date.parse(employee.extension_expires_at);
+            if (expiry > now && expiry < nextRosterExpiry) nextRosterExpiry = expiry;
+        });
+        if (Number.isFinite(nextRosterExpiry)) {
+            rosterExpiryTimer = window.setTimeout(refreshExpiredRoster, Math.min(nextRosterExpiry - now, 2147483647));
+        }
+    }
+
+    function refreshExpiredRoster() {
+        if (Date.now() >= nextRosterExpiry && Number.isFinite(nextRosterExpiry)) {
+            renderEmployees(true);
+            if (candidateDialog && candidateDialog.open) renderCandidatePicker();
+        }
+        scheduleRosterExpiry();
     }
 
     function rowHasConflict(row) {
@@ -947,6 +1360,7 @@
     function createEquipmentCell(row) {
         var equipment = row.equipment || {};
         var wrapper = createElement("div", "deputy-equipment-cell");
+        if (equipment.is_robot) wrapper.classList.add("is-robot");
         wrapper.tabIndex = 0;
         wrapper.setAttribute("role", "button");
         wrapper.setAttribute("aria-label", "Открыть карточку техники " + textValue(equipment.label));
@@ -958,7 +1372,7 @@
             icon.alt = "";
             iconWrap.appendChild(icon);
         }
-        wrapper.appendChild(iconWrap);
+        if (equipment.icon_url) wrapper.appendChild(iconWrap);
         var main = createElement("span", "deputy-equipment-main");
         main.appendChild(createElement("strong", "", equipment.label || "Техника"));
         if (equipment.model_label) main.appendChild(createElement("small", "", equipment.model_label));
@@ -988,14 +1402,34 @@
     function renderCandidatePicker() {
         if (!candidateList || !currentSlot) return;
         var query = normalizeSearch(candidateSearchInput && candidateSearchInput.value);
-        var candidates = rankedEmployeeMatches(candidateEmployees, query).map(function (match) {
+        var showFactual = currentSlot.position === "primary" && factualCandidates && factualCandidates.checked;
+        var candidatesWithChoices = state.factual_candidates.filter(function (employee) {
+            return choicesForCrewPosition(employee, currentSlot.position).length;
+        });
+        var candidatesForPosition = showFactual ? state.factual_candidates : candidateEmployees.concat(candidatesWithChoices);
+        function visibleInPicker(employee) {
+            if (employee.source_equipment_id) {
+                return currentBrigade === "all" || currentBrigade === "watch" || employee.brigade_code === currentBrigade;
+            }
+            return inDeputyRoster(employee) && employeeMatchesBrigade(employee);
+        }
+        var visibleEmployees = candidatesForPosition.filter(visibleInPicker);
+        var candidates = rankedEmployeeMatches(visibleEmployees, query).map(function (match) {
             return match.employee;
         });
+        if (query && !showFactual && currentSlot.position === "primary") {
+            var otherSpecializations = state.factual_candidates.filter(function (employee) {
+                return !choicesForCrewPosition(employee, currentSlot.position).length && visibleInPicker(employee);
+            });
+            candidates = candidates.concat(rankedEmployeeMatches(otherSpecializations, query).map(function (match) {
+                return Object.assign({}, match.employee, {disabled: true});
+            }));
+        }
         candidateList.replaceChildren();
         if (candidateCount) {
             candidateCount.textContent = query
-                ? "Найдено: " + candidates.length + " из " + candidateEmployees.length
-                : "Кандидатов: " + candidateEmployees.length;
+                ? "Найдено: " + candidates.length
+                : "Кандидатов: " + visibleEmployees.length;
         }
         if (candidateSearchClear) candidateSearchClear.hidden = !query;
         candidates.forEach(function (employee) {
@@ -1006,14 +1440,30 @@
             var main = createElement("span", "deputy-employee-main");
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
+            appendExtensionBadge(main, activeRosterExtensionUntil(employee));
+            var choices = choicesForCrewPosition(employee, currentSlot.position);
+            if (choices.length) {
+                main.appendChild(createElement("small", "", "Можно сохранить специализацию при назначении"));
+            } else if (employee.specialization_issue) {
+                main.appendChild(createElement("small", "", employee.specialization_issue));
+            }
             button.appendChild(main);
-            button.appendChild(createPresenceBadge(employee));
+            if (showFactual && !choices.length) {
+                main.appendChild(createElement("small", "", "Фактический состав с предупреждением"));
+            } else if (!choices.length) {
+                button.appendChild(createPresenceBadge(employee));
+            }
             button.addEventListener("click", function () {
+                if (button.disabled || !currentSlot) return;
                 var source = sourceForEmployee(employee);
                 var target = currentSlot;
+                if (choices.length) {
+                    openSpecializationChoice(employee, target, choices);
+                    return;
+                }
                 closeDialog(candidateDialog, { preserveEquipmentActive: true });
                 setActiveEquipmentRow(target.row);
-                saveSlot(target.row, target.slot, employee.id, source, target.position);
+                saveSlot(target.row, target.slot, employee.id, source, target.position, showFactual);
             });
             candidateList.appendChild(button);
         });
@@ -1022,7 +1472,7 @@
             if (query) {
                 emptyMessage = "По вашему запросу сотрудники не найдены.";
             } else {
-                emptyMessage = currentBrigade === "all"
+                emptyMessage = currentBrigade === "all" || currentBrigade === "watch"
                     ? "Свободных сотрудников нет."
                     : "В бригаде " + currentBrigade + " подходящих сотрудников нет.";
             }
@@ -1055,7 +1505,7 @@
         var employeeKey = position === "secondary" ? "secondary_employee" : "employee";
         var positionLabel = position === "secondary"
             ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
-            : (state.role.code === "driver" ? "Водитель" : "Машинист");
+            : (state.role.primary_label || (state.role.code === "driver" ? "Водитель" : "Машинист"));
         currentSlot = { row: row, slot: slot, position: position };
         setActiveEquipmentRow(row);
         if (candidateContext) {
@@ -1071,7 +1521,7 @@
         state.rows.forEach(function (candidateRow) {
             (candidateRow.slots || []).forEach(function (candidateSlot) {
                 [
-                    { key: "employee", position: "primary", label: state.role.code === "driver" ? "Водитель" : "Машинист" },
+                    { key: "employee", position: "primary", label: state.role.primary_label || (state.role.code === "driver" ? "Водитель" : "Машинист") },
                     { key: "secondary_employee", position: "secondary", label: candidateSlot.secondary_label || state.secondary_employee_label }
                 ].forEach(function (assignment) {
                     var assigned = candidateSlot[assignment.key];
@@ -1087,10 +1537,14 @@
                 });
             });
         });
-        candidateEmployees = Array.from(candidatesById.values()).filter(employeeMatchesBrigade);
+        candidateEmployees = Array.from(candidatesById.values());
+        if (factualCandidates) factualCandidates.checked = false;
+        if (factualCandidatesControl) {
+            factualCandidatesControl.hidden = position !== "primary" || !state.factual_candidates.some(employeeMatchesBrigade);
+        }
         if (candidateSearchInput) candidateSearchInput.value = "";
         renderCandidatePicker();
-        if (clearSlotButton) clearSlotButton.hidden = !slot[employeeKey];
+        if (clearSlotButton) clearSlotButton.hidden = !(slot[employeeKey] || (position === "primary" && slot.reported_name));
         openDialog(candidateDialog);
         var coarseMobilePointer = window.matchMedia
             && window.matchMedia("(max-width: 720px) and (pointer: coarse)").matches;
@@ -1131,54 +1585,95 @@
         return matched;
     }
 
+    function reportedOccupant(slot) {
+        var review = slot.specialization_review || {};
+        if (!slot.reported_name || !review.employee_id) return null;
+        return {id: review.employee_id, full_name: slot.reported_name, position: review.position,
+            reported: true, eligible_positions: ["primary"]};
+    }
+
     function createCrewPosition(row, slot, position) {
         var isSecondary = position === "secondary";
         var employeeKey = isSecondary ? "secondary_employee" : "employee";
         var employee = slot[employeeKey];
+        var reportedName = !employee && !isSecondary && slot.reported_name;
+        var review = slot.specialization_review || {};
+        var occupant = employee || (reportedName && (reportedOccupant(slot) || {full_name: reportedName, position: review.position}));
         var changed = isSecondary ? slot.secondary_changed : slot.changed;
         var conflict = isSecondary ? slot.secondary_conflict : slot.conflict;
         var issue = isSecondary ? slot.secondary_issue : slot.issue;
         var positionLabel = isSecondary
             ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
-            : (state.role.code === "driver" ? "Водитель" : "Машинист");
+            : (state.role.primary_label || (state.role.code === "driver" ? "Водитель" : "Машинист"));
         var button = createElement("div", "deputy-crew-position is-" + position);
+        if (occupant) {
+            button.setAttribute("data-search-employee", employee ? employee.id : review.employee_id);
+            button.setAttribute("data-search-equipment", row.equipment.id);
+            button.setAttribute("data-search-shift", slot.shift_type);
+            button.setAttribute("data-search-position", position);
+        }
         button.classList.toggle("is-disabled", !planEditable());
-        button.classList.toggle("has-employee", Boolean(employee));
+        button.classList.toggle("has-employee", Boolean(occupant));
         button.classList.toggle("has-conflict", Boolean(conflict));
         button.appendChild(createElement("span", "deputy-crew-position-label", positionLabel));
 
-        if (employee) {
-            button.title = "Двойной клик — открыть карточку сотрудника";
-            button.appendChild(createAvatar(employee));
+        if (occupant) {
+            button.appendChild(createAvatar(occupant));
             var person = createElement("button", "deputy-slot-person");
             person.type = "button";
-            person.setAttribute("aria-label", "Открыть карточку сотрудника: " + employeeName(employee));
+            person.setAttribute("aria-label", "Открыть карточку сотрудника: " + employeeName(occupant));
             var main = createElement("span", "deputy-employee-main");
-            main.appendChild(createElement("strong", "", employeeName(employee)));
-            main.appendChild(createElement("small", "", employeeMeta(employee) || positionLabel));
+            main.appendChild(createElement("strong", "", employeeName(occupant)));
+            main.appendChild(createElement("small", "", employeeMeta(occupant) || positionLabel));
+            appendExtensionBadge(main, occupant.extension_until);
             person.appendChild(main);
             var flags = createElement("span", "deputy-slot-flags");
-            flags.appendChild(createPresenceBadge(employee));
+            if (reportedName) {
+                var warning = !slot.specialization_review || review.warning;
+                var label = "Фактический состав";
+                if (warning) label = review.current === "" ? "Специализация не указана" : "Специализация отличается";
+                var badge = createElement("span", "deputy-specialization-review" + (warning ? "" : " is-resolved"));
+                badge.appendChild(createElement("span", "deputy-review-label", label));
+                badge.appendChild(createElement("span", "deputy-review-symbol", warning ? "!" : "Ф"));
+                flags.appendChild(badge);
+                person.classList.add("has-specialization-review");
+                person.title = label + " — открыть пояснение";
+                person.setAttribute("aria-label", label + ": " + reportedName);
+                person.setAttribute("data-role-readonly-safe", "");
+                person.addEventListener("click", function () { openSpecializationReview(row, slot); });
+            } else {
+                flags.appendChild(createPresenceBadge(employee));
+            }
             if (changed) flags.appendChild(createElement("span", "deputy-slot-flag", "ИЗМ"));
             if (conflict) flags.appendChild(createElement("span", "deputy-slot-flag is-conflict", "!"));
             person.appendChild(flags);
             button.appendChild(person);
-            bindDragSource(person, Object.assign({}, employee, {
-                source_equipment_id: row.equipment && row.equipment.id,
-                source_shift_type: slot.shift_type,
-                source_position: position
-            }), button);
-            person.title = "Двойной клик — открыть карточку сотрудника";
-            person.addEventListener("click", function (event) {
-                if (event.detail === 0) {
-                    openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
-                }
-            });
-            person.addEventListener("dblclick", function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
-            });
+            if (occupant.id) {
+                bindDragSource(button, Object.assign({}, occupant, {
+                    source_equipment_id: row.equipment && row.equipment.id,
+                    source_shift_type: slot.shift_type,
+                    source_position: position
+                }));
+            }
+            if (employee) {
+                var equipmentLabel = [row.equipment.type_label, row.equipment.label].filter(Boolean).join(" ");
+                var assignmentLabel = [equipmentLabel, slot.label, positionLabel].filter(Boolean).join(" · ");
+                button.title = person.title = "Двойной клик — открыть карточку сотрудника";
+                person.addEventListener("click", function (event) {
+                    if (event.detail === 0) {
+                        openEmployeeRecord(employee, assignmentLabel, slot.shift_type);
+                    }
+                });
+                person.addEventListener("dblclick", function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openEmployeeRecord(employee, assignmentLabel, slot.shift_type);
+                });
+                button.addEventListener("dblclick", function (event) {
+                    event.preventDefault();
+                    openEmployeeRecord(employee, assignmentLabel, slot.shift_type);
+                });
+            }
             if (planEditable()) {
                 var editButton = createElement("button", "deputy-slot-edit", "Сменить");
                 editButton.type = "button";
@@ -1190,10 +1685,6 @@
                 });
                 button.appendChild(editButton);
             }
-            button.addEventListener("dblclick", function (event) {
-                event.preventDefault();
-                openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
-            });
         } else {
             var emptyAction = createElement("button", "deputy-slot-empty", isSecondary ? "Добавить" : "Назначить");
             emptyAction.type = "button";
@@ -1208,12 +1699,13 @@
         button.addEventListener("dragover", function (event) {
             if (!planEditable() || saving) return;
             event.preventDefault();
-            button.classList.add("is-drag-over");
+            if (!button.classList.contains("is-drag-over")) button.classList.add("is-drag-over");
             setActiveEquipmentRow(row);
             setDragTargetEquipmentRow(row);
             if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
         });
-        button.addEventListener("dragleave", function () {
+        button.addEventListener("dragleave", function (event) {
+            if (event.relatedTarget && button.contains(event.relatedTarget)) return;
             button.classList.remove("is-drag-over");
             clearDragTargetEquipmentRow(row);
         });
@@ -1226,18 +1718,19 @@
                 finishDrag();
                 return;
             }
-            var employee = state.employees.concat(
-                state.rows.reduce(function (items, candidateRow) {
-                    (candidateRow.slots || []).forEach(function (candidateSlot) {
-                        if (candidateSlot.employee) items.push(candidateSlot.employee);
-                        if (candidateSlot.secondary_employee) items.push(candidateSlot.secondary_employee);
-                    });
-                    return items;
-                }, [])
-            ).find(function (candidate) {
+            var source = findSlot(payload.sourceEquipmentId, payload.sourceShiftType, payload.sourcePosition);
+            var assignedEmployee = source && (source.position === "primary"
+                ? source.slot.employee || reportedOccupant(source.slot) : source.slot.secondary_employee);
+            var fromCrew = assignedEmployee && textValue(assignedEmployee.id) === textValue(payload.employeeId);
+            var employee = fromCrew ? assignedEmployee : state.employees.find(function (candidate) {
                 return textValue(candidate.id) === textValue(payload.employeeId);
             });
-            if (employee && !employeeCanFillPosition(employee, position)) {
+            if (!employee || (!fromCrew && !inDeputyRoster(employee))) {
+                finishDrag();
+                return;
+            }
+            if (!employeeCanFillPosition(employee, position)) {
+                showNotice("Специализация сотрудника не подходит для этого места в экипаже.");
                 finishDrag();
                 return;
             }
@@ -1253,7 +1746,7 @@
             saveSlot(row, slot, payload.employeeId, {
                 source_equipment_id: payload.sourceEquipmentId,
                 source_shift_type: payload.sourceShiftType,
-                source_position: payload.sourcePosition
+                move_reported: Boolean(employee.reported)
             }, position);
         });
         return button;
@@ -1262,64 +1755,88 @@
     function createSlot(row, slot) {
         var wrapper = createElement("div", "deputy-slot");
         wrapper.appendChild(createCrewPosition(row, slot, "primary"));
-        wrapper.appendChild(createCrewPosition(row, slot, "secondary"));
+        if (state.role.supports_secondary !== false) wrapper.appendChild(createCrewPosition(row, slot, "secondary"));
         return wrapper;
     }
 
-    function renderBoard() {
+    function renderBoard(reuseNodes, context) {
         if (!board) return;
-        var context = searchContext();
+        context = context || searchContext();
         var rows = state.rows.filter(rowMatchesFilter);
-        if (context.query && !context.employeeMode) {
-            rows = rows.filter(function (row) { return rowSearchRank(row, context.query) !== null; });
+        if (context.query && (!context.employeeMode || (peopleSearch && !peopleSearch.target()))) {
+            rows = context.rowMatches.map(function (match) { return match.row; });
         }
-        board.replaceChildren();
         if (!rows.length) {
+            board.replaceChildren();
+            boardBody = null;
+            equipmentRowNodes = new Map();
             if (boardEmpty) boardEmpty.hidden = false;
             return;
         }
         if (boardEmpty) boardEmpty.hidden = true;
 
-        var table = createElement("table", "deputy-assignment-table");
-        var thead = document.createElement("thead");
-        var headRow = document.createElement("tr");
-        headRow.appendChild(createElement("th", "", "Техника"));
-        var firstSlots = rows[0].slots || [];
-        headRow.appendChild(createElement("th", "", firstSlots[0] && firstSlots[0].label || "Смена 1"));
-        headRow.appendChild(createElement("th", "", firstSlots[1] && firstSlots[1].label || "Смена 2"));
-        thead.appendChild(headRow);
-        table.appendChild(thead);
+        var retainTable = reuseNodes && boardBody;
+        if (!retainTable) {
+            var table = createElement("table", "deputy-assignment-table");
+            var thead = document.createElement("thead");
+            var headRow = document.createElement("tr");
+            headRow.appendChild(createElement("th", "", "Техника"));
+            var firstSlots = rows[0].slots || [];
+            headRow.appendChild(createElement("th", "", firstSlots[0] && firstSlots[0].label || "Смена 1"));
+            headRow.appendChild(createElement("th", "", firstSlots[1] && firstSlots[1].label || "Смена 2"));
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+            boardBody = document.createElement("tbody");
+            table.appendChild(boardBody);
+            board.replaceChildren(table);
+        }
 
-        var tbody = document.createElement("tbody");
-        rows.forEach(function (row) {
-            var tr = document.createElement("tr");
-            tr.classList.add("deputy-equipment-row");
-            tr.setAttribute("data-equipment-id", equipmentRowId(row));
-            tr.classList.toggle("has-attention", Boolean(row.attention || row.issue));
-            tr.classList.toggle("has-conflict", rowHasConflict(row));
-            tr.addEventListener("pointerdown", function () { setActiveEquipmentRow(row); });
-            tr.addEventListener("focusin", function () { setActiveEquipmentRow(row); });
-            var equipmentCell = document.createElement("td");
-            equipmentCell.appendChild(createEquipmentCell(row));
-            tr.appendChild(equipmentCell);
-            [0, 1].forEach(function (index) {
-                var slot = (row.slots || [])[index] || {
-                    shift_type: index === 0 ? "day" : "night",
-                    label: index === 0 ? "Смена 1" : "Смена 2",
-                    employee: null
-                };
-                var cell = document.createElement("td");
-                cell.appendChild(createSlot(row, slot));
-                tr.appendChild(cell);
-            });
-            tbody.appendChild(tr);
+        var nextRowNodes = new Map();
+        var rebuiltIds = [];
+        var rowNodes = rows.map(function (row) {
+            var id = equipmentRowId(row);
+            var fingerprint = JSON.stringify(row);
+            var previous = retainTable && equipmentRowNodes.get(id);
+            var entry = previous;
+            if (!previous || previous.fingerprint !== fingerprint) {
+                entry = { node: createEquipmentRow(row), fingerprint: fingerprint };
+                rebuiltIds.push(id);
+            }
+            nextRowNodes.set(id, entry);
+            return entry.node;
         });
-        table.appendChild(tbody);
-        board.appendChild(table);
-        syncEquipmentRowStates();
+        equipmentRowNodes = nextRowNodes;
+        if (retainTable) reconcileChildren(boardBody, rowNodes);
+        else boardBody.replaceChildren.apply(boardBody, rowNodes);
+        rebuiltIds.forEach(syncEquipmentRowState);
+    }
+
+    function createEquipmentRow(row) {
+        var tr = document.createElement("tr");
+        tr.classList.add("deputy-equipment-row");
+        tr.setAttribute("data-equipment-id", equipmentRowId(row));
+        tr.classList.toggle("has-attention", Boolean(row.attention || row.issue));
+        tr.classList.toggle("has-conflict", rowHasConflict(row));
+        tr.addEventListener("pointerdown", function () { setActiveEquipmentRow(row); });
+        tr.addEventListener("focusin", function () { setActiveEquipmentRow(row); });
+        var equipmentCell = document.createElement("td");
+        equipmentCell.appendChild(createEquipmentCell(row));
+        tr.appendChild(equipmentCell);
+        [0, 1].forEach(function (index) {
+            var slot = (row.slots || [])[index] || {
+                shift_type: index === 0 ? "day" : "night",
+                label: index === 0 ? "Смена 1" : "Смена 2",
+                employee: null
+            };
+            var cell = document.createElement("td");
+            cell.appendChild(createSlot(row, slot));
+            tr.appendChild(cell);
+        });
+        return tr;
     }
 
     function updatePublishButton() {
+        if (recordDialog && recordDialog.open && recordDutyForm && !recordDutyForm.hidden) updateRecordDutyFields();
         if (exportButton) {
             var canExport = Boolean(state.plan.id && state.endpoints.export && !saving);
             exportButton.href = canExport ? state.endpoints.export : "#";
@@ -1350,11 +1867,14 @@
         }
     }
 
-    function renderAll() {
+    function renderAll(reuseNodes) {
         renderCategories();
         renderSummary();
-        renderEmployees();
-        renderBoard();
+        var context = searchContext();
+        renderEmployees(reuseNodes, context);
+        scheduleRosterExpiry();
+        renderBoard(reuseNodes, context);
+        markSearchBadge();
         updatePublishButton();
         updateTemporaryTransferButton();
     }
@@ -1396,12 +1916,17 @@
         return result.payload;
     }
 
-    function applyPayload(payload) {
-        state = normalizeState(payload);
-        renderAll();
+    function applyPayload(payload, reuseNodes) {
+        var nextState = normalizeState(payload);
+        var sameBoard = state.plan.id === nextState.plan.id
+            && state.plan.editable === nextState.plan.editable
+            && state.role.code === nextState.role.code;
+        if (peopleSearch && !categoryRequest && currentQuery()) peopleSearch.clear(true);
+        state = nextState;
+        renderAll(reuseNodes && sameBoard);
     }
 
-    async function saveSlot(row, slot, employeeId, source, position) {
+    async function saveSlot(row, slot, employeeId, source, position, allowFactual, specializationId) {
         if (
             saving
             || !mutationAllowed()
@@ -1419,18 +1944,22 @@
             employee_id: employeeId === null ? null : employeeId,
             position: position === "secondary" ? "secondary" : "primary"
         };
+        if (allowFactual) body.factual = true;
+        if (specializationId) body.specialization_id = specializationId;
+        if (source && source.move_reported) body.move_reported = true;
         if (source && source.source_equipment_id) body.source_equipment_id = source.source_equipment_id;
         if (source && source.source_shift_type) body.source_shift_type = source.source_shift_type;
         try {
             var payload = await postJson(state.endpoints.slot, body);
-            applyPayload(payload);
+            applyPayload(payload, true);
             hideNotice();
             var savedLabel = state.plan.updated_at_label ? "Сохранено · " + state.plan.updated_at_label : "Все изменения сохранены";
             updateAutosave("saved", savedLabel);
+            if (specializationId) showToast("Специализация сохранена. Сотрудник назначен.", false);
         } catch (error) {
             if (error.payload) applyPayload(error.payload);
             updateAutosave("error", "Не сохранено");
-            var shouldReload = ["stale_version", "stale_baseline", "plan_work_date_closed"].indexOf(error.code) !== -1;
+            var shouldReload = ["stale_version", "stale_baseline", "plan_work_date_closed", "specialization_choice_changed"].indexOf(error.code) !== -1;
             var title = error.code === "plan_work_date_closed"
                 ? "Производственные сутки завершены"
                 : (shouldReload ? "Данные изменились" : "Назначение не изменено");
@@ -1439,6 +1968,40 @@
                 actionLabel: shouldReload ? "Обновить данные" : "",
                 action: shouldReload ? function () { window.location.reload(); } : null
             });
+        } finally {
+            saving = false;
+            updatePublishButton();
+        }
+    }
+
+    async function submitRecordDuty(event) {
+        event.preventDefault();
+        if (saving || !planEditable() || recordDutyForm.hidden || recordDutySubmit.disabled) return;
+        var fields = new FormData(recordDutyForm);
+        var selection = recordDutyForm.dataset;
+        saving = true;
+        recordDutySubmit.disabled = true;
+        recordDutyError.hidden = true;
+        updateAutosave("saving", "Публикую статус…");
+        updatePublishButton();
+        try {
+            var payload = await postJson(state.endpoints.off_equipment_transfer, {
+                plan_id: Number(selection.planId),
+                expected_plan_version: Number(selection.planVersion),
+                work_date: selection.workDate,
+                employee_id: Number(selection.employeeId),
+                status: fields.get("status"),
+                shift_type: fields.get("shift_type"),
+                location: fields.get("location")
+            });
+            closeDialog(recordDialog);
+            applyPayload(payload, true);
+            updateAutosave("saved", "Статус опубликован");
+            showToast("Сотрудник переведён во вкладку «Без техники».", false);
+        } catch (error) {
+            recordDutyError.textContent = error.message;
+            recordDutyError.hidden = false;
+            updateAutosave("error", "Статус не опубликован");
         } finally {
             saving = false;
             updatePublishButton();
@@ -1539,6 +2102,11 @@
     filterButtons.forEach(function (button) {
         button.addEventListener("click", function () {
             currentFilter = button.getAttribute("data-row-filter") || "all";
+            if (peopleSearch && currentQuery()) {
+                peopleSearch.clear(true);
+                renderSearch();
+                return;
+            }
             filterButtons.forEach(function (item) {
                 var active = item === button;
                 item.classList.toggle("is-active", active);
@@ -1551,6 +2119,11 @@
     brigadeButtons.forEach(function (button) {
         button.addEventListener("click", function () {
             currentBrigade = button.getAttribute("data-brigade-filter") || "all";
+            if (peopleSearch && currentQuery()) {
+                peopleSearch.clear(true);
+                renderBoard(true);
+                markSearchBadge();
+            }
             brigadeButtons.forEach(function (item) {
                 var active = item === button;
                 item.classList.toggle("is-active", active);
@@ -1561,12 +2134,110 @@
         });
     });
 
-    if (searchInput) {
-        searchInput.addEventListener("input", function () {
-            renderEmployees();
-            renderBoard();
+    function markSearchBadge() {
+        if (!peopleSearch) return;
+        board.removeAttribute("data-found-shift");
+        root.querySelectorAll(".is-person-search-hit").forEach(function (node) {
+            node.classList.remove("is-person-search-hit");
         });
+        var markedNames = new Set();
+        root.querySelectorAll(".deputy-planning-workspace mark.employee-search-highlight").forEach(function (mark) {
+            markedNames.add(mark.parentNode);
+        });
+        markedNames.forEach(function (name) { name.textContent = name.textContent; });
+        var hit = peopleSearch.target();
+        var rowFilter = currentFilter;
+        var brigadeFilter = currentBrigade;
+        if (hit && hit.place.role === state.role.code) {
+            var row = state.rows.find(function (item) { return item.equipment.id === hit.place.equipment; });
+            var free = !hit.place.equipment && state.allWatchEmployees.find(function (item) { return item.id === hit.person.id; });
+            if (row && !rowMatchesFilter(row)) rowFilter = "all";
+            if (free && !employeeMatchesBrigade(free)) brigadeFilter = "all";
+        }
+        function reflectFilter(buttons, attribute, selected) {
+            buttons.forEach(function (button) {
+                var active = button.getAttribute(attribute) === selected;
+                button.classList.toggle("is-active", active);
+                button.setAttribute("aria-pressed", String(active));
+            });
+        }
+        reflectFilter(filterButtons, "data-row-filter", rowFilter);
+        reflectFilter(brigadeButtons, "data-brigade-filter", brigadeFilter);
+        if (!hit || hit.place.role !== state.role.code) {
+            var query = currentQuery();
+            if (query) root.querySelectorAll(".deputy-planning-workspace [data-search-employee] .deputy-employee-main strong")
+                .forEach(function (name) { peopleSearch.highlight(name, query); });
+            return;
+        }
+        var selector = '[data-search-employee="' + hit.person.id + '"]';
+        if (hit.place.equipment) {
+            selector += '[data-search-equipment="' + hit.place.equipment + '"][data-search-shift="' +
+                hit.place.shift + '"][data-search-position="' + hit.place.position + '"]';
+        } else selector += ".deputy-employee-card";
+        var badge = root.querySelector(selector);
+        if (badge) {
+            badge.classList.add("is-person-search-hit");
+            var name = badge.querySelector(".deputy-employee-main strong");
+            if (name) peopleSearch.highlight(name, currentQuery());
+            if (hit.place.equipment) board.setAttribute("data-found-shift", hit.place.shift);
+        }
+        return badge;
     }
+
+    function renderSearch() {
+        var context = searchContext();
+        renderEmployees(true, context);
+        renderBoard(true, context);
+        markSearchBadge();
+    }
+
+    async function loadSearchPeople() {
+        // A report opened by revision must show only employees of that snapshot.
+        if (new URL(location.href).searchParams.has("plan")) {
+            var people = new Map();
+            state.rows.forEach(function (row) {
+                row.slots.forEach(function (slot) {
+                    var primary = slot.employee || (slot.reported_name && {
+                        id: slot.specialization_review.employee_id, full_name: slot.reported_name
+                    });
+                    [primary, slot.secondary_employee].forEach(function (employee, index) {
+                        if (!employee) return;
+                        if (!people.has(employee.id)) people.set(employee.id, Object.assign({}, employee, {places: []}));
+                        people.get(employee.id).places.push({role: state.role.code, equipment: row.equipment.id,
+                            number: row.equipment.label, shift: slot.shift_type, position: index ? "secondary" : "primary"});
+                    });
+                });
+            });
+            return Array.from(people.values());
+        }
+        var response = await fetch(searchInput.dataset.peopleUrl, {credentials: "same-origin", cache: "no-store"});
+        if (!response.ok) throw Error();
+        var result = await response.json();
+        if (textValue(result.access_id) !== categoryNav.dataset.accessId) throw Error();
+        return result.people;
+    }
+
+    if (searchInput && window.deputyPeopleSearch && searchInput.dataset.peopleUrl) {
+        function categoryFor(code) { return state.categories.find(function (item) { return item.code === code; }); }
+        peopleSearch = window.deputyPeopleSearch({
+            root: shell || root,
+            input: searchInput, query: currentQuery, normalize: normalizeSearch, role: function () { return state.role.code; },
+            quickSearchBlocked: function () { return saving || Boolean(categoryRequest || dragPayload); },
+            load: loadSearchPeople, render: renderSearch, findBadge: markSearchBadge, busy: function () { return saving; },
+            isSnapshot: function () { return new URL(location.href).searchParams.has("plan"); },
+            categoryLabel: function (code) { return categoryFor(code)?.label || code; },
+            categoryUrl: function (code) { return categoryFor(code)?.url || location.href; },
+            navigate: function (code) { return switchCategory(new URL(categoryFor(code).url, location.origin), false); },
+            cancelNavigation: function () { if (categoryRequest) categoryRequest.abort(); },
+            hasLocalMatches: function () {
+                var context = searchContext();
+                return context.rowMatches.length || context.employeeMatches.length;
+            }
+        });
+    } else if (searchInput) {
+        searchInput.addEventListener("input", renderSearch);
+    }
+    if (factualCandidates) factualCandidates.addEventListener("change", renderCandidatePicker);
     if (candidateSearchInput) {
         candidateSearchInput.addEventListener("input", renderCandidatePicker);
         candidateSearchInput.addEventListener("keydown", function (event) {
@@ -1597,9 +2268,8 @@
                 || !payload.sourceShiftType
             ) return;
             event.preventDefault();
-            employeePool.classList.add("is-drag-over");
+            if (!employeePool.classList.contains("is-drag-over")) employeePool.classList.add("is-drag-over");
             if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-            moveDragPreview(event);
         });
         employeePool.addEventListener("dragleave", function (event) {
             if (!event.relatedTarget || !employeePool.contains(event.relatedTarget)) {
@@ -1634,6 +2304,13 @@
     Array.prototype.slice.call(document.querySelectorAll("[data-record-close]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(recordDialog); });
     });
+    if (recordDutyForm) {
+        recordDutyForm.addEventListener("input", function () {
+            recordDutyError.hidden = true;
+            updateRecordDutyFields();
+        });
+        recordDutyForm.addEventListener("submit", submitRecordDuty);
+    }
     Array.prototype.slice.call(document.querySelectorAll("[data-publish-cancel]")).forEach(function (button) {
         button.addEventListener("click", function () { closeDialog(publishDialog); });
     });
@@ -1729,8 +2406,12 @@
     document.addEventListener("dragover", moveDragPreview);
     document.addEventListener("drop", finishDrag);
 
+    var lastMutationAllowed = mutationAllowed();
     function handleMutationAvailabilityChange() {
-        if (!mutationAllowed()) {
+        var allowed = mutationAllowed();
+        if (allowed === lastMutationAllowed) return;
+        lastMutationAllowed = allowed;
+        if (!allowed) {
             finishDrag();
             currentSlot = null;
             closeDialog(candidateDialog);
@@ -1752,6 +2433,10 @@
         "active-role-state-changed",
         handleMutationAvailabilityChange
     );
+
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden && Date.now() >= nextRosterExpiry) refreshExpiredRoster();
+    });
 
     var initialSavedLabel = state.plan.updated_at_label
         ? "Сохранено · " + state.plan.updated_at_label

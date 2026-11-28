@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Загрузить расстановку из Excel{% endblock %}
+{% block body_class %}deputy-mining-manager-screen deputy-reports-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/deputy_mining_manager_pwa_head.html" %}
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261125-employee-choice">
+<script src="{% static 'js/deputy-crew-excel-import-v1.js' %}?v=20261125-employee-choice" defer></script>
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell deputy-shell admin-day" data-admin-theme>
+    {% include "includes/deputy_mining_manager_header.html" with active_section="placement" screen_title="Импорт" %}
+
+    <main class="admin-console-page deputy-reports-page deputy-import-page">
+        <section class="deputy-publications-card" aria-labelledby="crew-import-title">
+            <header>
+                <div>
+                    <h2 id="crew-import-title">Загрузить расстановку</h2>
+                    <p>Техника на {{ work_date|date:"d.m.Y" }}</p>
+                </div>
+            </header>
+            <div class="deputy-publications-list">
+                <form method="post" enctype="multipart/form-data" data-crew-import-form>
+                    {% csrf_token %}
+                    <input type="hidden" name="work_date" value="{{ work_date|date:'Y-m-d' }}">
+                    <p>Данные берутся с «Лист1». Пустые ячейки сохраняют назначения. Чтобы снять экипаж, впиши «Снять».</p>
+                    <p>
+                        <label for="deputy-crew-workbook">Файл .xlsx до 2 МБ</label>
+                        <input type="file" id="deputy-crew-workbook" name="workbook"
+                               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+                    </p>
+                    <label><input type="checkbox" name="factual" value="1"{% if factual %} checked{% endif %}> Сохранить фактический состав при расхождении специализации на основном месте</label>
+                    <div data-crew-import-result>
+                        {% if draft_confirmation %}
+                            <div class="message info" role="status" data-crew-import-message>
+                                <strong>В черновике есть ручные правки</strong>
+                                {% if draft_changed %}
+                                    <p>Черновик или файл изменились. Подтверди замену заново.</p>
+                                {% endif %}
+                                <ul>
+                                    {% for category, count in draft_categories %}
+                                        <li>{{ category }} · Изменено сменных ячеек: {{ count }}</li>
+                                    {% endfor %}
+                                </ul>
+                                <p>Подтверждение уберёт ручные правки в этих категориях и применит Excel.
+                                   Для пустых ячеек будут использованы действующие назначения.</p>
+                            </div>
+                            <input type="hidden" name="draft_confirmation" value="{{ draft_confirmation }}">
+                        {% endif %}
+                        {% if retained_employee_selections %}
+                            <div data-crew-import-message hidden>
+                                {% for field, employee_id in retained_employee_selections.items %}
+                                    <input type="hidden" name="{{ field }}" value="{{ employee_id }}">
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        {% if employee_choices %}
+                            <div class="message info deputy-import-choices" data-crew-import-message>
+                                <strong>Уточни сотрудников перед публикацией</strong>
+                                {% for choice in employee_choices %}
+                                    <div class="deputy-import-choice">
+                                        <label for="{{ choice.field }}">
+                                            <b>{{ choice.record.address }}</b> · {{ choice.record.shift.label }} · Место {{ choice.position }}<br>
+                                            В Excel — «{{ choice.source }}»
+                                        </label>
+                                        <select id="{{ choice.field }}" name="{{ choice.field }}" required>
+                                            <option value="">Выбери сотрудника из справочника</option>
+                                            {% for person in choice.options %}
+                                                <option value="{{ person.pk }}">{{ person.full_name }}{% if person.personnel_number %} · таб. {{ person.personnel_number }}{% endif %}{% if person.position %} · {{ person.position }}{% endif %}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        {% if errors %}
+                            <div class="message error" role="alert" data-crew-import-message>
+                                <strong>Расстановка не опубликована</strong>
+                                <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+                            </div>
+                        {% endif %}
+                        {% if processed %}
+                            <div class="message success" role="status" data-crew-import-message>
+                                {% if publications %}
+                                    <strong>Расстановка опубликована</strong>
+                                    <ul>
+                                        {% for plan, category, changed in publications %}
+                                            <li>
+                                                <a href="{% url 'deputy_mining_manager_placement' %}?role={{ plan.role.code }}&amp;plan={{ plan.pk }}">
+                                                    {{ category }} · r{{ plan.revision }}
+                                                </a>
+                                                · Изменено сменных ячеек: {{ changed }}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% elif replaced_draft %}
+                                    Черновик заменён. Действующие назначения уже совпадают с Excel.
+                                {% else %}
+                                    Назначения уже совпадают с расстановкой в Excel.
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                        {% if skipped_categories %}
+                            <div class="message info" data-crew-import-message>
+                                <strong>Строки вне импорта</strong>
+                                <ul>{% for category, count in skipped_categories %}<li>{{ category }} · {{ count }}</li>{% endfor %}</ul>
+                            </div>
+                        {% endif %}
+                        <div class="deputy-dialog-actions">
+                            <button class="admin-button admin-button-primary" type="submit"
+                                    data-upload-label="Загрузить и опубликовать">
+                                {% if draft_confirmation %}Заменить черновик и опубликовать{% elif employee_choices %}Продолжить публикацию{% else %}Загрузить и опубликовать{% endif %}
+                            </button>
+                            <a class="admin-button admin-button-secondary" href="{% url 'deputy_mining_manager_placement' %}">К расстановке</a>
+                        </div>
+                    </div>
+                    <p data-crew-import-feedback role="status" hidden></p>
+                </form>
+            </div>
+        </section>
+    </main>
+</div>
+{% endblock %}

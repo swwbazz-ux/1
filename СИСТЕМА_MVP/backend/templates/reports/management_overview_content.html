@@ -1,0 +1,312 @@
+<div data-management-overview-live>
+        <section class="management-dashboard-kpis" aria-label="Ключевые показатели">
+            <article class="dispatcher-report-tile success">
+                <div class="dispatcher-report-tile-head"><h2>Факт</h2><span>сутки</span></div>
+                <strong>{{ daily_total_volume }} м3</strong>
+                <p>{{ selected_date|date:"d.m.Y" }}</p>
+            </article>
+            <article class="dispatcher-report-tile">
+                <div class="dispatcher-report-tile-head"><h2>План</h2><span>сутки</span></div>
+                <strong>{{ daily_plan_total }} м3</strong>
+                <p>{{ daily_plan_source }}</p>
+            </article>
+            <article class="dispatcher-report-tile {% if daily_plan_completion_class == 'success' %}success{% elif daily_plan_completion_class == 'danger' %}is-danger{% endif %}">
+                <div class="dispatcher-report-tile-head"><h2>Выполнение</h2><span>план</span></div>
+                <strong>{% if daily_plan_completion_percent is not None %}{{ daily_plan_completion_percent }}%{% else %}нет плана{% endif %}</strong>
+                <p>факт относительно плана</p>
+            </article>
+            <article class="dispatcher-report-tile {% if daily_deviation < 0 %}is-danger{% else %}success{% endif %}">
+                <div class="dispatcher-report-tile-head"><h2>Отклонение</h2><span>сутки</span></div>
+                <strong>{{ daily_deviation }} м3</strong>
+                <p>факт минус план</p>
+            </article>
+            <article class="dispatcher-report-tile">
+                <div class="dispatcher-report-tile-head"><h2>Тоннаж</h2><span>сутки</span></div>
+                <strong>{{ daily_total_tonnage }} т</strong>
+                <p>если заполнена плотность</p>
+            </article>
+            <article class="dispatcher-report-tile">
+                <div class="dispatcher-report-tile-head"><h2>Рейсы</h2><span>сутки</span></div>
+                <strong>{{ daily_trip_count }}</strong>
+                <p>завершенные рейсы</p>
+            </article>
+        </section>
+
+        <section class="management-dashboard-kpis management-dashboard-shift-kpis" aria-label="Сменная аналитика">
+            <article class="dispatcher-report-tile success">
+                <div class="dispatcher-report-tile-head"><h2>Погрузка</h2><span>экскаваторы</span></div>
+                <strong>{{ shift_analytics_totals.loaded_trip_count }}</strong>
+                <p>отгружено рейсов, включая груженые открытые</p>
+            </article>
+            <article class="dispatcher-report-tile">
+                <div class="dispatcher-report-tile-head"><h2>Выгрузка</h2><span>самосвалы</span></div>
+                <strong>{{ shift_analytics_totals.unloaded_trip_count }}</strong>
+                <p>разгружено и закрыто рейсов</p>
+            </article>
+            <article class="dispatcher-report-tile {% if shift_analytics_totals.open_trip_count %}is-risk{% endif %}">
+                <div class="dispatcher-report-tile-head"><h2>Открыто</h2><span>рейсы</span></div>
+                <strong>{{ shift_analytics_totals.open_trip_count }}</strong>
+                <p>груженые рейсы еще не разгружены</p>
+            </article>
+            <article class="dispatcher-report-tile {% if shift_analytics_totals.downtime_count %}is-danger{% endif %}">
+                <div class="dispatcher-report-tile-head"><h2>Простои</h2><span>смена</span></div>
+                <strong>{{ shift_analytics_totals.downtime_count }}</strong>
+                <p>{{ shift_analytics_totals.downtime_hours_display }} ч за выбранную дату</p>
+            </article>
+        </section>
+
+        <section class="management-dashboard-layout">
+            <article class="dispatcher-report-card management-dashboard-summary {% if daily_plan_completion_class == 'success' %}is-ok{% elif daily_plan_completion_class == 'danger' %}is-danger{% endif %}">
+                <div class="dispatcher-report-card-head">
+                    <h2>Оперативный итог</h2>
+                    <span>{{ selected_date|date:"d.m.Y" }}</span>
+                </div>
+                <div class="dispatcher-management-score">
+                    <div class="dispatcher-management-ring" style="--ring: {{ daily_plan_completion_css }}%;">
+                        <span>{% if daily_plan_completion_percent is not None %}{{ daily_plan_completion_percent }}%{% else %}0%{% endif %}</span>
+                    </div>
+                    <div class="dispatcher-management-score-data">
+                        <strong>{{ daily_total_volume }} м3</strong>
+                        <span>план {{ daily_plan_total }} м3</span>
+                        <em class="{% if daily_deviation < 0 %}is-danger{% else %}is-ok{% endif %}">{{ daily_deviation }} м3</em>
+                    </div>
+                </div>
+                <div class="dispatcher-management-mini-kpis">
+                    <div><strong>{{ active_trip_count }}</strong><span>активные</span></div>
+                    <div><strong>{{ carryover_trip_count }}</strong><span>переходящие сейчас</span></div>
+                    <div><strong>{{ open_mechanic_downtime_count }}</strong><span>открытые простои</span></div>
+                    <div><strong>{{ mechanic_downtime_count }}</strong><span>простои за дату</span></div>
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card management-dashboard-attention">
+                <div class="dispatcher-report-card-head">
+                    <h2>Внимание</h2>
+                    <span>риски контура</span>
+                </div>
+                <div class="dispatcher-management-alert-list">
+                    <div class="dispatcher-management-alert {% if open_mechanic_downtime_count %}is-danger{% endif %}">
+                        <strong>{{ open_mechanic_downtime_count }}</strong>
+                        <span>механические простои</span>
+                        <em>{% if open_mechanic_downtime_count %}требуют реакции{% else %}открытых простоев нет{% endif %}</em>
+                    </div>
+                    <div class="dispatcher-management-alert {% if carryover_trip_count %}is-danger{% endif %}">
+                        <strong>{{ carryover_trip_count }}</strong>
+                        <span>открытые переходящие рейсы</span>
+                        <em>{% if carryover_trip_count %}проверить смены{% else %}без переходящих{% endif %}</em>
+                    </div>
+                    <div class="dispatcher-management-alert">
+                        <strong>{{ daily_carryover_trip_count }}</strong>
+                        <span>завершено переходящих за дату</span>
+                        <em>исторический показатель</em>
+                    </div>
+                    <div class="dispatcher-management-alert {% if active_trip_count %}is-risk{% endif %}">
+                        <strong>{{ active_trip_count }}</strong>
+                        <span>активные рейсы</span>
+                        <em>еще не закрыты</em>
+                    </div>
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card management-dashboard-shifts">
+                <div class="dispatcher-report-card-head">
+                    <h2>Поток смены</h2>
+                    <a href="{% url 'shift_analytics_report' %}?date={{ selected_date|date:'Y-m-d' }}">подробно</a>
+                </div>
+                <div class="management-shift-grid">
+                    {% for item in shift_analytics_shift_cards %}
+                        <a class="management-shift-card" href="{{ item.url }}">
+                            <div>
+                                <strong>{{ item.label }}</strong>
+                                <span>{{ item.totals.loaded_trip_count }} отгр. / {{ item.totals.unloaded_trip_count }} разгр.</span>
+                            </div>
+                            <div><span>Объем</span><strong>{{ item.totals.volume_display }} м3</strong></div>
+                            <div><span>Открыто</span><strong>{{ item.totals.open_trip_count }}</strong></div>
+                            <div><span>Простои</span><strong>{{ item.totals.downtime_count }}</strong></div>
+                            <i><b style="width: {% widthratio item.totals.unloaded_trip_count item.totals.loaded_trip_count 100 %}%;"></b></i>
+                        </a>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card management-dashboard-shifts">
+                <div class="dispatcher-report-card-head">
+                    <h2>Первая / вторая смена</h2>
+                    <span>сравнение смен</span>
+                </div>
+                <div class="management-shift-grid">
+                    {% for item in daily_shift_comparison %}
+                        <div class="management-shift-card is-{{ item.css_class }}">
+                            <div>
+                                <strong>{{ item.label }}</strong>
+                                <span>{{ item.trip_count }} рейс.</span>
+                            </div>
+                            <div><span>Факт</span><strong>{{ item.volume }} м3</strong></div>
+                            <div><span>План</span><strong>{{ item.plan }} м3</strong></div>
+                            <div class="{% if item.deviation < 0 %}is-danger{% else %}is-ok{% endif %}">
+                                <span>Отклонение</span><strong>{{ item.deviation }} м3</strong>
+                            </div>
+                            <i><b style="width: {% widthratio item.volume max_daily_shift_volume 100 %}%;"></b></i>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">За выбранную дату сменных данных пока нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card management-dashboard-week">
+                <div class="dispatcher-report-card-head">
+                    <h2>Неделя</h2>
+                    <span>7 дней до даты</span>
+                </div>
+                <div class="dispatcher-management-month-grid">
+                    <div><strong>{{ trend_total_volume }}</strong><span>м3 факт</span></div>
+                    <div><strong>{{ trend_total_plan }}</strong><span>м3 план</span></div>
+                    <div><strong>{% if trend_completion_percent is not None %}{{ trend_completion_percent }}%{% else %}нет плана{% endif %}</strong><span>выполнение</span></div>
+                    <div><strong>{{ trend_trip_count }}</strong><span>рейсов</span></div>
+                </div>
+                <div class="management-week-extremes">
+                    <span>Лучший день: <strong>{% if trend_best_day %}{{ trend_best_day.date|date:"d.m" }} · {{ trend_best_day.volume }} м3{% else %}нет данных{% endif %}</strong></span>
+                    <span>Просадка: <strong>{% if trend_worst_day %}{{ trend_worst_day.date|date:"d.m" }} · {{ trend_worst_day.deviation }} м3{% else %}нет данных{% endif %}</strong></span>
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-wide management-dashboard-trend">
+                <div class="dispatcher-report-card-head">
+                    <h2>Динамика</h2>
+                    <span>факт / план</span>
+                </div>
+                <div class="management-trend-grid">
+                    {% for item in daily_trend %}
+                        <div class="management-trend-day {% if item.date == selected_date %}is-active{% endif %}">
+                            <strong>{{ item.date|date:"d.m" }}</strong>
+                            <span>{{ item.volume }} м3</span>
+                            <em class="{% if item.deviation < 0 %}is-danger{% else %}is-ok{% endif %}">{{ item.deviation }} м3</em>
+                            <i><b style="height: {% widthratio item.volume max_daily_trend_volume 100 %}%;"></b></i>
+                        </div>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Экскаваторы</h2>
+                    <span>погрузка</span>
+                </div>
+                <div class="dispatcher-split-list">
+                    {% for item in shift_analytics_excavator_rows %}
+                        <div class="dispatcher-split-row">
+                            <span>{{ item.label }}</span>
+                            <strong>{{ item.volume_display }} м3</strong>
+                            <i><b style="width: {% widthratio item.loaded_count shift_analytics_totals.loaded_trip_count 100 %}%;"></b></i>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">За выбранную дату погрузок пока нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Самосвалы</h2>
+                    <span>выгрузка</span>
+                </div>
+                <div class="dispatcher-split-list">
+                    {% for item in shift_analytics_truck_rows %}
+                        <div class="dispatcher-split-row">
+                            <span>{{ item.label }}</span>
+                            <strong>{{ item.volume_display }} м3</strong>
+                            <i><b style="width: {% widthratio item.unloaded_count shift_analytics_totals.unloaded_trip_count 100 %}%;"></b></i>
+                        </div>
+                    {% empty %}
+                        <p class="dispatcher-empty-note">За выбранную дату выгрузок пока нет.</p>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card">
+                <div class="dispatcher-report-card-head">
+                    <h2>Накопленно</h2>
+                    <span>вся база</span>
+                </div>
+                <div class="dispatcher-management-month-grid">
+                    <div><strong>{{ total_volume }}</strong><span>м3</span></div>
+                    <div><strong>{{ total_tonnage }}</strong><span>тоннаж</span></div>
+                    <div><strong>{{ completed_trip_count }}</strong><span>рейсов</span></div>
+                    <div><strong>{{ active_trip_count }}</strong><span>активные</span></div>
+                </div>
+            </article>
+
+            {% include "includes/shift_reading_corrections.html" %}
+
+            <article class="dispatcher-report-card dispatcher-report-card-table management-dashboard-table">
+                <div class="dispatcher-report-card-head">
+                    <h2>Открытые простои</h2>
+                    <span>механическая служба</span>
+                </div>
+                <div class="dispatcher-transport-table-wrap">
+                    <table class="dispatcher-transport-table">
+                        <thead>
+                        <tr>
+                            <th>Начало</th>
+                            <th>Техника</th>
+                            <th>Причина</th>
+                            <th>Кто зафиксировал</th>
+                            <th>Комментарий</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for downtime in open_mechanic_downtimes %}
+                            <tr class="is-danger">
+                                <td>{{ downtime.started_at|date:"d.m.Y H:i" }}</td>
+                                <td>{{ downtime.equipment }}</td>
+                                <td>{{ downtime.reason }}</td>
+                                <td>{{ downtime.employee|default:"-" }}</td>
+                                <td>{{ downtime.comment|default:"-" }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="5">Открытых механических простоев сейчас нет.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+
+            <article class="dispatcher-report-card dispatcher-report-card-table management-dashboard-table">
+                <div class="dispatcher-report-card-head">
+                    <h2>Последние рейсы</h2>
+                    <span>завершенные</span>
+                </div>
+                <div class="dispatcher-transport-table-wrap">
+                    <table class="dispatcher-transport-table">
+                        <thead>
+                        <tr>
+                            <th>Самосвал</th>
+                            <th>Экскаватор</th>
+                            <th>Порода</th>
+                            <th>Разгрузка</th>
+                            <th>Объем</th>
+                            <th>Тоннаж</th>
+                            <th>Выполнен</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for trip in recent_completed_trips %}
+                            <tr>
+                                <td>{{ trip.truck }}</td>
+                                <td>{{ trip.excavator }}</td>
+                                <td>{{ trip.rock_type }}</td>
+                                <td>{{ trip.dump_point }}</td>
+                                <td>{{ trip.volume_m3|default:"-" }}</td>
+                                <td>{{ trip.tonnage|default:"-" }}</td>
+                                <td>{{ trip.completed_at|date:"d.m.Y H:i" }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="7">Завершенных рейсов пока нет.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        </section>
+</div>

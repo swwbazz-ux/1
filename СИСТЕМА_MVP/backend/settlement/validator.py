@@ -17,6 +17,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Generic, Literal, Protocol, TypeAlias, TypeVar
 
+from .intervals import effective_ends_at
+
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = (
@@ -45,6 +47,7 @@ class ActualPlacementType(str, Enum):
     PERMANENT = "permanent"
     TEMPORARY = "temporary"
     PROPOSED = "proposed"
+    TEMPORARY_UNAPPROVED = "temporary_unapproved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,12 +78,14 @@ class FactState(str, Enum):
     NOT_APPLICABLE = "not_applicable"
 
 
-# Compiled status filter from the registry dated 04.08.2026.  This is not a
-# business-rule implementation.  It only prevents the generic skeleton from
-# emitting findings for draft, hypothesis, unconfirmed, or interface-only IDs.
+# Compiled status filter from the registry dated 21.11.2026 (101 rules).
+# This is not a business-rule implementation.  It only prevents the generic
+# skeleton from emitting findings for draft, hypothesis, unconfirmed, or
+# interface-only IDs.  SET-R095…R101 added for T-044 (all «Утверждено»).
 _AGREED_RULE_IDS = frozenset(
     {
         *(f"SET-R{number:03d}" for number in range(1, 23)),
+        "SET-R023",
         *(f"SET-R{number:03d}" for number in range(24, 28)),
         *(f"SET-R{number:03d}" for number in range(30, 36)),
         *(f"SET-R{number:03d}" for number in range(39, 46)),
@@ -89,14 +94,23 @@ _AGREED_RULE_IDS = frozenset(
         "SET-R050",
         "SET-R052",
         "SET-R054",
+        # T-044 review-12: R055/R058/R076 в реестре «Утверждено», но
+        # отсутствовали в наборе.
+        "SET-R055",
         "SET-R056",
+        "SET-R057",
+        "SET-R058",
         "SET-R060",
         "SET-R063",
         *(f"SET-R{number:03d}" for number in range(65, 72)),
         *(f"SET-R{number:03d}" for number in range(73, 76)),
+        "SET-R076",
         *(f"SET-R{number:03d}" for number in range(78, 82)),
         "SET-R091",
         *(f"SET-R{number:03d}" for number in range(92, 95)),
+        # T-044 (21.11.2026): R095–R101 утверждены и входят в действующий
+        # реестр из 101 правила.
+        *(f"SET-R{number:03d}" for number in range(95, 102)),
     }
 )
 
@@ -286,6 +300,26 @@ class PlacementConflictValidationRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class PlacementStructureValidationRequest:
+    """Минимальный вход для структурной проверки точки записи.
+
+    Содержит только поля контракта ``SET-R003/R030/R035/R066/R092-R094`` и не
+    требует нормативных контекстов (актор, жильё, календарь). Используется
+    сервисами записи, чтобы уже написанные структурные проверки валидатора
+    выполнялись, а не оставались библиотекой.
+    """
+
+    phase: object
+    employee_id: object
+    bed_stable_id: object
+    placement_type: object
+    starts_at: object
+    ends_at: object
+    checked_at: object
+    rule_set_version: object
+
+
+@dataclass(frozen=True, slots=True)
 class ValidationFinding:
     level: ValidationLevel
     code: str
@@ -386,8 +420,13 @@ def _is_timezone_aware(value: datetime) -> bool:
     return value.tzinfo is not None and value.utcoffset() is not None
 
 
+_StructureInput: TypeAlias = (
+    ActualPlacementValidationRequest | PlacementStructureValidationRequest
+)
+
+
 def _structural_block(
-    request: ActualPlacementValidationRequest,
+    request: _StructureInput,
     *,
     code: str,
     rule_id: str,
@@ -420,7 +459,7 @@ def _structural_block(
 
 
 def _check_request_structure(
-    request: ActualPlacementValidationRequest,
+    request: _StructureInput,
 ) -> _CheckOutcome:
     """Validate the typed request boundary without loading external facts."""
 
@@ -617,7 +656,7 @@ def _check_actual_placement_type(
         related_rule_ids=(),
         message=(
             "Фактическое размещение допускает только постоянный, "
-            "временный или предложенный тип."
+            "временный, предложенный тип или временное до утверждения."
         ),
         technical_details={"received_type": raw_value},
         ui_target=ValidationUiTarget(
@@ -734,15 +773,16 @@ def _canonical_conflict_interval(
     if not isinstance(starts_at, datetime) or not _is_timezone_aware(starts_at):
         return None
 
-    endings: list[datetime] = []
     for boundary in (ends_at, terminated_at):
         if boundary is None:
             continue
         if not isinstance(boundary, datetime) or not _is_timezone_aware(boundary):
             return None
-        endings.append(boundary)
 
-    effective_end = min(endings) if endings else None
+    effective_end = effective_ends_at(
+        ends_at if isinstance(ends_at, datetime) else None,
+        terminated_at if isinstance(terminated_at, datetime) else None,
+    )
     if effective_end is not None and effective_end <= starts_at:
         return None
     return starts_at, effective_end
@@ -1068,6 +1108,19 @@ def _validation_result_from_outcomes(
     )
 
 
+def validate_placement_structure(
+    request: PlacementStructureValidationRequest,
+) -> tuple[ValidationFinding, ...]:
+    """Run only the structural input-contract checks of SET-R092-R094.
+
+    This is the mandatory entry point for write paths that do not build the full
+    normative request (manual settle, apply).  It returns blocking findings; a
+    caller must refuse the write when the tuple is non-empty.
+    """
+
+    return _check_request_structure(request).findings
+
+
 def validate_actual_placement(
     request: ActualPlacementValidationRequest,
 ) -> ActualPlacementValidationResult:
@@ -1125,6 +1178,7 @@ __all__ = [
     "PersonnelContext",
     "PlacementBasisContext",
     "PlacementConflictValidationRequest",
+    "PlacementStructureValidationRequest",
     "UnknownRequiredFact",
     "ValidationFact",
     "ValidationFinding",
@@ -1134,4 +1188,5 @@ __all__ = [
     "ValidationUiTarget",
     "validate_actual_placement",
     "validate_placement_conflicts",
+    "validate_placement_structure",
 ]

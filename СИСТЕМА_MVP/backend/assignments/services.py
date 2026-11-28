@@ -20,8 +20,14 @@ from core.models import bump_operational_state, lock_production_state
 from core.production_time import production_work_date as contract_production_work_date
 from references.models import Equipment
 from shifts.models import EmployeeShift
-from users.models import Employee, EmployeeAccess, Role
-from users.work_profiles import effective_specialization, employee_has_effective_access_role
+from trips.free_bucket import cancel_free_bucket_for_applied_assignment
+from users.models import AdminActionLog, Employee, EmployeeAccess, Role, TemporaryWorkTransfer
+from users.work_profiles import (
+    active_specializations_for_positions, effective_specialization, effective_specializations_by_employee_id,
+    eligible_employee_ids_for_work_role, employee_has_effective_access_role, legacy_work_category_for_specialization,
+)
+from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS
+from .off_equipment import clear_assigned_reserves, validate_off_equipment_assignment
 
 from .models import (
     AssignmentStatus,
@@ -43,7 +49,7 @@ WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES = {
     'driver': 'Самосвал',
     'excavator_operator': 'Экскаватор',
 }
-CREW_PLAN_ROLE_CODES = frozenset(WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES)
+CREW_PLAN_ROLE_CODES = frozenset(CATEGORY_LABELS)
 
 
 def haul_assignment_effective_at(truck, now):
@@ -182,21 +188,108 @@ def _crew_plan_employee(employee):
         raise ValidationError('Сотрудник не найден.', code='employee_not_found') from error
 
 
-def employee_matches_work_role(employee, role):
-    return employee_has_effective_access_role(employee, role.code)
+def employee_matches_work_role(employee, role, *, infer_from_position=False):
+    category = AUXILIARY_CATEGORIES.get(role.code)
+    if category:
+        specialization = effective_specialization(employee, infer_from_position=infer_from_position)
+        return bool(
+            employee.contractor_access_is_valid()
+            and specialization
+            and specialization.is_active
+            and specialization.code == category.specialization
+        )
+    return employee_has_effective_access_role(
+        employee, role.code, infer_from_position=infer_from_position,
+    )
+
+
+def eligible_crew_employee_ids(role_code):
+    category = AUXILIARY_CATEGORIES.get(role_code)
+    if not category:
+        return eligible_employee_ids_for_work_role(role_code, infer_from_position=True)
+    employees = Employee.objects.filter(
+        Employee.work_eligibility_q(), is_active=True, status=Employee.Status.ACTIVE,
+    ).select_related('base_specialization')
+    return {
+        employee_id for employee_id, spec in effective_specializations_by_employee_id(
+            employees, infer_from_position=True,
+        ).items()
+        if spec and spec.is_active and spec.code == category.specialization
+    }
+
+
+def is_excavator_assistant_specialization(specialization):
+    return bool(
+        specialization
+        and specialization.is_active
+        and specialization.code == 'assistant_excavator_operator'
+    )
 
 
 def secondary_employee_matches_work_role(employee, role):
     if role.code == 'driver':
-        return employee_matches_work_role(employee, role)
+        return employee_matches_work_role(employee, role, infer_from_position=True)
     if role.code == 'excavator_operator':
-        specialization = effective_specialization(employee)
-        return bool(
-            specialization
-            and specialization.is_active
-            and specialization.code == 'assistant_excavator_operator'
+        return employee_matches_work_role(employee, role, infer_from_position=True) or is_excavator_assistant_specialization(
+            effective_specialization(employee, infer_from_position=True),
         )
     return False
+
+
+def crew_specialization_choices(employee, role, choices_by_position):
+    if employee.base_specialization_id or employee.is_protected:
+        return []
+    choices = choices_by_position.get(employee.personnel_position_id, ())
+    if len(choices) < 2:
+        return []
+    category = AUXILIARY_CATEGORIES.get(role.code)
+    result = []
+    for spec in choices:
+        matches_primary = spec.code == category.specialization if category else spec.access_role_id == role.pk
+        if matches_primary:
+            positions = [CREW_SLOT_POSITION_PRIMARY]
+            if role.code in {'driver', 'excavator_operator'}:
+                positions.append(CREW_SLOT_POSITION_SECONDARY)
+        elif role.code == 'excavator_operator' and is_excavator_assistant_specialization(spec):
+            positions = [CREW_SLOT_POSITION_SECONDARY]
+        else:
+            continue
+        result.append({'id': spec.pk, 'name': spec.name, 'positions': positions})
+    return result
+
+
+def _save_crew_specialization(employee, role, position, specialization_id, actor):
+    from users.oup_services import emit_employee_changed, employee_work_category_blockers
+
+    choices_by_position = active_specializations_for_positions({employee.personnel_position_id})
+    offered = crew_specialization_choices(employee, role, choices_by_position)
+    if not any(item['id'] == specialization_id and position in item['positions'] for item in offered):
+        raise ValidationError('Выбор специализации изменился. Обновите данные.', code='specialization_choice_changed')
+    if TemporaryWorkTransfer.objects.filter(
+        employee=employee,
+        status__in=[TemporaryWorkTransfer.Status.REQUESTED, TemporaryWorkTransfer.Status.APPROVED],
+        effective_to__gte=timezone.localdate(),
+    ).exists():
+        raise ValidationError('У сотрудника уже есть временный перевод или запрос на перевод.')
+    blockers = employee_work_category_blockers(employee)
+    if blockers:
+        raise ValidationError('Нельзя сохранить специализацию: ' + ', '.join(blockers) + '.')
+
+    specialization = next(spec for spec in choices_by_position[employee.personnel_position_id] if spec.pk == specialization_id)
+    employee.base_specialization = specialization
+    employee.work_category = legacy_work_category_for_specialization(specialization)
+    employee.save(update_fields=['base_specialization', 'work_category', 'updated_at'])
+    AdminActionLog.objects.create(
+        actor=actor,
+        action='Заместитель начальника: сохранена специализация при назначении',
+        action_code='deputy_crew_specialization_saved',
+        object_type='Employee',
+        object_id=str(employee.pk),
+        object_repr=employee.full_name,
+        old_value='Специализация не указана',
+        new_value=specialization.name,
+    )
+    emit_employee_changed(employee, 'crew_specialization_saved')
 
 
 def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMARY):
@@ -205,7 +298,7 @@ def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMA
     if position not in CREW_SLOT_POSITIONS:
         raise ValidationError('Неизвестная позиция в экипаже.', code='invalid_crew_position')
     matches_position = (
-        employee_matches_work_role(employee, role)
+        employee_matches_work_role(employee, role, infer_from_position=True)
         if position == CREW_SLOT_POSITION_PRIMARY
         else secondary_employee_matches_work_role(employee, role)
     )
@@ -213,13 +306,13 @@ def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMA
         position_label = (
             'основной рабочей роли'
             if position == CREW_SLOT_POSITION_PRIMARY
-            else ('стажёра' if role.code == 'driver' else 'помощника машиниста')
+            else ('стажёра' if role.code == 'driver' else 'помощника машиниста или стажёра')
         )
         raise ValidationError(
             f'Производственная специализация сотрудника не соответствует позиции {position_label}.',
             code='invalid_work_category',
         )
-    has_other_role_assignment = (
+    other_assignment = (
         EquipmentAssignment.objects
         .filter(
             employee=employee,
@@ -230,11 +323,13 @@ def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMA
             shift_type__in=WorkShiftType.values,
         )
         .exclude(role=role)
-        .exists()
+        .select_related('equipment__equipment_type')
+        .first()
     )
-    if has_other_role_assignment:
+    if other_assignment:
         raise ValidationError(
-            'Сотрудник уже назначен по другой рабочей роли.',
+            f'{employee.full_name} уже назначен: {other_assignment.equipment.equipment_type.name} '
+            f'{other_assignment.equipment.garage_number}, {other_assignment.get_shift_type_display().lower()}.',
             code='assignment_conflict',
         )
 
@@ -258,6 +353,51 @@ def validate_employee_equipment_organization(employee, equipment):
             'Организация сотрудника не совпадает с владельцем техники.',
             code='contractor_organization_mismatch',
         )
+
+
+def crew_bookings_on_other_equipment(plan, employee_ids=None):
+    """Other categories that reserve a worker on this production date, in any crew position."""
+    bookings = {}
+    slots = CrewPlanSlot.objects.filter(
+        plan__work_date=plan.work_date, plan__status__in=(CrewPlanStatus.DRAFT, CrewPlanStatus.PUBLISHED),
+    ).exclude(plan__role_id=plan.role_id)
+    assignments = EquipmentAssignment.objects.filter(
+        status=AssignmentStatus.ACCEPTED, ended_at__isnull=True, shift__isnull=True,
+        role__isnull=False, shift_type__in=WorkShiftType.values,
+    ).exclude(role_id=plan.role_id)
+    if employee_ids is not None:
+        employee_ids = set(employee_ids)
+        if not employee_ids:
+            return bookings
+        slots = slots.filter(Q(employee_id__in=employee_ids) | Q(secondary_employee_id__in=employee_ids)
+                             | Q(reported_employee_id__in=employee_ids))
+        assignments = assignments.filter(employee_id__in=employee_ids)
+
+    def remember(employee_id, equipment_type, number, shift, status):
+        if employee_id and (employee_ids is None or employee_id in employee_ids):
+            bookings.setdefault(employee_id, f'{equipment_type} {number}, {WorkShiftType(shift).label.lower()} ({status})')
+
+    for kind, number, shift, status, primary, secondary, reported in slots.order_by('pk').values_list(
+        'equipment__equipment_type__name', 'equipment__garage_number', 'shift_type', 'plan__status',
+        'employee_id', 'secondary_employee_id', 'reported_employee_id',
+    ):
+        for employee_id in (primary, secondary, reported):
+            remember(employee_id, kind, number, shift, CrewPlanStatus(status).label.lower())
+    if plan.work_date == production_work_date():
+        for employee_id, kind, number, shift in assignments.order_by('pk').values_list(
+            'employee_id', 'equipment__equipment_type__name', 'equipment__garage_number', 'shift_type',
+        ):
+            remember(employee_id, kind, number, shift, 'действующее назначение')
+    return bookings
+
+
+def validate_other_crew_bookings(plan, employee_ids):
+    bookings = crew_bookings_on_other_equipment(plan, employee_ids)
+    if bookings:
+        employee_id, location = next(iter(bookings.items()))
+        name = Employee.objects.values_list('full_name', flat=True).get(pk=employee_id)
+        raise ValidationError(f'{name} уже в экипаже: {location}. Сначала освободите прежнее место.',
+                              code='duplicate_employee')
 
 
 def _validate_crew_equipment(equipment, role):
@@ -337,6 +477,14 @@ def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
             )
         }
 
+    reported_by_slot = {}
+    if published_plan:
+        reported_by_slot = {
+            (equipment_id, shift): employee_id
+            for equipment_id, shift, employee_id in published_plan.slots.filter(
+                reported_employee__isnull=False,
+            ).values_list('equipment_id', 'shift_type', 'reported_employee_id')
+        }
     used_employee_ids = set(
         plan.slots.exclude(employee_id__isnull=True).values_list('employee_id', flat=True)
     )
@@ -370,6 +518,8 @@ def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
                 shift_type=shift_type,
                 employee_id=employee_id,
                 secondary_employee_id=secondary_employee_id,
+                reported_employee_id=None if employee_id else reported_by_slot.get(slot_key),
+                baseline_reported_employee_id=None if employee_id else reported_by_slot.get(slot_key),
                 baseline_employee_id=employee_id,
                 baseline_secondary_employee_id=secondary_employee_id,
             ))
@@ -438,7 +588,13 @@ def update_crew_draft_slot(
     expected_version,
     actor=None,
     position=CREW_SLOT_POSITION_PRIMARY,
+    allow_factual=False,
+    validate_new_employee=None,
+    reported_source=None,
+    specialization_id=None,
 ):
+    if specialization_id is not None and (not employee or reported_source is not None):
+        raise ValidationError('Выберите сотрудника для сохранения специализации.')
     locked_plan = _crew_plan_instance(plan, for_update=True)
     role = _crew_plan_role(locked_plan.role)
     if locked_plan.status != CrewPlanStatus.DRAFT:
@@ -478,9 +634,67 @@ def update_crew_draft_slot(
             .select_related('contractor_organization')
             .get(pk=employee.pk)
         )
-        _validate_crew_employee(employee, role, position=position)
+        validate_off_equipment_assignment(locked_plan.work_date, [employee.pk])
+        if validate_new_employee is not None and (
+            specialization_id is not None or not locked_plan.slots.filter(
+                Q(employee=employee) | Q(secondary_employee=employee) | Q(reported_employee=employee),
+            ).exists()
+        ):
+            validate_new_employee(employee, locked_plan.work_date)
+        if specialization_id is not None:
+            _save_crew_specialization(employee, role, position, specialization_id, actor)
+        record_fact = reported_source is not None
+        try:
+            _validate_crew_employee(employee, role, position=position)
+        except ValidationError as error:
+            if specialization_id is not None or not (
+                (allow_factual or record_fact) and position == CREW_SLOT_POSITION_PRIMARY
+                and error.code == 'invalid_work_category'
+            ):
+                raise
+            record_fact = True
         validate_employee_equipment_organization(employee, equipment)
-    if getattr(target_slot, f'{employee_field}_id') == getattr(employee, 'id', None):
+        validate_other_crew_bookings(locked_plan, [employee.pk])
+        other_reports = locked_plan.slots.filter(reported_employee=employee)
+        if reported_source is not None:
+            reports = list(other_reports[:2])
+            if (position != CREW_SLOT_POSITION_PRIMARY or len(reports) != 1
+                    or (reports[0].equipment_id, reports[0].shift_type) != reported_source):
+                raise ValidationError('Исходное место фактического состава изменилось.', code='stale_version')
+            source_report = reports[0]
+            if source_report.pk == target_slot.pk:
+                return locked_plan
+            if target_slot.employee_id or target_slot.reported_employee_id:
+                raise ValidationError('Перенесите сотрудника с пометкой на свободное основное место.',
+                                      code='reported_target_occupied')
+            other_reports = other_reports.exclude(pk=source_report.pk)
+        if position == CREW_SLOT_POSITION_PRIMARY:
+            other_reports = other_reports.exclude(pk=target_slot.pk)
+        if other_reports.exists():
+            raise ValidationError('Сотрудник уже указан в фактическом составе.', code='duplicate_employee')
+        if record_fact:
+            occupied = locked_plan.slots.filter(
+                Q(employee=employee) | Q(secondary_employee=employee),
+            ).exclude(pk=target_slot.pk)
+            if target_slot.secondary_employee_id == employee.pk or occupied.exists():
+                raise ValidationError('Сотрудник уже назначен в экипаж.', code='duplicate_employee')
+            if target_slot.reported_employee_id == employee.pk:
+                return locked_plan
+            if reported_source is not None:
+                source_report.reported_employee = None
+                source_report.save(update_fields=['reported_employee'])
+            target_slot.employee = None
+            target_slot.reported_employee = employee
+            target_slot.save(update_fields=['employee', 'reported_employee'])
+            locked_plan.version += 1
+            locked_plan.updated_by = actor
+            locked_plan.save(update_fields=['version', 'updated_by', 'updated_at'])
+            return locked_plan
+    replacing_report = position == CREW_SLOT_POSITION_PRIMARY and target_slot.reported_employee_id
+    if replacing_report:
+        target_slot.reported_employee = None
+        target_slot.save(update_fields=['reported_employee'])
+    if not replacing_report and getattr(target_slot, f'{employee_field}_id') == getattr(employee, 'id', None):
         return locked_plan
 
     source_slot = None
@@ -495,6 +709,9 @@ def update_crew_draft_slot(
             )
             .order_by('pk')
         )
+        if len(source_slots) > 1 or (source_slots and source_slots[0].employee_id == source_slots[0].secondary_employee_id):
+            raise ValidationError('Сотрудник уже занимает два места. Сначала освободите лишнее место.',
+                                  code='duplicate_employee')
         if source_slots:
             source_slot = source_slots[0]
             source_position = (
@@ -511,6 +728,7 @@ def update_crew_draft_slot(
         )
         displaced_employee = getattr(target_slot, employee_field)
         if displaced_employee:
+            validate_other_crew_bookings(locked_plan, [displaced_employee.pk])
             _validate_crew_employee(
                 displaced_employee,
                 role,
@@ -592,6 +810,9 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
             code='stale_baseline',
         )
 
+    reported_ids = [slot.reported_employee_id for slot in slots if slot.reported_employee_id]
+    if len(reported_ids) != len(set(reported_ids)):
+        raise ValidationError('В фактической расстановке сотрудник указан дважды.', code='duplicate_employee')
     target_employee_ids = set()
     for slot in slots:
         _validate_crew_equipment(slot.equipment, role)
@@ -603,19 +824,21 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
                 continue
             _validate_crew_employee(employee, role, position=position)
             validate_employee_equipment_organization(employee, slot.equipment)
-            if employee.id in target_employee_ids:
+            if employee.id in target_employee_ids or employee.id in reported_ids:
                 raise ValidationError(
                     'Сотрудник назначен более чем в одну позицию экипажа.',
                     code='duplicate_employee',
                 )
             target_employee_ids.add(employee.id)
 
-    if target_employee_ids:
+    occupied_ids = target_employee_ids.union(reported_ids)
+    if occupied_ids:
         list(
             Employee.objects.select_for_update()
-            .filter(id__in=target_employee_ids)
+            .filter(id__in=occupied_ids)
             .order_by('id')
         )
+        validate_off_equipment_assignment(locked_plan.work_date, occupied_ids)
         refreshed_employees = (
             Employee.objects.select_related('contractor_organization')
             .in_bulk(target_employee_ids)
@@ -893,6 +1116,7 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
             slots=slots,
             actor_access=actor_access,
         )
+    clear_assigned_reserves(locked_plan.work_date, occupied_ids, actor)
     bump_operational_state(
         'CrewPlan:published',
         event_type='personnel_assignment_changed',
@@ -910,15 +1134,20 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
     return locked_plan
 
 
+def validate_plan_crew_bookings(plan):
+    people = plan.slots.values_list('employee_id', 'secondary_employee_id', 'reported_employee_id')
+    validate_other_crew_bookings(plan, {pk for crew in people for pk in crew if pk})
+
+
 def publish_crew_plan(*, plan, expected_version, actor=None, actor_access=None):
     """Publish once; retain a controlled OUP-role review outside a rolled-back draft."""
     try:
-        return _publish_crew_plan_once(
-            plan=plan,
-            expected_version=expected_version,
-            actor=actor,
-            actor_access=actor_access,
-        )
+        with transaction.atomic():
+            published = _publish_crew_plan_once(
+                plan=plan, expected_version=expected_version, actor=actor, actor_access=actor_access,
+            )
+            validate_plan_crew_bookings(published)
+            return published
     except ValidationError as error:
         if actor_access is not None and getattr(error, 'code', '') == 'invalid_work_category':
             from rotations.arrival_roster_routing import _record_crew_plan_role_review
@@ -932,6 +1161,8 @@ def publish_crew_plan(*, plan, expected_version, actor=None, actor_access=None):
 
 def equipment_queryset_for_work_role(role_code):
     equipment_type_name = WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES.get(str(role_code or ''))
+    if role_code in AUXILIARY_CATEGORIES:
+        equipment_type_name = AUXILIARY_CATEGORIES[role_code].equipment_type
     if not equipment_type_name:
         return Equipment.objects.none()
     return (
@@ -978,6 +1209,7 @@ def validate_work_assignment(*, employee, role, equipment, shift_type, exclude_a
         raise ValidationError('Сотрудник неактивен.')
     if not employee_matches_work_role(employee, role):
         raise ValidationError('Производственная специализация сотрудника не соответствует выбранной роли.')
+    validate_off_equipment_assignment(production_work_date(), [employee.pk])
     if not equipment_queryset_for_work_role(role.code).filter(id=equipment.id).exists():
         raise ValidationError('Выбранная техника не соответствует рабочей роли или неактивна.')
     validate_employee_equipment_organization(employee, equipment)
@@ -1098,6 +1330,7 @@ def set_active_equipment_assignment(*, employee, role, equipment, shift_type, as
         )
     except IntegrityError as error:
         raise ValidationError('Назначение конфликтует с другим активным назначением. Обновите страницу.') from error
+    clear_assigned_reserves(production_work_date(now), [employee.pk], assigned_by)
     _emit_work_assignment_changed(assignment, 'assigned')
     return assignment, True
 
@@ -1131,6 +1364,32 @@ def clear_active_equipment_assignment(*, employee, assigned_by=None, now=None, r
     return len(assignments)
 
 
+def _notify_driver_assignment_changed(truck_id, state_version):
+    """Разбудить нативного Водителя только после записи нового назначения."""
+    from users.native_push import native_app_ids_for_role, notify_employee_devices
+
+    try:
+        shift = (
+            EmployeeShift.objects
+            .select_related('employee')
+            .filter(equipment_id=truck_id, closed_at__isnull=True)
+            .filter(Q(workplace_code='driver') | Q(
+                workplace_code='', equipment__equipment_type__name='Самосвал',
+            ))
+            .order_by('-opened_at', '-id')
+            .first()
+        )
+        if shift:
+            notify_employee_devices(
+                shift.employee,
+                kind='driver_assignment_changed',
+                state_version=str(state_version),
+                app_ids=native_app_ids_for_role('driver'),
+            )
+    except Exception:
+        logger.exception('Не удалось разбудить Водителя после изменения назначения.')
+
+
 def _emit_assignment_changed(
         *, action, truck_id, excavator_ids, assignment_id=None,
         target_excavator_id=None, source_excavator_id=None, effective_at=None):
@@ -1147,7 +1406,7 @@ def _emit_assignment_changed(
         .filter(id__in=related_equipment_ids)
         .values_list('id', 'garage_number')
     )
-    bump_operational_state(
+    state = bump_operational_state(
         f'HaulAssignment:{action}',
         event_type='assignment_changed',
         object_type='HaulAssignment',
@@ -1168,6 +1427,12 @@ def _emit_assignment_changed(
             'effective_at': effective_at.isoformat() if effective_at else '',
         },
     )
+
+
+    if action in {'assignment_pending', 'release_pending', 'pending_cancelled'}:
+        transaction.on_commit(
+            lambda: _notify_driver_assignment_changed(truck_id, state.version)
+        )
 
 
 def _cancel_assignments(assignments, now):
@@ -1465,6 +1730,7 @@ def resolve_haul_handoffs_for_trip(trip, *, now=None):
     target.status = AssignmentStatus.ACCEPTED
     target.accepted_at = now
     target.save(update_fields=['status', 'accepted_at'])
+    cancel_free_bucket_for_applied_assignment(truck_id=target.truck_id, excavator_id=target.excavator_id, at=now)
     if handoff:
         handoff.status = HaulAssignmentHandoffStatus.RESOLVED
         handoff.resolved_at = now
@@ -1845,6 +2111,11 @@ def apply_pending_haul_assignment(assignment_id, *, now=None):
             pending.accepted_at = now
             pending.save(update_fields=['status', 'accepted_at'])
             applied_action = 'assignment_applied'
+        cancel_free_bucket_for_applied_assignment(
+            truck_id=pending.truck_id,
+            excavator_id=pending.excavator_id if pending.action != HaulAssignmentAction.RELEASE else None,
+            at=now,
+        )
         if handoffs:
             HaulAssignmentHandoff.objects.filter(pk__in=[item.pk for item in handoffs]).update(
                 status=HaulAssignmentHandoffStatus.EXPIRED,

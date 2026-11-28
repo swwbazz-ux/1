@@ -5,12 +5,13 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.models import OfflineFieldEvent, OfflineFieldEventStatus
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
 from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
 
 from .excavator_hourly_report import build_excavator_hourly_report
-from .models import Trip, TripStatus
+from .models import Trip, TripClientAction, TripStatus
 from users.role_apps import ROLE_APPS_BY_CODE
 
 
@@ -167,6 +168,86 @@ class ExcavatorHourlyReportTests(TestCase):
         current, previous = report['hours']
         self.assertEqual(current['totals']['trip_count'], 1)
         self.assertEqual(previous['totals']['trip_count'], 1)
+
+    def load_mark(self, trip, occurred_at, sequence):
+        event = OfflineFieldEvent.objects.create(
+            event_id=f'test-mark-{sequence}', event_type='excavator.trip.loaded',
+            actor=self.operator, access=self.access, role_code=self.role.code,
+            device_id='test-excavator', sequence=sequence, occurred_at=occurred_at,
+            trip=trip, status=OfflineFieldEventStatus.ACCEPTED,
+        )
+        TripClientAction.objects.create(
+            trip=trip, actor=self.operator, action_type='truck_loaded',
+            client_action_id=event.event_id,
+        )
+
+    def test_rapid_replacement_counts_once_in_the_hour_of_the_first_mark(self):
+        first_at = timezone.make_aware(datetime(2026, 11, 28, 9, 59, 55))
+        second_at = first_at + timedelta(seconds=17)
+        shift = EmployeeShift.objects.create(
+            employee=self.operator, equipment=self.excavator, shift_type='day',
+            opened_at=first_at - timedelta(hours=1),
+        )
+        first, second = [
+            self.trip(self.belaz, at, status=TripStatus.UNCONTROLLED,
+                      dump_point=self.point_b, loading_shift=shift, passive=True)
+            for at in (first_at, second_at)
+        ]
+        Trip.objects.filter(pk__in=[first.pk, second.pk]).update(volume_m3='51.00')
+        Trip.objects.filter(pk=first.pk).update(superseded_by=second, operationally_closed_at=second_at)
+        self.load_mark(first, first_at, 1)
+        self.load_mark(second, second_at - timedelta(seconds=1), 2)
+        # A late receipt associated with the second trip cannot stand in for its originating event.
+        OfflineFieldEvent.objects.create(
+            event_id='late-receipt', event_type='excavator.trip.loaded',
+            actor=self.operator, access=self.access, role_code=self.role.code,
+            device_id='test-excavator', sequence=3, occurred_at=first_at - timedelta(minutes=4),
+            trip=second, status=OfflineFieldEventStatus.ACCEPTED,
+        )
+        self.trip(self.nhl, second_at + timedelta(minutes=4), dump_point=self.point_b)
+
+        with self.assertNumQueries(1):
+            report = build_excavator_hourly_report(self.excavator, captured_at=second_at + timedelta(minutes=15))
+        latest, previous = report['hours']
+        self.assertEqual(latest['totals'], {'belaz': 0, 'nhl': 1, 'trip_count': 1})
+        self.assertEqual(previous['totals'], {'belaz': 1, 'nhl': 0, 'trip_count': 1})
+        self.assertEqual(Trip.objects.count(), 3)
+
+    def test_distinct_passive_loads_in_one_delivery_batch_both_count(self):
+        first_at = timezone.make_aware(datetime(2026, 11, 28, 10, 20, 4))
+        second_at = first_at + timedelta(seconds=17)
+        shift = EmployeeShift.objects.create(
+            employee=self.operator, equipment=self.excavator, shift_type='day',
+            opened_at=first_at - timedelta(hours=1),
+        )
+        first, second = [
+            self.trip(self.belaz, at, status=TripStatus.UNCONTROLLED,
+                      dump_point=self.point_b, loading_shift=shift, passive=True)
+            for at in (first_at, second_at)
+        ]
+        Trip.objects.filter(pk__in=[first.pk, second.pk]).update(volume_m3='51.00')
+        Trip.objects.filter(pk=first.pk).update(superseded_by=second, operationally_closed_at=second_at)
+        self.load_mark(first, first_at - timedelta(minutes=8), 1)
+        self.load_mark(second, second_at - timedelta(seconds=1), 2)
+
+        report = build_excavator_hourly_report(self.excavator, captured_at=second_at + timedelta(minutes=15))
+        self.assertEqual(report['hours'][0]['totals']['belaz'], 2)
+
+        OfflineFieldEvent.objects.filter(trip=first).update(occurred_at=first_at)
+        with self.subTest('explicitly confirmed new cycle'):
+            OfflineFieldEvent.objects.filter(trip=second).update(payload={'load_intent': 'new_cycle'})
+            report = build_excavator_hourly_report(self.excavator, captured_at=second_at + timedelta(minutes=15))
+            self.assertEqual(report['hours'][0]['totals']['belaz'], 2)
+            OfflineFieldEvent.objects.filter(trip=second).update(payload={})
+        with self.subTest('different assigned destination'):
+            Trip.objects.filter(pk=second.pk).update(assigned_dump_point=self.point_a)
+            report = build_excavator_hourly_report(self.excavator, captured_at=second_at + timedelta(minutes=15))
+            self.assertEqual(report['hours'][0]['totals']['belaz'], 2)
+            Trip.objects.filter(pk=second.pk).update(assigned_dump_point=self.point_b)
+        with self.subTest('known unload on the first trip'):
+            Trip.objects.filter(pk=first.pk).update(unload_received_at=second_at - timedelta(seconds=1))
+            report = build_excavator_hourly_report(self.excavator, captured_at=second_at + timedelta(minutes=15))
+            self.assertEqual(report['hours'][0]['totals']['belaz'], 2)
 
     def test_endpoint_uses_only_excavator_from_open_shift(self):
         captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))

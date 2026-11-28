@@ -119,6 +119,8 @@
 }
 
 .deputy-category-nav {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
     display: flex;
     flex: 1 1 auto;
     min-width: 0;
@@ -214,13 +216,12 @@
 .deputy-search-field {
     position: relative;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 7px;
+    gap: 4px;
     align-items: center;
     min-width: 0;
 }
 
-.deputy-search-field span {
+.deputy-search-field > label {
     color: var(--admin-muted);
     font-size: 10px;
     font-weight: 900;
@@ -244,6 +245,77 @@
 .deputy-search-field input:focus {
     border-color: var(--admin-green);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--admin-green) 18%, transparent);
+}
+
+.deputy-search-results {
+    grid-column: 1 / -1;
+    min-width: 0;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+}
+
+.deputy-search-results [data-search-choices] {
+    max-height: min(23dvh, 220px);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.deputy-search-announcement {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+}
+
+.deputy-search-results [role=status] {
+    padding: 6px 10px;
+    color: var(--admin-muted);
+    font-size: 13px;
+}
+
+.deputy-search-results a {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 4px 12px;
+    padding: 7px 10px;
+    border-top: 1px solid var(--admin-line);
+    background: transparent;
+    color: inherit;
+    text-decoration: none;
+    font: inherit;
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.deputy-search-results small {
+    color: var(--admin-muted);
+}
+
+.deputy-placement-screen .employee-search-highlight {
+    padding: 0;
+    border-radius: 3px;
+    background: var(--admin-yellow-soft);
+    box-shadow: inset 0 -1px 0 var(--admin-yellow);
+}
+
+.deputy-search-results a:hover,
+.deputy-search-results a:focus-visible {
+    background: var(--admin-panel-soft);
+    outline: 2px solid var(--admin-green);
+    outline-offset: -2px;
+}
+
+.deputy-planning-workspace .is-person-search-hit {
+    outline: 2px solid var(--admin-green);
+    outline-offset: -2px;
+    background-color: color-mix(in srgb, var(--admin-green) 12%, var(--admin-panel));
+    scroll-margin: 6px;
 }
 
 .deputy-toolbar-actions {
@@ -493,6 +565,7 @@
 
 .deputy-employee-list {
     display: grid;
+    grid-auto-rows: max-content;
     align-content: start;
     gap: 6px;
     min-height: 0;
@@ -503,7 +576,7 @@
 
 .deputy-employee-card {
     display: grid;
-    grid-template-columns: 38px minmax(0, 1fr) auto 16px;
+    grid-template-columns: 38px minmax(0, 1fr) 16px;
     gap: 8px;
     align-items: center;
     min-height: 52px;
@@ -607,6 +680,18 @@
     color: var(--admin-muted);
     font-size: 11px;
     font-weight: 800;
+}
+
+.deputy-employee-card .deputy-employee-main strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.deputy-employee-card .deputy-presence {
+    display: grid;
+    justify-items: start;
+    max-width: 100%;
+    margin-top: 4px;
 }
 
 .deputy-drag-mark {
@@ -791,6 +876,11 @@ button.deputy-avatar {
     padding: 2px;
     border-radius: 6px;
     cursor: pointer;
+}
+
+.deputy-equipment-cell.is-robot {
+    border-inline-start: 4px solid #7963cc;
+    background-color: color-mix(in srgb, #7963cc 16%, var(--admin-panel));
 }
 
 .deputy-equipment-cell:hover,
@@ -1049,6 +1139,11 @@ button.deputy-avatar {
 
 .deputy-slot-person .deputy-employee-main strong {
     font-size: 12px;
+}
+
+.is-person-search-hit .deputy-employee-main strong {
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 
 .deputy-crew-position > .deputy-avatar {
@@ -1428,7 +1523,14 @@ button.deputy-avatar {
     top: 12px;
     right: 12px;
     z-index: 2;
+    display: grid;
+    place-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
 }
+
+.deputy-record-close svg { display: block; }
 
 .deputy-record-head {
     display: grid;
@@ -1534,6 +1636,328 @@ button.deputy-avatar {
     font-weight: 900;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.deputy-record-dialog:is(.is-specialization, .is-employee) {
+    width: min(840px, calc(100% - 28px));
+    max-height: calc(100dvh - 28px);
+    overflow-y: auto;
+}
+
+.deputy-record-dialog:is(.is-specialization, .is-employee) :is(.deputy-record-head h2, .deputy-record-head p, .deputy-record-field dd, .deputy-dialog-actions button) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.deputy-record-dialog:is(.is-specialization, .is-employee) .deputy-record-fields {
+    max-height: none;
+    overflow: visible;
+}
+
+.deputy-record-dialog:is(.is-specialization, .is-employee) .deputy-record-field {
+    padding: 12px 16px;
+}
+
+.deputy-record-dialog:is(.is-specialization, .is-employee) .deputy-record-field dd {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+.deputy-record-dialog:is(.is-specialization, .is-employee) .deputy-record-field dt {
+    font-size: 12px;
+}
+
+.is-specialization .is-summary {
+    grid-column: 1 / -1;
+}
+
+.is-specialization .is-warning {
+    border-inline-start: 4px solid var(--admin-yellow);
+    background: var(--admin-yellow-soft);
+}
+
+.is-specialization .deputy-dialog-actions {
+    flex-wrap: wrap;
+}
+
+.deputy-record-dialog {
+    --record-gutter: clamp(16px, 3vw, 28px);
+}
+
+.deputy-record-dialog.is-employee {
+    width: min(1120px, calc(100% - 24px));
+}
+
+.deputy-record-dialog.is-employee,
+.deputy-record-form {
+    font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.is-employee .deputy-record-head {
+    padding: 18px 68px 16px var(--record-gutter);
+    grid-template-columns: 60px minmax(0, 1fr);
+    border: 0;
+}
+
+.is-employee .deputy-record-visual {
+    width: 60px;
+    height: 60px;
+    border-radius: 12px;
+}
+
+.is-employee .deputy-record-visual .deputy-avatar {
+    font-size: 23px;
+    text-transform: uppercase;
+}
+
+.is-employee .deputy-record-head h2 {
+    font-size: clamp(20px, 2.4vw, 26px);
+    line-height: 1.18;
+}
+
+.is-employee .deputy-record-head p {
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+.deputy-record-assignment,
+.deputy-record-dialog.is-employee .deputy-record-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 14px 24px;
+    margin: 0 var(--record-gutter);
+}
+
+.deputy-record-assignment {
+    padding: 12px 16px;
+    border-inline-start: 3px solid var(--admin-green);
+    border-radius: 5px;
+    background: var(--admin-green-soft);
+    color: var(--admin-ink);
+}
+
+.deputy-record-assignment dt,
+.deputy-record-dialog.is-employee .deputy-record-field dt {
+    color: var(--admin-muted);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: none;
+}
+
+.deputy-record-assignment time {
+    margin-inline-start: .35em;
+    font-variant-numeric: tabular-nums;
+}
+
+.deputy-record-assignment dd {
+    margin: 3px 0 0;
+    font-size: 17px;
+    font-weight: 750;
+    overflow-wrap: anywhere;
+}
+
+.deputy-record-dialog.is-employee .deputy-record-fields {
+    padding: 16px 0 20px;
+    background: transparent;
+}
+
+.deputy-record-dialog.is-employee .deputy-record-field {
+    padding: 0;
+    background: transparent;
+}
+
+.is-employee .deputy-record-field a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--admin-line);
+    text-underline-offset: 3px;
+}
+
+.deputy-record-clients {
+    display: block;
+    color: var(--admin-muted);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.is-employee .deputy-dialog-actions,
+.deputy-record-dialog [hidden] {
+    display: none;
+}
+
+.deputy-record-form {
+    display: block;
+    container-type: inline-size;
+    padding: 14px 16px;
+    margin: 0 var(--record-gutter) 16px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+}
+.deputy-record-form label { margin: 0; }
+
+.deputy-duty-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+    border: 0;
+}
+
+.deputy-duty-options legend {
+    padding: 0 0 10px;
+    color: var(--admin-ink);
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.deputy-duty-options label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.deputy-duty-options label:has(:checked) {
+    border-color: var(--admin-green);
+    background: var(--admin-green-soft);
+}
+
+.deputy-duty-options input[type=radio] {
+    flex: 0 0 16px;
+    width: 16px;
+    min-height: 0;
+    height: 16px;
+    margin: 2px 0 0;
+    accent-color: var(--admin-green);
+}
+
+.deputy-duty-options strong { font-size: 15px; white-space: nowrap; }
+.deputy-duty-options small,
+.deputy-record-duty-inputs small {
+    color: var(--admin-muted);
+    font-size: 13px;
+    font-weight: 500;
+}
+.deputy-duty-options small { display: block; margin-top: 3px; white-space: nowrap; }
+
+.deputy-record-duty-inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 14px;
+    margin-top: 12px;
+}
+
+.deputy-record-duty-inputs label {
+    display: grid;
+    align-content: end;
+    min-width: 0;
+    gap: 5px;
+    font-weight: 650;
+}
+
+.deputy-record-duty-inputs small { margin-inline-start: .25em; }
+.deputy-record-duty-inputs :is(input, select) {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    padding: 7px 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    color: var(--admin-ink);
+    background: var(--admin-panel);
+    font: inherit;
+    font-weight: 500;
+}
+
+.deputy-record-duty-confirm {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+    border-top: 1px solid var(--admin-line-soft);
+    padding-top: 12px;
+}
+.deputy-record-duty-feedback {
+    flex: 1 1 15em;
+}
+.deputy-record-duty-feedback p {
+    margin: 0;
+    color: var(--admin-muted);
+}
+.deputy-record-duty-confirm .admin-button-primary {
+    width: auto;
+    padding: 0 16px;
+    min-height: 42px;
+    border: 0;
+    background: #147448;
+    color: #fff;
+    font: 650 15px/1.25 "Segoe UI", system-ui, sans-serif;
+    letter-spacing: normal;
+    text-transform: none;
+    white-space: nowrap;
+}
+.deputy-record-duty-confirm .admin-button-primary:enabled:hover { background: #105e3a; }
+.deputy-record-duty-confirm .admin-button-primary:disabled {
+    color: var(--admin-muted);
+    background: var(--admin-panel-soft);
+    box-shadow: none;
+    cursor: default;
+}
+.deputy-record-form :is(input, select, button):focus-visible,
+.deputy-record-close:focus-visible {
+    outline: 2px solid var(--admin-green);
+    outline-offset: 2px;
+}
+.deputy-record-duty-error {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--admin-red);
+    overflow-wrap: anywhere;
+}
+
+@container (max-width: 50rem) {
+    .deputy-duty-options { grid-template-columns: minmax(0, 1fr); }
+    .deputy-duty-options label { align-items: center; }
+    .deputy-duty-options label > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+    .deputy-duty-options small { margin: 0; }
+}
+@media (max-width: 800px) {
+    .deputy-record-dialog.is-employee[open] {
+        display: flex;
+        flex-direction: column;
+        reading-flow: flex-visual;
+    }
+    .is-employee > * { flex-shrink: 0; }
+    .is-employee .deputy-record-close { order: -1; reading-order: -1; }
+    .is-employee .deputy-record-fields { order: 1; }
+    .is-employee .deputy-record-form { margin-block: 12px 0; }
+}
+@media (max-width: 620px) {
+    .deputy-record-dialog { --record-gutter: 12px; }
+    .deputy-record-dialog.is-employee { max-height: calc(100dvh / var(--admin-interface-scale, 1) - 24px); }
+    .deputy-record-form { padding: 12px; }
+    .deputy-duty-options label { min-height: 48px; }
+    .deputy-record-duty-inputs { grid-template-columns: minmax(0, 1fr); }
+    .deputy-record-duty-confirm .admin-button-primary { width: 100%; }
+    .deputy-record-assignment,
+    .deputy-record-dialog.is-employee .deputy-record-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    .is-employee .deputy-record-head { grid-template-columns: 46px minmax(0, 1fr); gap: 10px; padding-top: 16px; }
+    .is-employee .deputy-record-visual { width: 46px; height: 46px; }
+}
+
+@media (min-width: 360px) and (max-width: 620px) {
+    .deputy-record-assignment { grid-template-columns: minmax(0, 1fr) auto; }
 }
 
 .deputy-toast {
@@ -1690,13 +2114,40 @@ button.deputy-avatar {
     height: calc(100% - 70px);
     padding: 10px;
     overflow-y: auto;
+    scrollbar-gutter: stable;
+}
+
+.deputy-import-page .deputy-publications-card {
+    align-self: start;
+    justify-self: center;
+    width: min(100%, 44rem);
+    max-height: 100%;
+}
+
+.deputy-import-page .deputy-dialog-actions {
+    justify-content: flex-start;
+    padding: 8px 0 0;
+    border: 0;
+}
+
+.deputy-import-choice {
+    display: grid;
+    gap: 4px;
+    margin-top: 10px;
+    overflow-wrap: anywhere;
+}
+
+.deputy-import-choice select {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
 }
 
 .deputy-publication-row {
     display: grid;
-    grid-template-columns: minmax(130px, .8fr) minmax(120px, .7fr) minmax(190px, 1.2fr) auto;
+    grid-template-columns: minmax(0, .8fr) minmax(0, .9fr) minmax(0, 1.2fr) clamp(18rem, 29%, 24rem);
     gap: 12px;
-    align-items: center;
+    align-items: start;
     min-height: 68px;
     padding: 9px 11px;
     border: 1px solid var(--admin-line-soft);
@@ -1738,10 +2189,24 @@ button.deputy-avatar {
 }
 
 .deputy-publication-status {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
-    justify-content: flex-end;
+    align-self: center;
+}
+
+.deputy-publication-row > .deputy-publication-status > .admin-chip {
+    justify-self: start;
+    max-width: 100%;
+    box-sizing: border-box;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.deputy-publication-status > .admin-button {
+    grid-column: 2;
 }
 
 .deputy-report-empty {
@@ -1766,6 +2231,16 @@ button.deputy-avatar {
     font-weight: 800;
 }
 
+@media (max-width: 1600px) {
+    .deputy-planning-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .deputy-planning-scope {
+        grid-column: 1 / -1;
+    }
+}
+
 @media (max-width: 1180px) {
     .deputy-mining-manager-screen {
         overflow: auto;
@@ -1779,14 +2254,6 @@ button.deputy-avatar {
     .deputy-server-messages {
         position: static;
         width: 100%;
-    }
-
-    .deputy-planning-toolbar {
-        grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .deputy-planning-scope {
-        grid-column: 1 / -1;
     }
 
     .deputy-work-date span {
@@ -1805,7 +2272,27 @@ button.deputy-avatar {
     }
 }
 
+@media (max-width: 1000px) {
+    .deputy-planning-toolbar {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .deputy-toolbar-actions {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+
+    .deputy-publication-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 @media (max-width: 720px) {
+    .deputy-search-results a {
+        grid-template-columns: minmax(0, 1fr);
+        min-height: 44px;
+    }
+
     .deputy-shell {
         --admin-console-header-height: 108px;
     }
@@ -1854,17 +2341,20 @@ button.deputy-avatar {
     }
 
     .deputy-shell .admin-console-nav {
-        flex: 1 1 auto;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         width: 100%;
-        justify-content: stretch;
+        gap: 4px;
     }
 
     .deputy-shell .admin-console-nav a {
-        flex: 1 1 0;
         min-width: 0;
         min-height: 44px;
-        padding: 0 8px;
+        padding: 0 4px;
         font-size: 11px;
+        line-height: 1.15;
+        text-align: center;
+        white-space: normal;
     }
 
     .deputy-shell .admin-console-actions {
@@ -1903,7 +2393,10 @@ button.deputy-avatar {
         padding: 6px;
     }
 
-    .deputy-category-nav,
+    .deputy-category-nav {
+        flex-wrap: nowrap;
+    }
+
     .deputy-planning-scope,
     .deputy-toolbar-actions {
         grid-column: auto;
@@ -1927,7 +2420,7 @@ button.deputy-avatar {
 
     .deputy-toolbar-actions {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 72px 116px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
         justify-content: stretch;
     }
@@ -1982,20 +2475,6 @@ button.deputy-avatar {
         overflow-y: hidden;
     }
 
-    .deputy-employee-card {
-        grid-template-columns: 38px minmax(0, 1fr) 16px;
-    }
-
-    .deputy-employee-card > .deputy-presence {
-        grid-column: 2;
-        justify-self: start;
-    }
-
-    .deputy-employee-card > .deputy-drag-mark {
-        grid-column: 3;
-        grid-row: 1 / span 2;
-    }
-
     .deputy-employee-drop-hint {
         inset: 54px 8px 8px;
         min-height: 60px;
@@ -2010,6 +2489,23 @@ button.deputy-avatar {
 
     .deputy-assignment-board {
         min-height: 470px;
+    }
+
+    .deputy-board-scroll[data-found-shift] table {
+        min-width: 0;
+    }
+
+    .deputy-board-scroll[data-found-shift="day"] :is(th,td):nth-child(3),
+    .deputy-board-scroll[data-found-shift="night"] :is(th,td):nth-child(2) {
+        display: none;
+    }
+
+    .deputy-board-scroll[data-found-shift] th:not(:first-child) {
+        width: 76%;
+    }
+
+    .deputy-board-scroll[data-found-shift] .deputy-equipment-cell {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .deputy-assignment-table th:first-child,
@@ -2032,6 +2528,11 @@ button.deputy-avatar {
 
     .deputy-dialog-actions .admin-button {
         flex: 1 1 130px;
+    }
+
+    .deputy-import-page .deputy-dialog-actions button[type="submit"] {
+        flex-basis: 100%;
+        min-height: 44px;
     }
 
     .deputy-dialog-actions [data-clear-slot] {
@@ -2102,13 +2603,9 @@ button.deputy-avatar {
         overflow: visible;
     }
 
-    .deputy-publication-row {
-        grid-template-columns: 1fr 1fr;
-    }
-
+    .deputy-publication-time,
     .deputy-publication-status {
         grid-column: 1 / -1;
-        justify-content: flex-start;
     }
 }
 
@@ -2121,4 +2618,64 @@ button.deputy-avatar {
     .deputy-equipment-icon {
         transition: none;
     }
+}
+
+.deputy-factual-candidates {
+    padding: 0 16px 8px;
+    font-size: 13px;
+}
+
+.deputy-specialization-review.is-resolved {
+    color: var(--admin-muted);
+    background: var(--admin-panel-soft);
+    border-color: var(--admin-line);
+}
+
+.has-specialization-review {
+    container-type: inline-size;
+}
+
+.deputy-specialization-review {
+    padding: 2px 5px;
+    border: 1px solid #c99437;
+    border-radius: 4px;
+    color: #744400;
+    background: #ffecad;
+    font-size: 10px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.has-specialization-review:hover .deputy-specialization-review {
+    text-decoration: underline;
+}
+
+.deputy-review-symbol {
+    display: none;
+}
+
+@container (max-width: 300px) {
+    .deputy-review-label {
+        display: none;
+    }
+
+    .deputy-review-symbol {
+        display: inline;
+        font-weight: 900;
+    }
+}
+
+.deputy-extension-badge {
+    display: inline-block;
+    align-self: start;
+    justify-self: start;
+    max-width: 100%;
+    width: fit-content;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #ffe49a;
+    color: #4e3600;
+    font-size: .75rem;
+    font-weight: 700;
+    line-height: 1.25;
 }

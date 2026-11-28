@@ -1,9 +1,10 @@
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const template = fs.readFileSync(path.join(__dirname, '../../../templates/trips/excavator_work.html'), 'utf8');
+const template = excavatorScreenSource();
 const sharedDragSource = fs.readFileSync(path.join(__dirname, '../excavator-dashboard-drag-v1.js'), 'utf8');
 
 function fixture(manual) {
@@ -166,9 +167,8 @@ function effectsFixture(reducedMotion = false) {
         document: {createElement: makeNode, createElementNS: makeNode, body: {appendChild: node => nodes.push(node)}},
     };
     vm.createContext(context);
-    const start = template.indexOf('    function moveTruckDragPreview(state, dx, dy)');
-    const end = template.indexOf('    function findDumpTargetIntersectingPreview', start);
-    vm.runInContext(template.slice(start, end), context);
+    context.window.document = context.document;
+    vm.runInContext(sharedDragSource, context);
     const preview = makeNode(); nodes.push(preview);
     const pickupFlare = makeNode(); nodes.push(pickupFlare);
     const state = {preview, pickupFlare, originRect: {left: 10, top: 20, width: 100, height: 100}};
@@ -180,10 +180,10 @@ function effectsFixture(reducedMotion = false) {
 
 test('comet follows one continuous bounded path, fades and releases its RAF and DOM', () => {
     const f = effectsFixture();
-    f.context.createTruckComet(f.state);
+    f.context.window.ExcavatorDashboardDrag.createComet(f.state, 'test-comet');
     const comet = f.state.comet;
     for (let n = 1; n <= 100; n++) {
-        f.context.moveTruckDragPreview(f.state, n * 8, n * 4);
+        f.context.window.ExcavatorDashboardDrag.movePreview(f.state, n * 8, n * 4);
         f.tick(n * 16);
     }
     assert.ok(comet.points.length <= 48);
@@ -199,7 +199,7 @@ test('comet follows one continuous bounded path, fades and releases its RAF and 
     assert.ok(Number(comet.layer.style.opacity) > 0);
     f.tick(2400);
     assert.equal(Number(comet.layer.style.opacity), 0);
-    f.context.removeTruckDragPreview(f.state);
+    f.context.window.ExcavatorDashboardDrag.removePreview(f.state);
     assert.equal(f.frames.size, 0);
     assert.equal(f.nodes.length, 0);
     assert.equal(f.state.comet, null);
@@ -208,30 +208,30 @@ test('comet follows one continuous bounded path, fades and releases its RAF and 
 
 test('larger visual preview preserves the nominal drop hitbox', () => {
     const f = effectsFixture();
-    f.context.moveTruckDragPreview(f.state, 30, 40);
+    f.context.window.ExcavatorDashboardDrag.movePreview(f.state, 30, 40);
     assert.match(f.state.preview.style.transform, /scale\(1\.18\)/);
     assert.deepEqual({...f.state.previewHitRect}, {left: 45, right: 135, top: 65, bottom: 155});
 });
 
 test('slow movement emits the tail outside the card instead of hiding it underneath', () => {
     const f = effectsFixture();
-    f.context.createTruckComet(f.state);
-    f.context.moveTruckDragPreview(f.state, 6, 0);
+    f.context.window.ExcavatorDashboardDrag.createComet(f.state, 'test-comet');
+    f.context.window.ExcavatorDashboardDrag.movePreview(f.state, 6, 0);
     f.tick(16);
     const tail = f.state.comet.points[0];
     const trailingEdge = 60 + 6 - 100 * 1.18 / 2;
     assert.ok(tail.x < trailingEdge);
-    f.context.removeTruckDragPreview(f.state);
+    f.context.window.ExcavatorDashboardDrag.removePreview(f.state);
 });
 
 test('reduced motion keeps static feedback without a comet or pending animation', () => {
     const f = effectsFixture(true);
-    f.context.createTruckComet(f.state);
-    f.context.moveTruckDragPreview(f.state, 30, 40);
+    f.context.window.ExcavatorDashboardDrag.createComet(f.state, 'test-comet');
+    f.context.window.ExcavatorDashboardDrag.movePreview(f.state, 30, 40);
     assert.equal(f.state.comet, undefined);
     assert.equal(f.frames.size, 0);
     assert.match(f.state.preview.style.transform, /scale\(1\)/);
-    f.context.removeTruckDragPreview(f.state);
+    f.context.window.ExcavatorDashboardDrag.removePreview(f.state);
     assert.equal(f.nodes.length, 0);
 });
 
@@ -248,12 +248,11 @@ test('drag copy sheds blocking and transfer decoration while the real truck reta
     const context = {
         window: {matchMedia: () => ({matches: true}), getComputedStyle: () => ({borderRadius: '12px'})},
         document: {body: {appendChild() {}}, createElement: () => ({})},
-        moveTruckDragPreview() {},
     };
     vm.createContext(context);
-    const start = template.indexOf('    function createTruckDragPreview(state)');
-    vm.runInContext(template.slice(start, template.indexOf('    function moveTruckDragPreview', start)), context);
-    context.createTruckDragPreview({card, originRect: {left: 0, top: 0, width: 100, height: 100}});
+    context.window.document = context.document;
+    vm.runInContext(sharedDragSource, context);
+    context.window.ExcavatorDashboardDrag.createPreview({card, originRect: {left: 0, top: 0, width: 100, height: 100}});
     assert.ok(card.classes.includes('is-load-blocked'));
     assert.ok(card.classes.includes('is-shift-pending'));
     assert.ok(cloneClasses.has('is-plan-overrun'));
@@ -361,7 +360,7 @@ test('mutation queues a higher-version fragment behind an invalidated in-flight 
 
 test('truck loaded outbox event carries exact assignment state and immutable context', () => {
     const start = template.indexOf('    function postTruckLoaded(card, dumpTarget)');
-    const end = template.indexOf('    function clearDropReady()', start);
+    const end = template.indexOf('    function isFreeBucketCancelSwipe(', start);
     const source = template.slice(start, end);
     assert.match(source, /assignment_id:\s*isFreeBucketLoad \? "" : \(card\.dataset\.assignmentId/);
     assert.match(source, /event_type:\s*isFreeBucketLoad \? "excavator\.free_bucket\.loaded" : "excavator\.trip\.loaded"/);
@@ -470,7 +469,7 @@ test('offline restart restores a valid tab from URL or access-scoped storage', (
 
 test('fragment replacement rebinds outbox dispatch to the new shell without duplicate lifecycle listeners', async () => {
     const start = template.indexOf('function ensureExcavatorFieldOutbox(shell)');
-    const end = template.indexOf('window.initExcavatorWorkShell = function ()', start);
+    const end = template.indexOf('window.ExcavatorWorkRuntime =', start);
     const source = template.slice(start, end);
     const oldShell = {
         name: 'old',

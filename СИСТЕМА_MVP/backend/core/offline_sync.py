@@ -291,24 +291,18 @@ def _process_driver_free_bucket_selected(access, normalized):
             'free_bucket_primary_target',
             'Основной экскаватор не требует отдельного запроса свободного ковша.',
         )
-    # Действующее принятие — ТЕМ ЖЕ фильтром, что видит экран водителя
-    # (active_free_bucket_acceptance_filter, с TTL 10 минут для запроса): раньше
-    # здесь смотрели только на статус, и просроченный запрос, уже невидимый
-    # водителю, всё равно отвечал «уже выбран другой экскаватор» — сервер держал
-    # работника (стенд 28.09.2026). Просроченный запрос гасится как истёкший
-    # (CANCELLED моментом истечения, как при закрытии смены), новый выбор
-    # принимается. ACCEPTED и USED — как прежде, без срока: принятое
-    # машинистом право и созданный рейс живут по своим правилам.
+    # Compare with the time of the selection, including when it arrived offline.
     from trips.free_bucket import (
+        FREE_BUCKET_REQUEST_TTL,
         active_free_bucket_acceptance_filter,
         expire_stale_free_bucket_requests,
     )
-    expire_stale_free_bucket_requests(truck, now=normalized['received_at'])
+    expire_stale_free_bucket_requests(truck, now=normalized['occurred_at'])
     existing = (
         FreeBucketAcceptance.objects.select_for_update(of=('self',))
         .filter(truck=truck)
         .filter(
-            active_free_bucket_acceptance_filter(now=normalized['received_at'])
+            active_free_bucket_acceptance_filter(now=normalized['occurred_at'])
             | Q(status__in=(
                 FreeBucketAcceptanceStatus.ACCEPTED,
                 FreeBucketAcceptanceStatus.USED,
@@ -383,7 +377,8 @@ def _process_driver_free_bucket_selected(access, normalized):
     )
     if latest:
         terminal_at = latest.closed_at or latest.cancelled_at or latest.used_at or latest.accepted_at or latest.occurred_at
-        if normalized['occurred_at'] <= terminal_at:
+        at_expiry = normalized['occurred_at'] == latest.cancelled_at == latest.occurred_at + FREE_BUCKET_REQUEST_TTL
+        if normalized['occurred_at'] <= terminal_at and not at_expiry:
             _conflict('free_bucket_request_stale', 'Запоздалый выбор относится к уже завершённому состоянию.')
 
     snapshot = _free_bucket_work_context_snapshot(excavator)
@@ -413,6 +408,8 @@ def _process_driver_free_bucket_selected(access, normalized):
 
 
 def _process_free_bucket_accepted(access, normalized):
+    from assignments.models import HaulAssignment
+    from trips.free_bucket import FREE_BUCKET_REQUEST_TTL, expire_stale_free_bucket_requests
     from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus, OPEN_TRIP_STATUSES, Trip
     from trips.trip_creation import lock_trip_participant_equipment
 
@@ -429,10 +426,12 @@ def _process_free_bucket_accepted(access, normalized):
     _validate_free_bucket_participants(excavator, truck)
     if Trip.objects.select_for_update().filter(truck=truck, status__in=OPEN_TRIP_STATUSES).exists():
         _conflict('open_trip_exists', 'Самосвал уже находится в незавершённом рейсе.')
+    occurred_at = normalized['occurred_at']
+    expire_stale_free_bucket_requests(truck, now=occurred_at)
+    history = FreeBucketAcceptance.objects.select_for_update().filter(truck=truck)
     existing = (
-        FreeBucketAcceptance.objects.select_for_update()
+        history
         .filter(
-            truck=truck,
             status__in=(
                 FreeBucketAcceptanceStatus.REQUESTED,
                 FreeBucketAcceptanceStatus.ACCEPTED,
@@ -441,33 +440,45 @@ def _process_free_bucket_accepted(access, normalized):
         )
         .first()
     )
+    if not existing:
+        previous = history.order_by('-occurred_at', '-id').first()
+        if previous and occurred_at < (previous.closed_at or previous.cancelled_at or previous.occurred_at):
+            # A driver's request may have expired while the operator's response was in the outbox.
+            if (previous.status == FreeBucketAcceptanceStatus.CANCELLED and not previous.accepted_at
+                    and previous.occurred_at <= occurred_at < previous.cancelled_at):
+                existing = previous
+            else:
+                _conflict('free_bucket_request_stale', 'После этого приёма состояние самосвала уже изменилось.')
     if existing:
         if _free_bucket_trip_changed_between(
             truck,
             occurred_at=(
                 existing.occurred_at
-                if existing.status == FreeBucketAcceptanceStatus.REQUESTED
+                if not existing.accepted_at
                 else normalized['occurred_at']
             ),
             received_at=normalized['received_at'],
         ):
             _conflict('free_bucket_request_stale', 'После выбора состояние рейса уже изменилось.')
         if existing.excavator_id != excavator.id:
-            if existing.status == FreeBucketAcceptanceStatus.REQUESTED:
+            if not existing.accepted_at:
                 _conflict('free_bucket_target_changed', 'Водитель уже выбрал другой экскаватор.')
             _conflict(
                 'free_bucket_already_accepted',
                 'Самосвал уже принят другим экскаватором или ожидает разгрузки.',
             )
-        if existing.status != FreeBucketAcceptanceStatus.REQUESTED:
+        if existing.accepted_at:
             _conflict(
                 'free_bucket_already_accepted',
                 'Самосвал уже принят под свободный ковш или ожидает разгрузки после такой погрузки.',
             )
+        if occurred_at < existing.occurred_at:
+            _conflict('free_bucket_request_stale', 'Запоздалый приём не может использовать более новый запрос.')
         existing.operator = access.employee
         existing.loading_shift = shift
-        existing.status = FreeBucketAcceptanceStatus.ACCEPTED
-        existing.accepted_at = max(existing.occurred_at, normalized['occurred_at'])
+        if existing.cancelled_at is None:
+            existing.status = FreeBucketAcceptanceStatus.ACCEPTED
+        existing.accepted_at = occurred_at
         existing.save(update_fields=['operator', 'loading_shift', 'status', 'accepted_at'])
         acceptance = existing
     else:
@@ -490,6 +501,20 @@ def _process_free_bucket_accepted(access, normalized):
             accepted_at=normalized['occurred_at'],
             work_context_snapshot=_free_bucket_work_context_snapshot(excavator),
         )
+    # A direct offline accept may arrive after its excavator has already become the primary.
+    # Keep the original right for a dependent swipe recorded before that transition.
+    if acceptance.cancelled_at is None:
+        became_primary_at = (
+            HaulAssignment.objects.filter(
+                truck=truck, excavator=excavator,
+                accepted_at__gt=occurred_at, accepted_at__lte=normalized['received_at'],
+            )
+            .order_by('accepted_at').values_list('accepted_at', flat=True).first()
+        )
+        if became_primary_at:
+            acceptance.status = FreeBucketAcceptanceStatus.CANCELLED
+            acceptance.cancelled_at = min(became_primary_at, acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL)
+            acceptance.save(update_fields=['status', 'cancelled_at'])
     state = bump_operational_state(
         'OfflineFieldEvent:free_bucket_accepted', event_type='trip_changed',
         object_type='FreeBucketAcceptance', object_id=acceptance.id,
@@ -674,12 +699,12 @@ def _close_downtimes_for_load(access, *, truck, excavator, occurred_at, process)
 
 
 def _process_free_bucket_loaded(access, normalized):
-    """Consume exactly one confirmed free-bucket acceptance into an ordinary Trip."""
+    """Record one load at the selected excavator."""
     from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
     from downtimes.models import DowntimeEvent
     from shifts.models import EmployeeShift
-    from trips.free_bucket import resolve_free_bucket_load_context
-    from trips.models import FreeBucketAcceptanceStatus, OPEN_TRIP_STATUSES, Trip, TripClientAction
+    from trips.free_bucket import FREE_BUCKET_REQUEST_TTL, resolve_free_bucket_load_context
+    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus, OPEN_TRIP_STATUSES, Trip, TripClientAction
     from trips.trip_creation import create_loaded_waiting_unload_trip, lock_trip_participant_equipment
     from trips.views import notify_driver_truck_loaded, reconcile_excavator_waiting_for_trucks
 
@@ -691,11 +716,18 @@ def _process_free_bucket_loaded(access, normalized):
     lock_production_state()
     excavator, truck = lock_trip_participant_equipment(excavator_id=shift.equipment_id, truck_id=truck_id)
     acceptance = _resolve_free_bucket_acceptance(access, normalized)
+    driver_selection = (
+        acceptance.status in (FreeBucketAcceptanceStatus.REQUESTED, FreeBucketAcceptanceStatus.CANCELLED)
+        and acceptance.requesting_shift_id is not None
+        and acceptance.operator_id is None
+        and acceptance.accepted_at is None
+    )
     if (
         acceptance.truck_id != truck.id
         or acceptance.excavator_id != excavator.id
-        or acceptance.operator_id != access.employee_id
-        or acceptance.loading_shift_id != shift.id
+        or (not driver_selection and (
+            acceptance.operator_id != access.employee_id or acceptance.loading_shift_id != shift.id
+        ))
     ):
         _conflict('free_bucket_context_changed', 'Временный приём не соответствует этой погрузке.')
     merge_driver_trip = False
@@ -722,11 +754,25 @@ def _process_free_bucket_loaded(access, normalized):
         )
         if not merge_driver_trip:
             _conflict('free_bucket_already_loaded', 'Погрузка по свободному ковшу уже выполнена другим событием.')
-    if acceptance.status != FreeBucketAcceptanceStatus.ACCEPTED and not merge_driver_trip:
+    occurred_at = normalized['occurred_at']
+    if occurred_at >= acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL and not merge_driver_trip:
+        _conflict('free_bucket_expired', 'В момент погрузки время свободного ковша уже истекло.')
+    if acceptance.status == FreeBucketAcceptanceStatus.CANCELLED and (acceptance.accepted_at or driver_selection):
+        # An earlier offline swipe can consume its own reservation after expiry or transfer.
+        # A later receipt must never displace a competing reservation or trip.
+        competing = FreeBucketAcceptance.objects.filter(truck=truck).exclude(pk=acceptance.pk).filter(
+            Q(occurred_at__gte=acceptance.occurred_at)
+            | Q(status__in=(FreeBucketAcceptanceStatus.REQUESTED, FreeBucketAcceptanceStatus.ACCEPTED,
+                            FreeBucketAcceptanceStatus.USED))
+        )
+        if (occurred_at >= acceptance.cancelled_at or competing.exists()
+                or _free_bucket_trip_changed_between(truck, occurred_at=occurred_at, received_at=normalized['received_at'])):
+            _conflict('free_bucket_not_available', 'Временный приём отменён или самосвал уже начал другую работу.')
+    elif not driver_selection and acceptance.status != FreeBucketAcceptanceStatus.ACCEPTED and not merge_driver_trip:
         _conflict('free_bucket_not_available', 'Временный приём уже использован или отменён.')
-    if not acceptance.accepted_at:
-        _conflict('free_bucket_not_accepted', 'Временный запрос ещё не согласован машинистом.')
-    if normalized['occurred_at'] < acceptance.accepted_at:
+    if not driver_selection and not acceptance.accepted_at:
+        _conflict('free_bucket_not_accepted', 'В записи свободного ковша отсутствует время начала.')
+    if occurred_at < (acceptance.accepted_at or acceptance.occurred_at):
         _conflict('free_bucket_load_before_accept', 'Время погрузки раньше времени приёма под свободный ковш.')
     if not merge_driver_trip:
         _release_open_trips_unknown_to_worker(
@@ -784,10 +830,17 @@ def _process_free_bucket_loaded(access, normalized):
     except ValidationError as error:
         _conflict('trip_validation_failed', '; '.join(error.messages))
     if not merge_driver_trip:
+        if driver_selection:
+            acceptance.operator = access.employee
+            acceptance.loading_shift = shift
+            acceptance.accepted_at = occurred_at
         acceptance.status = FreeBucketAcceptanceStatus.USED
+        acceptance.cancelled_at = None
         acceptance.used_at = normalized['occurred_at']
         acceptance.used_trip = trip
-        acceptance.save(update_fields=['status', 'used_at', 'used_trip'])
+        acceptance.save(update_fields=[
+            'status', 'operator', 'loading_shift', 'accepted_at', 'cancelled_at', 'used_at', 'used_trip',
+        ])
     TripClientAction.objects.create(action_type='free_bucket_loaded', client_action_id=normalized['event_id'], trip=trip, actor=access.employee)
     close_truck_waiting_loading_downtimes(truck, ended_at=normalized['occurred_at'])
     reconcile_excavator_waiting_for_trucks(excavator, access.employee, start_when_empty=True)
@@ -1306,6 +1359,60 @@ def _automatic_load_receipt(trip, *, acceptance=None):
         .order_by('sequence', 'id')
         .first()
     )
+
+
+def _guard_excavator_load_intent(access, normalized, *, truck, shift, open_trip, expected_id):
+    """Resolve a guarded ordinary load before it can replace an unconfirmed trip."""
+    from trips.models import Trip, TripStatus
+
+    payload = normalized['payload']
+    intent = payload.get('load_intent')
+    if intent is None:
+        return None  # Keep the existing contract for receipts saved by older shells.
+    if intent not in ('standard', 'new_cycle'):
+        _invalid('invalid_load_intent', 'Неизвестный вид погрузки.')
+    expected_id = _positive_int(expected_id, field='expected_open_trip_id', required=False)
+
+    occurred_at = normalized['occurred_at']
+    if open_trip and open_trip.loaded_at and open_trip.loaded_at <= occurred_at:
+        previous = open_trip
+    else:
+        previous = (
+            Trip.objects.select_for_update(of=('self',))
+            .filter(truck=truck, loaded_at__lte=occurred_at)
+            .exclude(status=TripStatus.CANCELLED)
+            .filter(Q(completed_at__isnull=True) | Q(completed_at__gt=occurred_at))
+            .filter(Q(operationally_closed_at__isnull=True) | Q(operationally_closed_at__gt=occurred_at))
+            .order_by('-loaded_at', '-pk').first()
+        )
+
+    if intent == 'new_cycle':
+        expected = previous or (
+            Trip.objects.filter(truck=truck, loaded_at__lte=occurred_at)
+            .exclude(status=TripStatus.CANCELLED)
+            .order_by('-loaded_at', '-pk').first()
+        )
+        if (
+            expected is None
+            or expected.pk != expected_id
+            or (open_trip and open_trip.pk != expected.pk)
+            or (open_trip and open_trip.loaded_at and open_trip.loaded_at > occurred_at)
+        ):
+            _conflict('new_load_confirmation_outdated',
+                      'Предыдущий рейс изменился. Сверьте отметку перед новой погрузкой.')
+        return None
+
+    if previous is None:
+        return None
+    if (
+        previous.pk == expected_id
+        and previous.loading_shift_id == shift.id
+        and previous.excavator_operator_id == access.employee_id
+        and _manual_load_matches_trip(previous, {**payload, 'truck_id': truck.id, 'excavator_id': shift.equipment_id})
+    ):
+        return previous
+    _conflict('new_load_confirmation_required',
+              'Погрузка сохранена для сверки: на момент отметки у самосвала уже был рейс.')
 
 
 def _automatic_load_authority_matches(receipt, *, assignment=None, acceptance=None):
@@ -2151,11 +2258,11 @@ def _process_excavator_loaded_via_free_bucket(access, normalized, *, shift, exca
 
 
 def _process_excavator_loaded(access, normalized):
-    from assignments.models import AssignmentStatus, HaulAssignment
+    from assignments.models import AssignmentStatus, HaulAssignment, HaulAssignmentAction
     from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
     from downtimes.models import DowntimeEvent
     from references.models import DumpPoint, RockType
-    from trips.manual_loading import may_replace_open_trip
+    from trips.manual_loading import attach_pending_excavator_trip_to_driver_shift, may_replace_open_trip
     from trips.models import OPEN_TRIP_STATUSES, Trip, TripClientAction
     from trips.trip_creation import create_loaded_waiting_unload_trip, lock_trip_participant_equipment
     from trips.views import (
@@ -2174,20 +2281,25 @@ def _process_excavator_loaded(access, normalized):
     excavator, truck = lock_trip_participant_equipment(excavator_id=shift.equipment_id, truck_id=truck_id)
     shift.equipment = excavator
     from trips.free_bucket import active_free_bucket_acceptance_for_truck
-    pending_acceptance = active_free_bucket_acceptance_for_truck(truck, for_update=True)
+    pending_acceptance = active_free_bucket_acceptance_for_truck(truck, for_update=True, reservation_only=True)
     if pending_acceptance:
         _conflict(
             'free_bucket_acceptance_required',
             'Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.',
         )
-    truck_claimed_elsewhere = (
+    open_assignments = (
         HaulAssignment.objects.select_for_update(of=('self',))
         .filter(truck_id=truck_id, ended_at__isnull=True, assigned_at__lte=normalized['occurred_at'])
-        .exclude(excavator_id=shift.equipment_id)
         .exclude(status=AssignmentStatus.CANCELLED)
-        .exists()
     )
-    if truck_claimed_elsewhere:
+    # During a transfer the previous accepted assignment remains open. A load
+    # against the incoming assignment completes that transfer through the regular path.
+    if open_assignments.exclude(excavator_id=shift.equipment_id).exists() and not open_assignments.filter(
+        pk=assignment_id,
+        excavator_id=shift.equipment_id,
+        action=HaulAssignmentAction.ASSIGN,
+        status=AssignmentStatus.PENDING,
+    ).exists():
         # Самосвал открыто числится за ДРУГИМ экскаватором прямо сейчас —
         # машинист истина по погрузке, отказа быть не должно, но и основное
         # назначение на пульте диспетчера трогать нельзя (правило: свободный
@@ -2219,7 +2331,8 @@ def _process_excavator_loaded(access, normalized):
         .order_by('-opened_at', '-id')
         .first()
     )
-    manual_control = payload.get('manual_control') is True
+    without_driver_shift = historical_driver_shift is None
+    manual_control = payload.get('manual_control') is True or without_driver_shift
     participation = {
         'shift': historical_driver_shift,
         'control_shift': None if manual_control else historical_driver_shift,
@@ -2277,7 +2390,17 @@ def _process_excavator_loaded(access, normalized):
                 action_type='truck_loaded',
             ).exists()
         )
-        if not merge_driver_trip:
+    if not merge_driver_trip:
+        repeated_trip = _guard_excavator_load_intent(
+            access, normalized, truck=truck, shift=shift, open_trip=open_trip, expected_id=expected_id,
+        )
+        if repeated_trip:
+            return {
+                'server_ids': {'trip_id': repeated_trip.id, 'shift_id': shift.id},
+                'load_already_recorded': True,
+                'version': _current_operational_version(),
+            }, {'trip': repeated_trip, 'shift': shift, 'equipment': truck}
+        if open_trip:
             trip_mismatch = str(expected_id or '') != str(open_trip.id)
             prior_is_own_offline_event = bool(linked_previous and linked_previous.id == open_trip.id)
             replace_blocked = not prior_is_own_offline_event and not may_replace_open_trip(open_trip, participation)
@@ -2341,6 +2464,7 @@ def _process_excavator_loaded(access, normalized):
         manual_control=manual_control,
         participation=participation,
         has_open_truck_shift=bool(historical_driver_shift),
+        allow_missing_driver_shift=without_driver_shift,
     )
     if load_block:
         _conflict(load_block['code'], load_block['label'])
@@ -2391,6 +2515,7 @@ def _process_excavator_loaded(access, normalized):
             downtime_text=payload.get('downtime_text'),
             note=payload.get('note'),
             participation=participation,
+            driver_participation_recorded=True if without_driver_shift else None,
             supersede_trip=current_open_trip,
             occurred_at=normalized['occurred_at'],
             resolve_assignment_transition=(
@@ -2404,6 +2529,19 @@ def _process_excavator_loaded(access, normalized):
         trip.load_received_at = normalized['received_at']
         trip.load_time_source = 'server_receipt'
         trip.save(update_fields=['load_received_at', 'load_time_source'])
+    if without_driver_shift and trip.loaded_at:
+        current_driver_shift = (
+            EmployeeShift.objects.filter(
+                equipment_id=truck_id, workplace_code='driver', closed_at__isnull=True,
+                opened_at__gte=trip.loaded_at,
+            )
+            .order_by('-opened_at', '-id')
+            .first()
+        )
+        if current_driver_shift:
+            attached_trip = attach_pending_excavator_trip_to_driver_shift(current_driver_shift)
+            if attached_trip and attached_trip.pk == trip.pk:
+                trip.driver_control_shift = current_driver_shift
     TripClientAction.objects.create(
         action_type='truck_loaded', client_action_id=normalized['event_id'],
         trip=trip, actor=access.employee,

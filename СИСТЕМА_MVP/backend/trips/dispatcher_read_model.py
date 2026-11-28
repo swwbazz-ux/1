@@ -77,6 +77,7 @@ def build_dispatcher_control_read_model(
             'actual_dump_point',
             'excavator_operator',
             'loading_shift',
+            'driver_control_shift',
         )
         .order_by('created_at')
     )
@@ -280,6 +281,7 @@ def build_dispatcher_control_read_model(
         equipment_card_ids=equipment_card_ids,
         equipment_work_assignments=equipment_work_assignments,
         reporting_period=reporting_period,
+        stable_complex_order=access.role.code != 'mining_master',
     )
 
     return DispatcherControlReadModel(

@@ -1,3 +1,4 @@
+import json
 import re
 from io import BytesIO
 from pathlib import Path
@@ -104,6 +105,49 @@ class EmployeeSexMigrationTests(TransactionTestCase):
 
 
 class UnifiedEmployeeCardTests(TestCase):
+    def test_settlement_category_label_follows_personnel_position(self):
+        worker = PersonnelPosition.objects.create(
+            code='ui-settlement-worker',
+            name='UI категория рабочий',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
+        )
+        itr = PersonnelPosition.objects.create(
+            code='ui-settlement-itr',
+            name='UI категория ИТР',
+            settlement_category=PersonnelPosition.SettlementCategory.ITR,
+        )
+        unclassified = PersonnelPosition.objects.create(
+            code='ui-settlement-empty',
+            name='UI категория не указана',
+        )
+        employee = Employee.objects.create(
+            full_name='Проверка Категории',
+            phone='+79001112244',
+            personnel_position=worker,
+            status=Employee.Status.ACTIVE,
+        )
+        for position, label in (
+            (worker, 'Рабочий'),
+            (itr, 'ИТР'),
+            (unclassified, 'Не указана'),
+        ):
+            with self.subTest(position=position.code):
+                employee.personnel_position = position
+                employee.save(update_fields=['personnel_position'])
+                form = EmployeeCardForm(instance=employee)
+
+                self.assertEqual(position.settlement_category_label, label)
+                self.assertEqual(form.selected_settlement_category_label, label)
+                catalog = json.loads(
+                    form.fields['base_specialization'].widget.attrs[
+                        'data-specialization-catalog'
+                    ],
+                )
+                self.assertEqual(
+                    catalog[str(position.id)]['settlement_category_label'],
+                    label,
+                )
+
     def setUp(self):
         self.admin_role, _ = Role.objects.update_or_create(code='admin', defaults={'name': 'Администратор'})
         self.oup_role, _ = Role.objects.update_or_create(code='oup', defaults={'name': 'Специалист ОУП'})
@@ -177,6 +221,25 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(create_response, '>Выберите доступ</option>', html=False)
         self.assertContains(create_response, '<details class="employee-card-section employee-card-notes"', html=False)
         self.assertContains(edit_response, 'data-copy-target="#id_phone"', html=False)
+
+    def test_employee_card_shows_settlement_category_of_personnel_position(self):
+        self.login_as(self.admin_access)
+        self.truck_position.settlement_category = (
+            PersonnelPosition.SettlementCategory.WORKER
+        )
+        self.truck_position.save(update_fields=['settlement_category'])
+
+        response = self.client.get(
+            reverse('system_admin_employee_detail', args=[self.employee.id]),
+        )
+
+        self.assertContains(response, 'id="employee-settlement-category"', html=False)
+        self.assertContains(response, '>Категория для расселения</label>', html=False)
+        self.assertContains(
+            response,
+            '<input id="employee-settlement-category" value="Рабочий" readonly>',
+            html=False,
+        )
 
     def test_oup_create_and_edit_use_the_same_template_as_admin(self):
         oup_employee = Employee.objects.create(
@@ -341,7 +404,28 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(registry, 'Подразделения')
         self.assertContains(registry, 'Графики работы')
         self.assertContains(detail, 'Официальные должности из 1С')
+        self.assertContains(detail, 'Требуется техника')
+        self.assertTrue(PersonnelPosition.objects.get(name='Машинист экскаватора').requires_equipment)
+        self.assertFalse(PersonnelPosition.objects.get(name='Слесарь-ремонтник').requires_equipment)
+        self.assertFalse(PersonnelPosition.objects.get(name='Горный мастер').requires_equipment)
         self.assertContains(detail, 'Разрешенные производственные специализации')
+
+    def test_admin_can_toggle_equipment_requirement_in_position_reference(self):
+        self.login_as(self.admin_access)
+        position = PersonnelPosition.objects.create(code='qa-position-toggle', name='Рабочая должность')
+        url = reverse('system_admin_reference_detail', args=['personnel-positions'])
+        fields = {
+            'action': 'save', 'record_id': str(position.pk), 'name': position.name,
+            'code': position.code, 'settlement_category': 'worker', 'is_active': 'on',
+        }
+        for enabled in (True, False):
+            data = dict(fields)
+            if enabled:
+                data['requires_equipment'] = 'on'
+            response = self.client.post(url, data)
+            self.assertEqual(response.status_code, 302)
+            position.refresh_from_db()
+            self.assertEqual(position.requires_equipment, enabled)
 
     def test_personnel_position_reference_rejects_default_outside_allowed_list(self):
         excavator_specialization = ProductionSpecialization.objects.get(code='excavator_operator')

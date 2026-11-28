@@ -1,0 +1,127 @@
+.management-workplace-header {
+    display: grid;
+    min-width: 0;
+    gap: 10px;
+    background: var(--gd-bg);
+    view-transition-name: management-header;
+}
+
+body:has(.management-connection-dot) > .app-connection-dot {
+    display: none;
+}
+
+.management-workplace-header .management-dashboard-header-actions {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(10px, 1fr);
+}
+
+.management-workplace-header .management-connection-dot {
+    position: static;
+    place-self: center end;
+    padding: 0;
+    background: transparent;
+    pointer-events: auto;
+}
+
+.management-workplace-header .management-connection-dot i {
+    width: 9px;
+    height: 9px;
+}
+
+.management-workplace-header .dispatcher-subnav a {
+    flex: 0 0 auto;
+}
+
+@media (max-width: 1180px) {
+    .management-workplace-header .management-dashboard-header-actions {
+        justify-self: stretch;
+    }
+}
+
+@media (max-width: 620px) {
+    .management-workplace-header {
+        gap: 4px;
+    }
+
+    .management-workplace-header .management-dashboard-header {
+        gap: 8px;
+        padding: 9px 12px;
+    }
+
+    .management-workplace-header .management-dashboard-header-title h1 {
+        font-size: clamp(18px, 6vw, 27px);
+    }
+
+    .management-workplace-header .management-dashboard-header-meta {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .management-workplace-header .management-dashboard-header-meta div {
+        min-height: 46px;
+        padding: 7px 9px;
+    }
+
+    .management-workplace-header .management-dashboard-header-actions {
+        grid-template-columns: 44px repeat(2, minmax(0, 1fr)) 10px;
+    }
+}
+
+[data-management-overview-live] {
+    display: contents;
+}
+
+.management-section-heading {
+    min-width: 0;
+    margin: 0;
+    color: var(--gd-ink);
+    font-size: 20px;
+}
+
+.management-dynamics-page[data-management-dynamics-refresh-root] {
+    min-width: 0;
+}
+
+.management-extensions-pane {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    --admin-panel: var(--gd-panel);
+    --admin-panel-soft: var(--gd-panel-soft);
+    --admin-ink: var(--gd-ink);
+    --admin-muted: var(--gd-muted);
+    --admin-line: var(--gd-line);
+    --admin-line-soft: var(--gd-line-soft);
+    --admin-shadow: var(--gd-shadow);
+    --admin-green: var(--gd-green);
+    --admin-green-soft: var(--gd-green-soft);
+    --admin-red: var(--gd-red);
+    --admin-red-soft: var(--gd-red-soft);
+    --admin-yellow: var(--gd-yellow);
+    --admin-yellow-soft: var(--gd-yellow-soft);
+    --admin-cyan: var(--gd-cyan);
+    --admin-cyan-soft: var(--gd-blue-soft);
+    --admin-gray: var(--gd-muted);
+    --admin-gray-soft: var(--gd-panel-soft);
+}
+
+@view-transition {
+    navigation: auto;
+}
+
+::view-transition-group(management-header),
+::view-transition-old(management-header),
+::view-transition-new(management-header) {
+    animation: none;
+}
+
+::view-transition-old(management-header) {
+    opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(root),
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+        animation: none;
+    }
+}

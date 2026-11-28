@@ -19,6 +19,30 @@ class CrewPlanStatus(models.TextChoices):
     SUPERSEDED = 'superseded', 'Заменен новой публикацией'
 
 
+class OffEquipmentStatus(models.TextChoices):
+    RESERVE = 'reserve', 'Резерв'
+    OTHER_WORK = 'other_work', 'Работа без техники'
+    SUSPENDED = 'suspended', 'Отстранён от управления техникой'
+    CLEARED = 'cleared', 'Отметка снята'
+
+
+class CrewOffEquipment(models.Model):
+    """Published operational status for a production day."""
+
+    work_date = models.DateField('Производственные сутки')
+    employee = models.ForeignKey('users.Employee', on_delete=models.CASCADE, related_name='+')
+    status = models.CharField(max_length=16, choices=OffEquipmentStatus.choices)
+    shift_type = models.CharField(max_length=16, choices=WorkShiftType.choices, blank=True)
+    location = models.CharField('Место и работа', max_length=180, blank=True)
+    updated_by = models.ForeignKey('users.Employee', null=True, on_delete=models.SET_NULL, related_name='+')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['employee', 'work_date'], name='unique_off_equipment_employee_date'),
+        ]
+
+
 class HaulAssignmentAction(models.TextChoices):
     ASSIGN = 'assign', 'Назначить'
     RELEASE = 'release', 'Снять назначение'
@@ -336,6 +360,14 @@ class CrewPlanSlot(models.Model):
         null=True,
         blank=True,
     )
+    reported_employee = models.ForeignKey(
+        'users.Employee', verbose_name='Фактический сотрудник на проверке',
+        on_delete=models.PROTECT, related_name='+', null=True, blank=True,
+    )
+    baseline_reported_employee = models.ForeignKey(
+        'users.Employee', verbose_name='Фактический сотрудник в базовой расстановке',
+        on_delete=models.PROTECT, related_name='+', null=True, blank=True,
+    )
     baseline_employee = models.ForeignKey(
         'users.Employee',
         verbose_name='Сотрудник в базовой расстановке',
@@ -361,6 +393,10 @@ class CrewPlanSlot(models.Model):
             models.UniqueConstraint(
                 fields=['plan', 'equipment', 'shift_type'],
                 name='unique_crew_plan_equipment_shift',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(employee__isnull=True) | models.Q(reported_employee__isnull=True),
+                name='crew_slot_one_primary_source',
             ),
             models.UniqueConstraint(
                 fields=['plan', 'employee'],

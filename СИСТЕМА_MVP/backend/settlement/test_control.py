@@ -14,13 +14,19 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, connections, transaction
 from django.test import Client, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
-from django.urls import Resolver404, resolve, reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
 
 from references.models import Dormitory
 from shifts.models import WatchPeriod
 from users import employee_access_locks
-from users.models import Employee, EmployeeAccess, Role, WatchComposition
+from users.models import (
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+    Role,
+    WatchComposition,
+)
 
 from . import control as control_module
 from . import residents as settlement_residents
@@ -38,6 +44,7 @@ from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
+    SettlementClerkShift,
     SettlementControlEvent,
     SettlementControlLease,
     SettlementPreviewApplication,
@@ -409,10 +416,27 @@ class SettlementControlLifecycleTests(
                 self.assertEqual(self.lease_state(), baseline_lease)
                 self.assertEqual(self.event_state(), baseline_events)
 
+    def test_upgrade_preserves_active_admin_credentials_and_unblocks_clerk(self):
+        from importlib import import_module
+        from django.apps import apps
+
+        # The old release stored an admin grant on the shared row.
+        admin = self.takeover(session='legacy-admin')
+        migration = import_module('settlement.migrations.0026_move_active_admin_control')
+        with transaction.atomic():
+            migration.move_admin_control(apps, connection.schema_editor())
+        self.acquire(session='new-clerk')
+        renewed = heartbeat_control_lease(
+            owner_access_id=self.admin_access.pk, raw_session_key='legacy-admin',
+            lease_token=admin.lease_token, fencing_revision=admin.fencing_revision, now=self.now,
+        )
+        self.assertEqual(renewed.lease_token, admin.lease_token)
+        self.assertEqual(SettlementControlLease.objects.get(scope='settlement').owner_access_id, self.clerk_access.pk)
+
     def test_activated_admin_access_is_allowed(self):
         grant = self.acquire(access=self.admin_access, session='admin-session')
 
-        lease = SettlementControlLease.objects.get(scope='settlement')
+        lease = SettlementControlLease.objects.get(scope=f'settlement:admin:{self.admin_access.pk}')
         self.assertEqual(lease.owner_access_id, self.admin_access.pk)
         self.assertEqual(grant.fencing_revision, 1)
         self.assertEqual(
@@ -1677,9 +1701,9 @@ class SettlementControlHttpLifecycleTests(
         self.authenticate(self.client, self.clerk_access)
         self.client.post(self.acquire_url)
         lease = SettlementControlLease.objects.get()
-        previous_expiry = lease.expires_at
+        previous_expiry = timezone.now() + timedelta(seconds=10)
         SettlementControlLease.objects.filter(pk=lease.pk).update(
-            expires_at=timezone.now() + timedelta(seconds=10),
+            expires_at=previous_expiry,
         )
 
         response = self.client.post(self.heartbeat_url)
@@ -1852,7 +1876,13 @@ class SettlementControlHttpLifecycleTests(
         self.assertContains(response, self.acquire_url)
         self.assertContains(response, self.heartbeat_url)
         self.assertContains(response, self.release_url)
-        self.assertEqual(response.content.count(b'-settlement-map-v34'), 2)
+        self.assertEqual(response.content.count(b'-settlement-map-v39'), 5)
+        self.assertContains(response, 'js/settlement-temporary-placement.js')
+        self.assertContains(response, 'js/settlement-clerk-shift.js')
+        self.assertNotContains(response, '-settlement-map-v37')
+        self.assertNotContains(response, '-settlement-map-v36')
+        self.assertNotContains(response, '-settlement-map-v35')
+        self.assertNotContains(response, '-settlement-map-v34')
         self.assertNotContains(response, '-settlement-map-v33')
         self.assertContains(response, 'data-auto-apply-night-url')
         self.assertContains(response, 'data-auto-apply-day-url')
@@ -1954,9 +1984,17 @@ class SettlementControlHttpLifecycleTests(
         )
         self.assertFalse(EmployeeBedOccupancy.objects.exists())
 
-    def test_no_takeover_endpoint_was_added(self):
-        with self.assertRaises(Resolver404):
-            resolve('/clerk/settlement/control/takeover/')
+    def test_takeover_endpoint_is_admin_only_http_route(self):
+        match = resolve('/clerk/settlement/control/takeover/')
+
+        self.assertEqual(
+            match.url_name,
+            'settlement_control_takeover',
+        )
+        self.assertEqual(
+            reverse('settlement_control_takeover'),
+            '/clerk/settlement/control/takeover/',
+        )
 
 
 class SettlementControlledWriterTests(
@@ -1979,6 +2017,20 @@ class SettlementControlledWriterTests(
             ends_on=today + timedelta(days=14),
             is_active=True,
         )
+        # Решение владельца 22.11.2026: категория кадровой должности обязательна.
+        cls.worker_position = PersonnelPosition.objects.create(
+            code='control-writer-worker',
+            name='Control writer worker position',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
+        )
+        # Решение владельца 22.11.2026: при активной вахте клерк пишет только
+        # со своей OPEN-сменой. Эти тесты про писателя/блокировки, поэтому
+        # смена клерка открыта в фикстуре.
+        cls.clerk_shift = SettlementClerkShift.objects.create(
+            clerk_access=cls.clerk_access,
+            watch_period=cls.watch_period,
+            status=SettlementClerkShift.Status.OPEN,
+        )
         cls.same_employee_access = EmployeeAccess.objects.create(
             employee=cls.clerk_access.employee,
             role=cls.clerk_role,
@@ -1990,6 +2042,7 @@ class SettlementControlledWriterTests(
             full_name='Control writer subject',
             personnel_number='CONTROL-WRITER-SUBJECT',
             sex=Employee.Sex.MALE,
+            personnel_position=cls.worker_position,
             watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
@@ -2005,6 +2058,7 @@ class SettlementControlledWriterTests(
             full_name='Control writer unrelated subject',
             personnel_number='CONTROL-WRITER-UNRELATED',
             sex=Employee.Sex.MALE,
+            personnel_position=cls.worker_position,
             watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
@@ -2031,7 +2085,9 @@ class SettlementControlledWriterTests(
             number=1,
             room_type=PhysicalRoom.RoomType.STANDARD,
             transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
-            capacity=1,
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+            # T-036 backend-14: комнаты <=2 мест — только ручной ИТР-путь.
+            capacity=3,
             corridor_side=PhysicalRoom.CorridorSide.LEFT,
             side_position=1,
         )
@@ -2041,7 +2097,9 @@ class SettlementControlledWriterTests(
             number=2,
             room_type=PhysicalRoom.RoomType.STANDARD,
             transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
-            capacity=1,
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+            # T-036 backend-14: комнаты <=2 мест — только ручной ИТР-путь.
+            capacity=3,
             corridor_side=PhysicalRoom.CorridorSide.RIGHT,
             side_position=1,
         )
@@ -2813,7 +2871,7 @@ class SettlementControlConcurrencyTests(
         )
         self.assertTrue(all(result[0] in {'success', 'validation'} for result in results))
 
-    def run_two_acquires(self):
+    def run_two_acquires(self, second_access=None):
         barrier = threading.Barrier(2)
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = (
@@ -2827,12 +2885,22 @@ class SettlementControlConcurrencyTests(
                 executor.submit(
                     self.acquire_in_thread,
                     barrier=barrier,
-                    access_id=self.second_clerk_access.pk,
+                    access_id=(second_access or self.second_clerk_access).pk,
                     session_key='concurrent-session-two',
                     now=self.now,
                 ),
             )
             return [future.result(timeout=20) for future in futures]
+
+    def test_admin_and_clerk_can_acquire_at_the_same_time(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Concurrent row locking is PostgreSQL-only.')
+        results = self.run_two_acquires(second_access=self.admin_access)
+        self.assertEqual([result[0] for result in results], ['acquired', 'acquired'], results)
+        self.assertCountEqual(
+            SettlementControlLease.objects.values_list('owner_access_id', flat=True),
+            [self.admin_access.pk, self.clerk_access.pk],
+        )
 
     def assert_single_concurrency_winner(self, results):
         self.assertEqual(

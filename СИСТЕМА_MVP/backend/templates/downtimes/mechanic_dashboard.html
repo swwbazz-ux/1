@@ -3,7 +3,14 @@
 {% block title %}Механическая служба{% endblock %}
 {% block body_class %}dispatcher-control-screen{% endblock %}
 {% block extra_head %}
+{% if access.role.code == 'mechanic' %}
 {% include "includes/role_app_pwa_head.html" with role_code="mechanic" manifest_url="/mechanic.webmanifest" service_worker_url="/mechanic-sw.js" legacy_scope="/mechanic/" theme_color="#C65C2E" apple_title="Механик" icon_180="img/pwa/mechanic-180.png" %}
+{% else %}
+{% if app_role_code == 'manager' %}
+{% include "reports/includes/management_pwa_head.html" %}
+{% endif %}
+{% include "reports/includes/management_workplace_assets.html" %}
+{% endif %}
 {% endblock %}
 
 {% block body %}

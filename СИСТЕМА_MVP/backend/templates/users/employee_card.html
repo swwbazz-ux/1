@@ -77,6 +77,7 @@
                   method="post"
                   enctype="multipart/form-data"
                   data-canonical-employee-card
+                  data-card-mode="{{ page_mode }}"
                   data-card-schema="employee-card-v1">
                 {% csrf_token %}
                 {{ form.position }}
@@ -177,6 +178,12 @@
                             </div>
                             {{ form.personnel_position }}{{ form.personnel_position.errors }}
                         </div>
+                        <div class="employee-card-field" data-card-field data-copy-label="Категория для расселения">
+                            <div class="employee-card-label-row">
+                                <label for="employee-settlement-category">Категория для расселения</label>
+                            </div>
+                            <input id="employee-settlement-category" value="{{ form.selected_settlement_category_label }}" readonly>
+                        </div>
                     </div>
                 </div>
 
@@ -220,6 +227,7 @@
                                 <button type="button" class="employee-copy-icon" data-copy-target="#{{ form.base_specialization.id_for_label }}" aria-label="Скопировать производственную специализацию" title="Скопировать производственную специализацию"></button>
                             </div>
                             {{ form.base_specialization }}{{ form.base_specialization.errors }}
+                            <small class="employee-card-field-help" data-specialization-suggestion hidden></small>
                             {% if form.base_specialization.help_text %}<small class="employee-card-field-help">{{ form.base_specialization.help_text }}</small>{% endif %}
                         </div>
                         <div class="employee-card-field" data-card-field data-copy-label="Статус">
@@ -566,5 +574,5 @@
 </div>
 {% endif %}
 
-<script src="{% static 'js/employee-card-unified.js' %}?v=20260907-1"></script>
+<script src="{% static 'js/employee-card-unified.js' %}?v=20261127-specialization-rules"></script>
 {% endblock %}

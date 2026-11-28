@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="all" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m1 3a5 5 0 0 1 4 5v1"/></symbol>
+  <symbol id="review" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.7 2.7 0 0 1 5.2 1c0 2-2.7 2.1-2.7 4m0 2.5v.2"/></symbol>
+  <symbol id="reserve" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5V12l3.5 2"/></symbol>
+  <symbol id="other_work" viewBox="0 0 24 24"><path d="m14 5 3 3 4-4a6 6 0 0 1-7.6 7.7L6 19.1a2 2 0 0 1-2.8-2.8l7.4-7.4A6 6 0 0 1 17 2z"/></symbol>
+  <symbol id="suspended" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></symbol>
+  <symbol id="date" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M7.5 3v4m9-4v4m-13 3h17"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+  <symbol id="edit" viewBox="0 0 24 24"><path d="m14.5 5.5 4 4m-14 10 4.5-.8 11-11a2.8 2.8 0 0 0-4-4l-11 11z"/></symbol>
+</svg>

@@ -1,13 +1,13 @@
-{% extends "base.html" %}
+{% extends "reports/management_linked_base.html" %}
 
 {% block title %}Сменная аналитика{% endblock %}
 {% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
-    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Сменная аналитика" data-shift-analytics-refresh-root>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Сменная аналитика"{% if access.role.code == 'dispatcher' or request.mining_master_tablet_control %} data-shift-analytics-refresh-root{% endif %}>
         {% include "reports/includes/management_report_header.html" with active="shift_analytics" title="Сменная аналитика" subtitle="Серверный расчет по рейсам, породам, технике, сотрудникам и простоям." export_url=export_url %}
-        <div class="management-linked-report-content">
+        <div class="management-linked-report-content"{% if access.role.code != 'dispatcher' and not request.mining_master_tablet_control %} data-shift-analytics-refresh-root{% endif %}>
             <form class="dispatcher-report-filters management-dashboard-filters" method="get" data-auto-filter-form>
                 <label>
                     <span>Дата</span>

@@ -1,0 +1,45 @@
+<div class="housing-review__identity">
+    <details class="housing-review__identity-option" data-housing-identity-search>
+        <summary>Найти по ФИО</summary>
+        <div class="housing-import__review-fields">
+            <label>ФИО или табельный номер, если известен
+                <input type="search" data-identity-query value="{{ row.name }}" maxlength="100" autocomplete="off">
+            </label>
+            <button type="button" data-find-housing-identity>Найти</button>
+        </div>
+        <p data-identity-status role="status"></p>
+        <ul data-identity-results class="housing-review__identity-results"></ul>
+    </details>
+    <details class="housing-review__identity-option" data-housing-external>
+        <summary>Оформить командированного или подрядчика</summary>
+        <div class="housing-import__review-fields">
+            <label>Тип жильца
+                <select name="external_resident_type:{{ row.source }}" form="housing-import-form">
+                    <option value="">Выберите тип жильца</option>
+                    <option value="BUSINESS_TRIP"{% if row.external_draft.resident_type == "BUSINESS_TRIP" %} selected{% endif %}>Командированный</option>
+                    <option value="CONTRACTOR"{% if row.external_draft.resident_type == "CONTRACTOR" %} selected{% endif %}>Сотрудник подрядчика</option>
+                </select>
+            </label>
+            <label>ФИО
+                <input name="external_full_name:{{ row.source }}" maxlength="255" value="{{ row.name }}" form="housing-import-form">
+            </label>
+            <label>Организация или участок
+                <input name="external_organization:{{ row.source }}" maxlength="255" value="{{ row.external_draft.organization }}" form="housing-import-form">
+            </label>
+            <label>Должность или профессия
+                <input name="external_position_title:{{ row.source }}" maxlength="255" value="{{ row.external_draft.position_title }}" form="housing-import-form">
+            </label>
+            <label>Контактный телефон
+                <input type="tel" name="external_phone:{{ row.source }}" maxlength="64" value="{{ row.external_draft.phone }}" form="housing-import-form">
+            </label>
+            <label>Пол
+                <select name="external_sex:{{ row.source }}" form="housing-import-form">
+                    <option value="">Выберите пол</option>
+                    <option value="male"{% if row.external_draft.sex == "male" %} selected{% endif %}>Мужской</option>
+                    <option value="female"{% if row.external_draft.sex == "female" %} selected{% endif %}>Женский</option>
+                </select>
+            </label>
+        </div>
+        <button type="submit" name="review_action" value="external:{{ row.source }}" form="housing-import-form" class="housing-review__primary">Добавить в черновик</button>
+    </details>
+</div>

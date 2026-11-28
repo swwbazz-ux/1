@@ -1,5 +1,6 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
@@ -7,17 +8,13 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-
 const TEMPLATE_ROOT = path.resolve(__dirname, "..", "..", "..", "templates");
 const ACHIEVEMENT_SOURCE = fs.readFileSync(
     path.join(TEMPLATE_ROOT, "includes", "achievement_prize.html"),
     "utf8"
 );
 const DRIVER_SOURCE = driverScreenSource();
-const EXCAVATOR_SOURCE = fs.readFileSync(
-    path.join(TEMPLATE_ROOT, "trips", "excavator_work.html"),
-    "utf8"
-);
+const EXCAVATOR_SOURCE = excavatorScreenSource();
 
 
 function extractInlineScript(source, label) {

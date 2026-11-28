@@ -186,12 +186,19 @@ def release_disabled_excavator_complex(excavator):
     if previous_is_active is not True or excavator.is_active or not is_excavator(excavator):
         return
 
-    placement_changed = False
-    placement = ExcavatorPlacement.objects.filter(excavator=excavator).first()
-    if placement and placement.zone != ExcavatorPlacement.Zone.INACTIVE:
-        placement.zone = ExcavatorPlacement.Zone.INACTIVE
-        placement.save(update_fields=['zone', 'changed_at'])
-        placement_changed = True
+    changed_at = timezone.now()
+    # The rich release event below is the single assignment event for this
+    # compound mutation. A normal save() here would also trigger a generic
+    # ExcavatorPlacement event before all affected assignments were released.
+    placement_changed = bool(
+        ExcavatorPlacement.objects
+        .filter(excavator=excavator)
+        .exclude(zone=ExcavatorPlacement.Zone.INACTIVE)
+        .update(
+            zone=ExcavatorPlacement.Zone.INACTIVE,
+            changed_at=changed_at,
+        )
+    )
 
     assignments_to_end = (
         HaulAssignment.objects
@@ -199,7 +206,7 @@ def release_disabled_excavator_complex(excavator):
         .exclude(status=AssignmentStatus.CANCELLED)
     )
     released_truck_ids = list(assignments_to_end.values_list('truck_id', flat=True))
-    ended_assignments = assignments_to_end.update(ended_at=timezone.now())
+    ended_assignments = assignments_to_end.update(ended_at=changed_at)
 
     if placement_changed or ended_assignments:
         bump_operational_state(

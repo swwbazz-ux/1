@@ -17,13 +17,13 @@
                        ломает строку принудительно, независимо от кегля. {% endcomment %}
                     <strong class="driver-manual-workspace__face-summary" data-driver-manual-face-summary title="{{ dashboard_face_excavator|default:'—' }} · Горизонт {{ dashboard_face_horizon|default:'—' }} / Блок {{ dashboard_face_block|default:'—' }}{% if dashboard_face_rock %} · Порода: {{ dashboard_face_rock }}{% endif %}">{{ dashboard_face_excavator|default:"—" }} · Гор. {{ dashboard_face_horizon|default:"—" }}/Бл. {{ dashboard_face_block|default:"—" }}{% if dashboard_face_rock %}<br>{{ dashboard_face_rock }}{% endif %}</strong>
                 {% else %}
-                    <span>Машинист экскаватора</span>
+                    <div class="eo-operator-caption"><span class="eo-operator-role">Машинист экскаватора</span></div>
                     <strong>{{ dashboard_operator_name|default:access.employee.full_name|default:"-" }}</strong>
                 {% endif %}
             </div>
-            <div class="eo-dashboard-plan-widget">
+            <div class="eo-dashboard-plan-widget"{% if not driver_manual_dashboard %} data-eo-round-controls{% endif %}>
                 <button class="eo-free-bucket-button" type="button"{% if driver_manual_dashboard %} data-driver-manual-free-bucket-open aria-controls="driver-free-bucket-dialog"{% else %} data-eo-free-bucket-open{% endif %} aria-haspopup="dialog" aria-label="Свободный ковш" title="Свободный ковш"{% if driver_manual_dashboard %}{% if not driver_manual_free_bucket_enabled %} disabled aria-disabled="true"{% endif %}{% elif not open_shift %} disabled aria-disabled="true"{% endif %}>
-                    <svg viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+                    <svg viewBox="{% if driver_manual_dashboard %}0 0 28 28{% else %}1 1 24 24{% endif %}" aria-hidden="true" focusable="false">
                         <path d="M3.5 7.5h7.8l2.6 8.2H7.2L3.5 7.5Z"></path>
                         <path d="M7.2 15.7c1.7 3.2 4.7 5.1 8.4 5.1 2.5 0 4.7-.8 6.6-2.3"></path>
                         <path d="M17.9 5.5v8M13.9 9.5h8"></path>
@@ -31,6 +31,11 @@
                 </button>
                 <div class="eo-dashboard-plan-ring {{ shift_plan_visual.text_class }}{% if shift_plan_visual.is_overrun %} is-progress-overrun{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%; --eo-dashboard-loop-progress: {{ shift_plan_visual.loop_progress }}%;"{% if not driver_manual_dashboard %} role="button" tabindex="0" aria-label="Открыть почасовой отчёт. {% if shift_plan_has_plan %}Выполнение нормы: текущий цикл {{ shift_plan_visual.loop_progress }}%, завершено циклов {{ shift_plan_visual.completed_loops }}{% else %}{{ shift_plan_status_label }}{% endif %}" data-eo-hourly-report-open{% else %} aria-label="Демонстрационный ручной режим"{% endif %} data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}" data-progress-percent="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-progress-loops="{{ shift_plan_visual.completed_loops }}" data-progress-phase="{{ shift_plan_visual.phase }}">
                     <span>{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
+                    {% if not driver_manual_dashboard %}
+                        <svg class="eo-dashboard-plan-arc" style="position:absolute" width="0" height="0" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                            <circle cx="50" cy="50" r="43" pathLength="100" transform="rotate(-90 50 50)"></circle>
+                        </svg>
+                    {% endif %}
                     {% if shift_plan_visual.has_completed_loops %}<b class="eo-dashboard-progress-loop">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                 </div>
             </div>
@@ -88,16 +93,20 @@
             {% else %}
                 {% for card in truck_cards %}
                     {% include "includes/excavator_dashboard_source_card.html" with driver_manual_dashboard=driver_manual_dashboard %}
-                {% empty %}
-                    <div class="eo-empty-state eo-dashboard-empty">
-                        <img src="{% static empty_source_icon|default:'img/equipment/truck-gray.png' %}" alt="">
-                        <strong>Нет погрузки</strong>
-                        <span>Назначает горный мастер</span>
-                    </div>
                 {% endfor %}
+                <div class="eo-empty-state eo-dashboard-empty"{% if truck_cards %} hidden{% endif %}>
+                    <img src="{% static empty_source_icon|default:'img/equipment/truck-gray.png' %}" alt="">
+                    <strong>Самосвалы не назначены</strong>
+                    <span>Назначает горный мастер или горный диспетчер</span>
+                </div>
             {% endif %}
         </div>
         {% if not driver_manual_dashboard %}
+            <div class="eo-empty-state eo-dashboard-empty eo-dashboard-shift-closed">
+                <img src="{% static empty_source_icon|default:'img/equipment/truck-gray.png' %}" alt="">
+                <strong>Смена закрыта</strong>
+                <span>{{ shift_action_block_message|default:'Начните смену во вкладке «Смена»' }}</span>
+            </div>
             <div data-eo-assignment-snapshot hidden>
                 {% for card in assignment_snapshot_cards %}
                     <i data-assignment-id="{{ card.assignment_id }}" data-truck-id="{{ card.truck_id }}" data-truck-number="{{ card.number }}"></i>

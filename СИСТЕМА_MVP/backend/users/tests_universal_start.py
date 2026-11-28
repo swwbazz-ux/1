@@ -322,6 +322,64 @@ class UniversalStartTests(TestCase):
         response = self.post()
         self.assertEqual(response.context['apps'][0]['app'].role_code, 'mining_master')
 
+    def test_public_catalog_uses_current_release_without_login(self):
+        self.add_driver_release()
+        self.add_excavator_release()
+        catalog = reverse('app_catalog')
+        response = self.client.get(catalog)
+        self.assertContains(response, 'class="app-catalog-download"', count=2)
+        self.assertContains(response, 'href="/media/apk/driver-0.1.10.apk" download')
+        self.assertContains(response, 'href="/media/apk/excavator-0.1.18.apk" download')
+
+        self.add_driver_release(version_code=13, version_name='0.1.11')
+        response = self.client.get(catalog)
+        self.assertContains(response, 'href="/media/apk/driver-0.1.11.apk" download')
+        self.assertContains(response, 'href="/media/apk/excavator-0.1.18.apk" download')
+        self.assertNotContains(response, '/media/apk/driver-0.1.10.apk')
+        self.assertIn('no-cache', response.headers['Cache-Control'])
+
+    @override_settings(ALLOWED_HOSTS=['driverform.ru', 'www.driverform.ru', '127.0.0.1'])
+    def test_clerk_catalog_card_opens_on_the_install_origin(self):
+        self.add_driver_release()
+        self.add_excavator_release()
+        catalog = reverse('app_catalog')
+        clerk_home = reverse('clerk_home')
+        public_url = f'https://www.driverform.ru{clerk_home}'
+        qr_url = '/static/img/pwa/qr/settlement_clerk-www.png'
+
+        response = self.client.get(catalog, HTTP_HOST='driverform.ru', secure=True)
+        self.assertContains(response, 'data-app-name="Делопроизводитель"')
+        self.assertContains(response, 'href="?app=settlement_clerk#connect"')
+        self.assertContains(response, f'data-app-url="{public_url}"')
+        self.assertContains(response, f'data-app-qr-target="{public_url}"')
+        self.assertContains(response, f'data-app-qr="{qr_url}"')
+
+        selected = self.client.get(catalog, {'app': 'settlement_clerk'}, HTTP_HOST='127.0.0.1:8000')
+        self.assertEqual(selected.context['selected_app']['role_code'], 'settlement_clerk')
+        self.assertContains(selected, f'data-dialog-open href="http://127.0.0.1:8000{clerk_home}"')
+        self.assertRedirects(
+            self.client.get(reverse('app_catalog_qr', args=['settlement_clerk']), HTTP_HOST='driverform.ru'),
+            qr_url,
+            fetch_redirect_response=False,
+        )
+
+        login = self.client.get(
+            clerk_home, HTTP_HOST=urlparse(public_url).netloc, secure=True, follow=True,
+        )
+        self.assertEqual(urlparse(login.redirect_chain[-1][0]).path, reverse('clerk_login'))
+        self.assertContains(login, 'Вход · Делопроизводитель')
+
+    def test_public_catalog_hides_unavailable_release(self):
+        self.add_driver_release()
+        self.add_excavator_release()
+        media = Path(self.media_directory.name) / 'apk'
+        (media / 'driver-0.1.10.apk').unlink()
+        (media / 'excavator-update.json').write_text('null', encoding='utf-8')
+        with self.assertLogs('users.app_catalog', level='ERROR'):
+            response = self.client.get(reverse('app_catalog'))
+        self.assertNotContains(response, 'class="app-catalog-download"')
+        self.assertContains(response, 'data-app-card')
+
     def test_android_sees_configured_apk_buttons_for_its_roles(self):
         self.add_driver_release()
         self.add_excavator_release()
@@ -548,3 +606,59 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="browser"')
         self.assertContains(response, 'install=1', count=1)
         self.assertNotContains(response, 'После перехода добавьте значок на экран')
+
+
+@override_settings(ALLOWED_HOSTS=['driverform.ru', 'www.driverform.ru', '127.0.0.1'])
+class AppCatalogClerkCardTests(TestCase):
+    """Карточка ведёт на адрес установки вне области действия Driver Form."""
+
+    def test_clerk_card_opens_on_the_install_origin(self):
+        catalog = reverse('app_catalog')
+        clerk_home = reverse('clerk_home')
+        public_url = f'https://www.driverform.ru{clerk_home}'
+        qr_url = '/static/img/pwa/qr/settlement_clerk-www.png'
+
+        response = self.client.get(
+            catalog,
+            HTTP_HOST='driverform.ru',
+            secure=True,
+        )
+        self.assertContains(response, 'data-app-name="Делопроизводитель"')
+        self.assertContains(response, 'href="?app=settlement_clerk#connect"')
+        self.assertContains(response, f'data-app-url="{public_url}"')
+        self.assertContains(response, f'data-app-qr-target="{public_url}"')
+        self.assertContains(response, f'data-app-qr="{qr_url}"')
+
+        selected = self.client.get(
+            catalog,
+            {'app': 'settlement_clerk'},
+            HTTP_HOST='127.0.0.1:8000',
+        )
+        self.assertEqual(
+            selected.context['selected_app']['role_code'],
+            'settlement_clerk',
+        )
+        self.assertContains(
+            selected,
+            f'data-dialog-open href="http://127.0.0.1:8000{clerk_home}"',
+        )
+
+        self.assertRedirects(
+            self.client.get(
+                reverse('app_catalog_qr', args=['settlement_clerk']),
+                HTTP_HOST='driverform.ru',
+            ),
+            qr_url,
+            fetch_redirect_response=False,
+        )
+
+        login = self.client.get(
+            clerk_home,
+            HTTP_HOST=urlparse(public_url).netloc,
+            secure=True,
+        )
+        self.assertEqual(login.status_code, 302)
+        self.assertEqual(
+            urlparse(login['Location']).path,
+            reverse('clerk_login'),
+        )

@@ -15,6 +15,11 @@
     justify-content: end;
 }
 
+.clerk-workplace-header .clerk-console-actions > .app-connection-dot {
+    position: static;
+    z-index: auto;
+}
+
 .clerk-workplace-shell .admin-console-title h1 {
     max-width: 100%;
     overflow: visible;
@@ -55,4 +60,11 @@
     .clerk-workplace-shell .admin-console-nav {
         grid-template-columns: 1fr;
     }
+}
+.clerk-workplace-header .clerk-admin-login-link {
+    display: inline-block;
+    margin-top: 2px;
+    color: var(--admin-ink);
+    font-size: 12px;
+    text-underline-offset: 2px;
 }

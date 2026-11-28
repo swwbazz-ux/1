@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import date
+from hashlib import sha256
 from urllib.parse import quote, urlencode
 
 from django.core.exceptions import ValidationError
@@ -10,14 +11,18 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.gzip import gzip_page
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET, require_http_methods, require_POST, require_safe
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.page import PageMargins
 
+from core.production_time import production_day_bounds
 from references.models import Equipment
 from shifts.models import WatchPeriod
 from users.models import AdminActionLog, Employee, EmployeeAccess, ProductionSpecialization, Role, TemporaryWorkTransfer
+from users.active_role import role_session_state
 from users.role_apps import (
     APP_CONTRACT_VERSION,
     get_role_app,
@@ -26,25 +31,38 @@ from users.role_apps import (
 )
 from users.live_monitor import application_presence_by_employee_ids, empty_application_presence
 from users.work_profiles import (
-    effective_specialization,
-    eligible_employee_ids_for_work_role,
+    active_specializations_for_positions,
+    effective_specializations_by_employee_id,
     expire_due_temporary_work_transfers,
     request_temporary_work_transfer,
 )
+from rotations.services import approved_watch_extensions_on
 from rotations.arrival_roster_routing import deputy_arrival_roster_routing_queue
 
+from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS, crew_equipment_number
+from .crew_search import placement_people_index
+from .crew_excel_import import (
+    DraftConfirmationRequired,
+    EmployeeChoiceRequired,
+    MAX_FILE_SIZE,
+    publish_crew_excel,
+    read_crew_excel,
+)
 from .models import (
-    AssignmentStatus,
     CrewPlan,
     CrewPlanStatus,
-    EquipmentAssignment,
     WorkShiftType,
 )
+from .off_equipment import blocked_off_equipment_ids
 from .services import (
     CREW_SLOT_POSITION_PRIMARY,
     CREW_SLOT_POSITION_SECONDARY,
-    WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
+    crew_bookings_on_other_equipment,
+    crew_specialization_choices,
+    eligible_crew_employee_ids,
+    employee_matches_work_role,
     get_or_create_crew_draft,
+    is_excavator_assistant_specialization,
     production_work_date,
     publish_crew_plan,
     update_crew_draft_slot,
@@ -52,10 +70,7 @@ from .services import (
 
 
 DEPUTY_ROLE_CODE = 'deputy_mining_manager'
-TARGET_ROLE_LABELS = {
-    'driver': 'Самосвалы',
-    'excavator_operator': 'Экскаваторы',
-}
+TARGET_ROLE_LABELS = CATEGORY_LABELS
 
 DEPUTY_MANIFEST = {
     'id': '/deputy-mining-manager/',
@@ -123,6 +138,7 @@ const CORE_ASSETS = [
   "/static/css/deputy-mining-manager-v3.css",
   "/static/js/role-readonly.js",
   "/static/js/deputy-mining-manager-v3.js",
+  "/static/js/deputy-people-search.js",
   "/static/js/deputy-mining-manager-pwa-v1.js",
   "/static/favicon.ico",
   "/static/img/pwa/deputy-mining-manager-180.png",
@@ -320,22 +336,40 @@ def _deputy_service_worker_script():
 
 
 def deputy_access_from_request(request):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
+    """Доступ депутата: только действующий статус и текущее поколение сессии.
+
+    Раньше здесь исключались лишь blocked/deactivated, поэтому доступ в статусе
+    not_activated и сессия, выданная до повторного входа, продолжали открывать
+    расстановку. Проверяем те же правила, что и остальные рабочие экраны.
+    """
+    state = role_session_state(request)
+    access = state.get('access')
+    if not access or not state.get('is_active'):
         return None
-    return (
-        EmployeeAccess.objects
-        .select_related('employee', 'role')
-        .filter(
-            id=access_id,
-            is_active=True,
-            employee__is_active=True,
-            role__is_active=True,
-            role__code=DEPUTY_ROLE_CODE,
-        )
-        .exclude(status__in=[EmployeeAccess.Status.BLOCKED, EmployeeAccess.Status.DEACTIVATED])
-        .first()
-    )
+    if access.role.code != DEPUTY_ROLE_CODE:
+        return None
+    return access
+
+
+# Match both the personnel number and normalized full name of the two deputies.
+# Keep personnel records out of the source tree.
+DEPUTY_BRIGADES_BY_IDENTITY = {
+    '660112ee99e947cc8162b7d7ce55f4e6925a37e61e2e03e05b39833ad9df786c': ('1', '2'),
+    '715f708a9e6c05675b70bcbb7fdc9f10fcfa2728f141d19f90da63467c632bfe': ('3', '4'),
+}
+ALL_BRIGADES = ('1', '2', '3', '4')
+
+
+def _deputy_brigades(deputy):
+    if deputy is None:
+        return ALL_BRIGADES
+    name = ' '.join(deputy.full_name.casefold().split())
+    identity = f'{(deputy.personnel_number or "").strip()}|{name}'
+    return DEPUTY_BRIGADES_BY_IDENTITY.get(sha256(identity.encode()).hexdigest(), ALL_BRIGADES)
+
+
+def _in_deputy_roster(employee, brigades, extensions):
+    return brigades == ALL_BRIGADES or _employee_brigade_code(employee) in brigades or employee.pk in extensions
 
 
 def _employee_short_name(employee):
@@ -438,7 +472,7 @@ def _application_presence_payload(presence):
     }
 
 
-def _employee_payload(employee, *, presence=None, eligible_positions=None):
+def _employee_payload(employee, *, presence=None, eligible_positions=None, extension=None):
     if not employee:
         return None
     photo_url = ''
@@ -469,6 +503,7 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
         'photo_url': photo_url,
         'initials': initials,
         'status_label': employee.get_status_display(),
+        'can_change_off_equipment': employee.is_active and employee.status == Employee.Status.ACTIVE and not employee.is_protected,
         'employment_type': employee.employment_type,
         'employment_label': employee.get_employment_type_display(),
         'contractor_label': contractor_label,
@@ -481,6 +516,8 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
             if getattr(employee, 'work_schedule_id', None)
             else employee.rotation or ''
         ),
+        'extension_until': extension.extension_end.strftime('%d.%m.%Y') if extension else '',
+        'extension_expires_at': production_day_bounds(extension.extension_end)[1].isoformat() if extension else '',
         'brigade_code': brigade_code,
         'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
         'search': f'{employee.full_name} {employee.personnel_number} {contractor_label}'.strip().lower(),
@@ -491,37 +528,35 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
     return payload
 
 
-def _secondary_eligible_employee_ids(role_code):
-    if role_code == 'driver':
-        return eligible_employee_ids_for_work_role(role_code)
-    if role_code != 'excavator_operator':
+def _secondary_eligible_employee_ids(role_code, primary_employee_ids=None):
+    if role_code not in {'driver', 'excavator_operator'}:
         return set()
+    if primary_employee_ids is None:
+        primary_employee_ids = eligible_crew_employee_ids(role_code)
+    if role_code == 'driver':
+        return primary_employee_ids
     employees = (
         Employee.objects.filter(
             Employee.work_eligibility_q(),
             is_active=True,
             status=Employee.Status.ACTIVE,
         )
-        .select_related(
-            'base_specialization',
-            'base_specialization__access_role',
-        )
+        .exclude(id__in=primary_employee_ids)
+        .select_related('base_specialization')
         .order_by('id')
     )
-    return {
-        employee.id
-        for employee in employees
-        if (
-            (specialization := effective_specialization(employee))
-            and specialization.is_active
-            and specialization.code == 'assistant_excavator_operator'
-        )
+    return primary_employee_ids | {
+        employee_id
+        for employee_id, specialization in effective_specializations_by_employee_id(
+            employees, infer_from_position=True,
+        ).items()
+        if is_excavator_assistant_specialization(specialization)
     }
 
 
 def _role_from_request(request):
     role_code = request.GET.get('role') or request.POST.get('role') or 'driver'
-    if role_code not in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES:
+    if role_code not in TARGET_ROLE_LABELS:
         role_code = 'driver'
     return get_object_or_404(Role, code=role_code, is_active=True)
 
@@ -571,10 +606,47 @@ def _natural_equipment_sort_key(equipment):
     )
 
 
-def build_crew_plan_payload(plan, *, request=None):
+def _crew_category_navigation(work_date):
+    categories = []
+    plans_by_category = {}
+    for item in CrewPlan.objects.filter(
+        work_date=work_date, role__code__in=TARGET_ROLE_LABELS,
+        status__in=[CrewPlanStatus.PUBLISHED, CrewPlanStatus.DRAFT],
+    ).select_related('role').order_by('-revision'):
+        plans_by_category.setdefault((item.role.code, item.status), item)
+    active_codes = set(Role.objects.filter(
+        code__in=TARGET_ROLE_LABELS, is_active=True,
+    ).values_list('code', flat=True))
+    for role_code, label in TARGET_ROLE_LABELS.items():
+        if role_code not in active_codes:
+            continue
+        query = urlencode({'role': role_code, 'date': work_date.isoformat()})
+        published_plan = plans_by_category.get((role_code, CrewPlanStatus.PUBLISHED))
+        draft_plan = plans_by_category.get((role_code, CrewPlanStatus.DRAFT))
+        visible_plan = published_plan or draft_plan
+        categories.append({
+            'code': role_code,
+            'label': label,
+            'url': f'{reverse("deputy_mining_manager_placement")}?{query}',
+            'status': CrewPlanStatus.PUBLISHED if published_plan else CrewPlanStatus.DRAFT,
+            'status_label': 'Опубликовано' if published_plan else 'Черновик',
+            'revision': visible_plan.revision if visible_plan else 1,
+            'published_at_label': (
+                timezone.localtime(published_plan.published_at).strftime('%d.%m.%Y %H:%M')
+                if published_plan and published_plan.published_at
+                else ''
+            ),
+        })
+
+    return categories
+
+
+def build_crew_plan_payload(plan, *, deputy=None):
+    brigades = _deputy_brigades(deputy)
     if not plan:
         return {
             'plan': None,
+            'brigades': brigades,
             'role': None,
             'categories': [],
             'endpoints': {},
@@ -586,6 +658,8 @@ def build_crew_plan_payload(plan, *, request=None):
                 'changed_count': 0,
             },
             'employees': [],
+            'other_watch_employees': [],
+            'factual_candidates': [],
             'secondary_employee_label': '',
             'rows': [],
         }
@@ -605,76 +679,71 @@ def build_crew_plan_payload(plan, *, request=None):
             'secondary_employee__personnel_position',
             'secondary_employee__work_schedule',
             'secondary_employee__contractor_organization',
-            'baseline_employee',
-            'baseline_employee__personnel_position',
-            'baseline_employee__work_schedule',
-            'baseline_employee__contractor_organization',
-            'baseline_secondary_employee',
-            'baseline_secondary_employee__personnel_position',
-            'baseline_secondary_employee__work_schedule',
-            'baseline_secondary_employee__contractor_organization',
+            'reported_employee__personnel_position',
+            'reported_employee__base_specialization',
         )
         .order_by('equipment__garage_number', 'shift_type')
     )
     assigned_employee_ids = {
         employee_id
         for slot in slots
-        for employee_id in (slot.employee_id, slot.secondary_employee_id)
+        for employee_id in (slot.employee_id, slot.secondary_employee_id, slot.reported_employee_id)
         if employee_id
     }
     expire_due_temporary_work_transfers()
-    eligible_employee_ids = eligible_employee_ids_for_work_role(plan.role.code)
-    secondary_eligible_employee_ids = _secondary_eligible_employee_ids(plan.role.code)
+    eligible_employee_ids = eligible_crew_employee_ids(plan.role.code)
+    secondary_eligible_employee_ids = _secondary_eligible_employee_ids(plan.role.code, eligible_employee_ids)
     all_eligible_employee_ids = eligible_employee_ids | secondary_eligible_employee_ids
-    other_role_assignment_employee_ids = set(
-        EquipmentAssignment.objects.filter(
-            employee_id__in=all_eligible_employee_ids,
-            status=AssignmentStatus.ACCEPTED,
-            ended_at__isnull=True,
-            shift__isnull=True,
-            role__isnull=False,
-            shift_type__in=WorkShiftType.values,
-        )
-        .exclude(role=plan.role)
-        .values_list('employee_id', flat=True)
-    )
+    secondary_position_label = 'Стажёр' if plan.role.code == 'driver' else 'Помощник или стажёр'
+    other_bookings = {} if plan.status == CrewPlanStatus.SUPERSEDED else crew_bookings_on_other_equipment(plan)
+    other_role_assignment_employee_ids = set(other_bookings)
     editable = plan.status == CrewPlanStatus.DRAFT and plan.work_date == production_work_date()
     eligible_employees = []
     transfer_candidates = []
+    factual_candidates = []
     transfer_specializations = []
+    transfer_pending_employee_ids = set()
     current_watch_periods = []
+    blocked_employee_ids = blocked_off_equipment_ids(plan.work_date) if editable else set()
+    if editable or any(slot.reported_employee_id for slot in slots):
+        category = AUXILIARY_CATEGORIES.get(plan.role.code)
+        specialization_filter = {'code': category.specialization} if category else {'access_role': plan.role}
+        transfer_specializations = list(
+            ProductionSpecialization.objects.filter(is_active=True, **specialization_filter).order_by('name')
+        )
     if editable:
         eligible_employees = list(
             Employee.objects.filter(id__in=all_eligible_employee_ids)
             .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .exclude(id__in=assigned_employee_ids)
+            .exclude(id__in=blocked_employee_ids)
             .exclude(id__in=other_role_assignment_employee_ids)
             .order_by('full_name')
         )
-        transfer_pending_employee_ids = TemporaryWorkTransfer.objects.filter(
+        transfer_pending_employee_ids = set(TemporaryWorkTransfer.objects.filter(
             status__in=[
                 TemporaryWorkTransfer.Status.REQUESTED,
                 TemporaryWorkTransfer.Status.APPROVED,
             ],
             effective_to__gte=timezone.localdate(),
-        ).values_list('employee_id', flat=True)
-        transfer_candidates = list(
+        ).values_list('employee_id', flat=True))
+        employees_with_other_specialization = list(
             Employee.objects.filter(
                 Employee.work_eligibility_q(),
                 is_active=True,
                 status=Employee.Status.ACTIVE,
             )
-            .exclude(id__in=eligible_employee_ids)
-            .exclude(id__in=transfer_pending_employee_ids)
-            .select_related('personnel_position', 'work_schedule', 'contractor_organization')
+            .exclude(id__in=eligible_employee_ids | blocked_employee_ids)
+            .select_related('personnel_position', 'work_schedule', 'contractor_organization', 'base_specialization')
             .order_by('full_name')
         )
-        transfer_specializations = list(
-            ProductionSpecialization.objects.filter(
-                is_active=True,
-                access_role=plan.role,
-            ).order_by('name')
-        )
+        transfer_candidates = [
+            employee for employee in employees_with_other_specialization if employee.pk not in transfer_pending_employee_ids
+        ]
+        factual_candidates = [
+            employee for employee in employees_with_other_specialization
+            if employee.pk not in assigned_employee_ids and employee.pk not in other_bookings
+        ]
         current_watch_periods = list(
             WatchPeriod.objects.filter(
                 is_active=True,
@@ -687,19 +756,66 @@ def build_crew_plan_payload(plan, *, request=None):
     for slot in slots:
         slot_map[(slot.equipment_id, slot.shift_type)] = slot
 
-    payload_employee_ids = set(all_eligible_employee_ids)
+    payload_employee_ids = set(all_eligible_employee_ids) | assigned_employee_ids
     payload_employee_ids.update(employee.id for employee in transfer_candidates)
-    payload_employee_ids.update(slot.employee_id for slot in slots if slot.employee_id)
-    payload_employee_ids.update(
-        slot.secondary_employee_id for slot in slots if slot.secondary_employee_id
+    payload_employee_ids.update(employee.id for employee in factual_candidates)
+    extensions = approved_watch_extensions_on(plan.work_date, employee_ids=payload_employee_ids) if deputy else {}
+    other_watch_employees = []
+    if brigades != ALL_BRIGADES:
+        roster_employees = []
+        for employee in eligible_employees:
+            if _in_deputy_roster(employee, brigades, extensions):
+                roster_employees.append(employee)
+                continue
+            brigade_code = _employee_brigade_code(employee)
+            if brigade_code in ALL_BRIGADES:
+                other_watch_employees.append({
+                    'id': employee.pk,
+                    'full_name': employee.full_name,
+                    'brigade_code': brigade_code,
+                    'position_label': (
+                        employee.personnel_position.name if employee.personnel_position_id else employee.position or ''
+                    ),
+                })
+        eligible_employees = roster_employees
+        transfer_candidates = [employee for employee in transfer_candidates if _in_deputy_roster(employee, brigades, extensions)]
+        factual_candidates = [employee for employee in factual_candidates if _in_deputy_roster(employee, brigades, extensions)]
+    visible_ids = assigned_employee_ids | {employee.pk for employee in eligible_employees}
+    presence_by_employee = application_presence_by_employee_ids(visible_ids)
+    reported_employees = {
+        slot.reported_employee_id: slot.reported_employee for slot in slots if slot.reported_employee_id
+    }
+    reported_specializations = effective_specializations_by_employee_id(
+        reported_employees.values(), infer_from_position=True,
     )
-    payload_employee_ids.update(slot.baseline_employee_id for slot in slots if slot.baseline_employee_id)
-    payload_employee_ids.update(
-        slot.baseline_secondary_employee_id
-        for slot in slots
-        if slot.baseline_secondary_employee_id
-    )
-    presence_by_employee = application_presence_by_employee_ids(payload_employee_ids)
+    people_needing_specialization = [
+        employee for employee in [*factual_candidates, *reported_employees.values()]
+        if editable and not employee.base_specialization_id and employee.pk not in transfer_pending_employee_ids
+        and _in_deputy_roster(employee, brigades, extensions)
+    ]
+    specialization_options = active_specializations_for_positions({
+        employee.personnel_position_id for employee in people_needing_specialization if employee.personnel_position_id
+    })
+    choices_by_employee = {
+        employee.pk: choices
+        for employee in people_needing_specialization
+        if (choices := crew_specialization_choices(employee, plan.role, specialization_options))
+    }
+    required_specialization = ', '.join(spec.name for spec in transfer_specializations) or plan.role.name
+    required_specialization_names = {spec.pk: spec.name for spec in transfer_specializations}
+
+    local_bookings = {}
+    repeated = {}
+    for slot in slots:
+        location = f'{slot.equipment.equipment_type.name} {slot.equipment.garage_number}, {slot.get_shift_type_display().lower()}'
+        for employee_id in (slot.employee_id, slot.secondary_employee_id, slot.reported_employee_id):
+            if not employee_id:
+                continue
+            if employee_id in local_bookings:
+                repeated[employee_id] = f'{local_bookings[employee_id]} / {location}'
+            else:
+                local_bookings[employee_id] = location
+    conflicting_bookings = {**other_bookings, **repeated}
 
     equipment_items = []
     seen_equipment_ids = set()
@@ -716,7 +832,7 @@ def build_crew_plan_payload(plan, *, request=None):
     conflict_count = 0
     changed_count = 0
     secondary_assigned_count = 0
-    icon_prefix = 'truck' if plan.role.code == 'driver' else 'excavator'
+    icon_prefix = {'driver': 'truck', 'excavator_operator': 'excavator'}.get(plan.role.code)
     for equipment in equipment_items:
         row_slots = []
         row_attention = False
@@ -738,16 +854,24 @@ def build_crew_plan_payload(plan, *, request=None):
                 other_role_assignment_employee_ids,
                 equipment=equipment,
             )
+            primary_booking = conflicting_bookings.get(slot.employee_id or slot.reported_employee_id)
+            if primary_booking:
+                issue = f'Уже в экипаже: {primary_booking}'
+            if slot.secondary_employee_id in conflicting_bookings:
+                secondary_issue = f'Уже в экипаже: {conflicting_bookings[slot.secondary_employee_id]}'
             if not equipment.is_active:
                 issue = issue or 'Техника недоступна'
                 secondary_issue = secondary_issue or (
                     'Техника недоступна' if slot.secondary_employee_id else ''
                 )
-            changed = slot.employee_id != slot.baseline_employee_id
+            changed = (
+                slot.employee_id != slot.baseline_employee_id
+                or slot.reported_employee_id != slot.baseline_reported_employee_id
+            )
             secondary_changed = (
                 slot.secondary_employee_id != slot.baseline_secondary_employee_id
             )
-            if slot.employee_id:
+            if slot.employee_id or slot.reported_employee_id:
                 assigned_count += 1
             else:
                 unfilled_count += 1
@@ -765,6 +889,44 @@ def build_crew_plan_payload(plan, *, request=None):
             if changed or secondary_changed:
                 changed_count += 1
                 row_changed = True
+            secondary_label = secondary_position_label
+            if slot.secondary_employee_id and plan.role.code == 'excavator_operator':
+                secondary_label = (
+                    'Стажёр'
+                    if slot.secondary_employee_id in eligible_employee_ids
+                    or employee_matches_work_role(slot.secondary_employee, plan.role, infer_from_position=True)
+                    else 'Помощник машиниста'
+                )
+            specialization_review = None
+            if slot.reported_employee_id:
+                reported_employee = slot.reported_employee
+                spec = reported_specializations[reported_employee.id]
+                personnel_position = reported_employee.personnel_position
+                base_specialization = reported_employee.base_specialization
+                review_issue = _slot_employee_issue(
+                    reported_employee, eligible_employee_ids, other_role_assignment_employee_ids,
+                    equipment=equipment,
+                )
+                specialization_review = {
+                    'employee_id': reported_employee.pk,
+                    'position': (
+                        personnel_position.name if personnel_position else reported_employee.position
+                    ),
+                    'base': base_specialization.name if base_specialization else '',
+                    'current': spec.name if spec else '',
+                    'suggested': required_specialization_names.get(personnel_position.default_specialization_id, '')
+                    if personnel_position and not spec else '',
+                    'required': required_specialization,
+                    'issue': review_issue,
+                    'warning': review_issue == 'Не соответствует производственной специализации',
+                    'can_assign': editable and not review_issue,
+                    'can_change_off_equipment': (
+                        editable and reported_employee.is_active and reported_employee.status == Employee.Status.ACTIVE
+                        and not reported_employee.is_protected and _in_deputy_roster(reported_employee, brigades, extensions)
+                    ),
+                    'specialization_choices': choices_by_employee.get(reported_employee.pk, [])
+                    if review_issue == 'Не соответствует производственной специализации' else [],
+                }
             row_slots.append({
                 'shift_type': shift_type,
                 'label': 'Первая смена' if shift_type == WorkShiftType.SHIFT_1 else 'Вторая смена',
@@ -772,6 +934,7 @@ def build_crew_plan_payload(plan, *, request=None):
                 'employee': _employee_payload(
                     slot.employee,
                     presence=presence_by_employee.get(slot.employee_id),
+                    extension=extensions.get(slot.employee_id),
                     eligible_positions=[
                         position
                         for position, employee_ids in (
@@ -784,6 +947,7 @@ def build_crew_plan_payload(plan, *, request=None):
                 'secondary_employee': _employee_payload(
                     slot.secondary_employee,
                     presence=presence_by_employee.get(slot.secondary_employee_id),
+                    extension=extensions.get(slot.secondary_employee_id),
                     eligible_positions=[
                         position
                         for position, employee_ids in (
@@ -793,11 +957,9 @@ def build_crew_plan_payload(plan, *, request=None):
                         if slot.secondary_employee_id in employee_ids
                     ],
                 ),
-                'secondary_label': (
-                    'Стажёр'
-                    if plan.role.code == 'driver'
-                    else 'Помощник машиниста'
-                ),
+                'reported_name': slot.reported_employee.full_name if slot.reported_employee_id else '',
+                'specialization_review': specialization_review,
+                'secondary_label': secondary_label,
                 'changed': changed,
                 'secondary_changed': secondary_changed,
                 'conflict': bool(issue),
@@ -805,14 +967,17 @@ def build_crew_plan_payload(plan, *, request=None):
                 'issue': issue,
                 'secondary_issue': secondary_issue,
             })
+        number = crew_equipment_number(equipment)
+        is_robot = plan.role.code == 'driver' and number.lstrip('0') == '53'
         status_label = '' if equipment.is_active else 'Недоступна'
         rows.append({
             'equipment': {
                 'id': equipment.id,
-                'label': equipment.garage_number or str(equipment),
+                'label': f'{number} · Робот' if is_robot else number,
+                'is_robot': is_robot,
                 'type_label': equipment.equipment_type.name,
                 'model_label': equipment.model.name if equipment.model_id else '',
-                'icon_url': static(f'img/equipment/{icon_prefix}-{"green" if equipment.is_active else "gray"}.png'),
+                'icon_url': static(f'img/equipment/{icon_prefix}-{"green" if equipment.is_active else "gray"}.png') if icon_prefix else '',
                 'is_active': equipment.is_active,
                 'status_label': status_label,
                 'serial_number': equipment.vin or '',
@@ -822,9 +987,11 @@ def build_crew_plan_payload(plan, *, request=None):
             'conflict': row_conflict,
             'changed': row_changed,
             'search': ' '.join([
+                'Робот' if is_robot else '',
                 equipment.garage_number or '',
                 equipment.model.name if equipment.model_id else '',
                 *[item['employee']['full_name'] for item in row_slots if item['employee']],
+                *[item['reported_name'] for item in row_slots if item['reported_name']],
                 *[
                     item['secondary_employee']['full_name']
                     for item in row_slots
@@ -834,39 +1001,8 @@ def build_crew_plan_payload(plan, *, request=None):
             'slots': row_slots,
         })
 
-    categories = []
-    selected_date = plan.work_date.isoformat()
-    for role_code, equipment_type_name in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES.items():
-        query = urlencode({'role': role_code, 'date': selected_date})
-        role_plans = CrewPlan.objects.filter(
-            work_date=plan.work_date,
-            role__code=role_code,
-        )
-        published_plan = (
-            role_plans.filter(status=CrewPlanStatus.PUBLISHED)
-            .order_by('-revision')
-            .first()
-        )
-        draft_plan = (
-            role_plans.filter(status=CrewPlanStatus.DRAFT)
-            .order_by('-revision')
-            .first()
-        )
-        visible_plan = published_plan or draft_plan
-        categories.append({
-            'code': role_code,
-            'label': TARGET_ROLE_LABELS.get(role_code, equipment_type_name),
-            'url': f'{reverse("deputy_mining_manager_placement")}?{query}',
-            'status': CrewPlanStatus.PUBLISHED if published_plan else CrewPlanStatus.DRAFT,
-            'status_label': 'Опубликовано' if published_plan else 'Черновик',
-            'revision': visible_plan.revision if visible_plan else 1,
-            'published_at_label': (
-                timezone.localtime(published_plan.published_at).strftime('%d.%m.%Y %H:%M')
-                if published_plan and published_plan.published_at
-                else ''
-            ),
-        })
 
+    factual_specializations = effective_specializations_by_employee_id(factual_candidates, infer_from_position=True)
     return {
         'plan': {
             'id': plan.id,
@@ -882,11 +1018,15 @@ def build_crew_plan_payload(plan, *, request=None):
             'code': plan.role.code,
             'label': plan.role.name,
             'category_label': TARGET_ROLE_LABELS.get(plan.role.code, plan.role.name),
+            'supports_secondary': plan.role.code not in AUXILIARY_CATEGORIES,
+            'primary_label': 'Водитель' if plan.role.code in {'driver', 'crew_kdm', 'crew_prm', 'crew_bus'} else 'Машинист',
         },
-        'categories': categories,
+        'brigades': brigades,
+        'categories': _crew_category_navigation(plan.work_date),
         'endpoints': {
             'slot': reverse('deputy_mining_manager_slot'),
             'publish': reverse('deputy_mining_manager_publish'),
+            'off_equipment_transfer': reverse('deputy_off_equipment_transfer'),
             'export': reverse('deputy_mining_manager_export', args=[plan.id]),
             'temporary_transfer_request': reverse('deputy_mining_manager_temporary_transfer_request'),
         },
@@ -902,6 +1042,7 @@ def build_crew_plan_payload(plan, *, request=None):
             _employee_payload(
                 employee,
                 presence=presence_by_employee.get(employee.id),
+                extension=extensions.get(employee.id),
                 eligible_positions=[
                     position
                     for position, employee_ids in (
@@ -913,11 +1054,27 @@ def build_crew_plan_payload(plan, *, request=None):
             )
             for employee in eligible_employees
         ],
-        'secondary_employee_label': (
-            'Стажёр'
-            if plan.role.code == 'driver'
-            else 'Помощник машиниста'
-        ),
+        'other_watch_employees': other_watch_employees,
+        'factual_candidates': [
+            {
+                'id': employee.pk,
+                'full_name': employee.full_name,
+                'brigade_code': _employee_brigade_code(employee),
+                'position_label': employee.personnel_position.name if employee.personnel_position_id else employee.position,
+                'specialization_issue': (
+                    'Специализация отличается' if factual_specializations[employee.pk]
+                    else 'Специализация не указана'
+                ),
+                'specialization_choices': choices_by_employee.get(employee.pk, []),
+                'extension_until': extensions[employee.pk].extension_end.strftime('%d.%m.%Y') if employee.pk in extensions else '',
+                'extension_expires_at': (
+                    production_day_bounds(extensions[employee.pk].extension_end)[1].isoformat()
+                    if employee.pk in extensions else ''
+                ),
+            }
+            for employee in factual_candidates
+        ],
+        'secondary_employee_label': secondary_position_label,
         'temporary_transfer': {
             'available': bool(
                 editable
@@ -926,12 +1083,18 @@ def build_crew_plan_payload(plan, *, request=None):
                 and current_watch_periods
             ),
             'candidates': [
-                _employee_payload(employee, presence=presence_by_employee.get(employee.id))
+                {
+                    'id': employee.pk,
+                    'full_name': employee.full_name,
+                    'position_label': employee.personnel_position.name if employee.personnel_position_id else employee.position,
+                    'contractor_label': str(employee.contractor_organization) if employee.contractor_organization_id else '',
+                    'contractor_access_until_label': employee.contractor_access_until.strftime('%d.%m.%Y') if employee.contractor_access_until else '',
+                }
                 for employee in transfer_candidates
             ],
             'target_specializations': [
                 {'id': specialization.id, 'name': specialization.name}
-                for specialization in transfer_specializations
+                for specialization in transfer_specializations if editable
             ],
             'watch_periods': [
                 {
@@ -950,6 +1113,23 @@ def build_crew_plan_payload(plan, *, request=None):
 
 DEPUTY_XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 DEPUTY_XLSX_TABLE_HEADER_ROW = 7
+
+
+@never_cache
+@gzip_page
+@require_GET
+def deputy_placement_people(request):
+    access = deputy_access_from_request(request)
+    if not access:
+        return JsonResponse({'error': 'Требуется вход в расстановку.'}, status=403)
+    brigades = _deputy_brigades(access.employee)
+    people = placement_people_index(
+        _work_date_from_request(request),
+        visible_free=lambda employee, extensions: (
+            _in_deputy_roster(employee, brigades, extensions) or _employee_brigade_code(employee) in ALL_BRIGADES
+        ),
+    )
+    return JsonResponse({'access_id': access.pk, 'people': people})
 
 
 def _excel_text(value):
@@ -976,6 +1156,10 @@ def _employee_excel_value(employee):
 
 def _crew_slot_excel_value(slot):
     primary = _employee_excel_value(slot.get('employee'))
+    if slot.get('reported_name'):
+        primary = _excel_text(slot['reported_name'])
+        if (slot.get('specialization_review') or {}).get('warning', True):
+            primary += '\nСпециализация отличается'
     secondary = slot.get('secondary_employee')
     if not secondary:
         return primary
@@ -1206,9 +1390,14 @@ def _deputy_crew_plan_filename(plan):
     return ascii_name, localized
 
 
-def deputy_mining_manager_placement_view(request):
+@never_cache
+@gzip_page
+@require_safe
+def deputy_mining_manager_placement_view(request, *, data_only=False):
     access = deputy_access_from_request(request)
     if not access:
+        if data_only:
+            return JsonResponse({'error': 'Требуется вход в приложение замначальника.'}, status=403)
         return redirect('role_home')
     role = _role_from_request(request)
     selected_date = _work_date_from_request(request)
@@ -1231,7 +1420,13 @@ def deputy_mining_manager_placement_view(request):
             .order_by('-revision')
             .first()
         )
-    payload = build_crew_plan_payload(plan, request=request)
+    payload = build_crew_plan_payload(plan, deputy=access.employee)
+    if not plan:
+        payload['categories'] = _crew_category_navigation(selected_date)
+        payload['role'] = {'code': role.code, 'label': role.name}
+    if data_only:
+        return JsonResponse({'payload': payload, 'access_id': access.pk,
+                             'current_date': production_work_date().isoformat()})
     return render(
         request,
         'assignments/deputy_mining_manager_placement.html',
@@ -1253,7 +1448,7 @@ def deputy_mining_manager_export_view(request, plan_id):
     plan = get_object_or_404(
         CrewPlan.objects
         .select_related('role', 'created_by', 'updated_by', 'published_by')
-        .filter(role__code__in=WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES),
+        .filter(role__code__in=TARGET_ROLE_LABELS),
         id=plan_id,
     )
     workbook = build_deputy_crew_plan_workbook(plan, actor=access.employee)
@@ -1266,6 +1461,71 @@ def deputy_mining_manager_export_view(request, plan_id):
     response['Cache-Control'] = 'private, no-store, max-age=0'
     response['X-Content-Type-Options'] = 'nosniff'
     workbook.save(response)
+    return response
+
+
+@require_http_methods(['GET', 'POST'])
+def deputy_mining_manager_import_view(request):
+    access = deputy_access_from_request(request)
+    if not access:
+        return redirect('role_home')
+    work_date = production_work_date()
+    context = {'access': access, 'work_date': work_date}
+    status = 200
+    if request.method == 'POST':
+        try:
+            if request.POST.get('work_date') != work_date.isoformat():
+                raise ValidationError('Производственные сутки изменились. Выбери файл заново.')
+            upload = request.FILES.get('workbook')
+            if upload is None or not upload.name.lower().endswith('.xlsx'):
+                raise ValidationError('Выбери файл в формате .xlsx.')
+            contents = upload.read(MAX_FILE_SIZE + 1)
+            grouped, skipped = read_crew_excel(contents)
+            context['skipped_categories'] = sorted(skipped.items())
+            confirmation = request.POST.get('draft_confirmation', '')
+            selections = {}
+            for records in grouped.values():
+                for record in records:
+                    for position in (1, 2):
+                        field = f'employee_{record.address}_{position}'
+                        value = request.POST.get(field, '')
+                        if value.isascii() and value.isdigit() and len(value) <= 20:
+                            selections[field] = value
+            context['retained_employee_selections'] = selections
+            context['factual'] = request.POST.get('factual') == '1'
+            publications = publish_crew_excel(
+                grouped, work_date=work_date, access=access,
+                file_digest=sha256(contents).hexdigest(), confirmation=confirmation, factual=context['factual'],
+                selections=selections,
+            )
+            context['publications'] = [
+                (plan, TARGET_ROLE_LABELS[plan.role.code], count)
+                for plan, count in publications
+            ]
+            context['processed'] = True
+            context.pop('retained_employee_selections', None)
+            context['replaced_draft'] = bool(confirmation)
+        except EmployeeChoiceRequired as review:
+            status = 422
+            for choice in review.choices:
+                selections.pop(choice['field'], None)
+            context['employee_choices'] = review.choices
+            context['errors'] = review.errors
+        except DraftConfirmationRequired as review:
+            status = 409
+            context['draft_changed'] = bool(confirmation)
+            context['draft_confirmation'] = review.token
+            context['draft_categories'] = [
+                (TARGET_ROLE_LABELS[role_code], count) for role_code, count in review.categories
+            ]
+        except ValidationError as error:
+            status = 400
+            context['errors'] = error.messages
+    response = render(
+        request, 'assignments/deputy_mining_manager_import.html', context,
+        status=status,
+    )
+    response['Cache-Control'] = 'private, no-store'
     return response
 
 
@@ -1296,6 +1556,7 @@ def _validation_response(error):
 
 
 @require_POST
+@gzip_page
 def deputy_mining_manager_slot_view(request):
     access = deputy_access_from_request(request)
     if not access:
@@ -1306,6 +1567,16 @@ def deputy_mining_manager_slot_view(request):
         equipment = get_object_or_404(Equipment, id=payload.get('equipment_id'))
         employee_id = payload.get('employee_id')
         employee = get_object_or_404(Employee, id=employee_id) if employee_id else None
+        specialization_id = payload.get('specialization_id')
+        brigades = _deputy_brigades(access.employee)
+
+        def validate_new_employee(candidate, work_date):
+            if _employee_brigade_code(candidate) in brigades:
+                return
+            extensions = approved_watch_extensions_on(work_date, employee_ids=[candidate.pk])
+            if not _in_deputy_roster(candidate, brigades, extensions):
+                raise ValidationError('У сотрудника другой бригады нет согласованного продления на эту дату.')
+
         plan = update_crew_draft_slot(
             plan=plan,
             equipment=equipment,
@@ -1314,12 +1585,18 @@ def deputy_mining_manager_slot_view(request):
             expected_version=int(payload.get('expected_version')),
             actor=access.employee,
             position=payload.get('position') or CREW_SLOT_POSITION_PRIMARY,
+            allow_factual=payload.get('factual') is True,
+            validate_new_employee=validate_new_employee if brigades != ALL_BRIGADES else None,
+            reported_source=(
+                int(payload.get('source_equipment_id')), payload.get('source_shift_type')
+            ) if employee and payload.get('move_reported') is True else None,
+            specialization_id=int(specialization_id) if specialization_id is not None else None,
         )
     except (TypeError, ValueError, ValidationError) as error:
         if isinstance(error, ValidationError):
             return _validation_response(error)
         return JsonResponse({'ok': False, 'error': 'Обновите страницу и повторите действие.'}, status=400)
-    return JsonResponse({'ok': True, 'payload': build_crew_plan_payload(plan, request=request)})
+    return JsonResponse({'ok': True, 'payload': build_crew_plan_payload(plan, deputy=access.employee)})
 
 
 @require_POST
@@ -1345,7 +1622,7 @@ def deputy_mining_manager_publish_view(request):
         if isinstance(error, ValidationError):
             return _validation_response(error)
         return JsonResponse({'ok': False, 'error': 'Обновите страницу и повторите действие.'}, status=400)
-    next_payload = build_crew_plan_payload(next_draft, request=request)
+    next_payload = build_crew_plan_payload(next_draft, deputy=access.employee)
     # Сразу после публикации печатается именно утвержденная ревизия. Как только
     # пользователь изменит новый черновик, обычный slot-ответ вернет его URL.
     next_payload['endpoints']['export'] = reverse(
@@ -1382,7 +1659,9 @@ def deputy_mining_manager_temporary_transfer_request_view(request):
             id=payload.get('target_specialization_id'),
             is_active=True,
         )
-        if specialization.access_role_id != plan.role_id:
+        category = AUXILIARY_CATEGORIES.get(plan.role.code)
+        valid = specialization.code == category.specialization if category else specialization.access_role_id == plan.role_id
+        if not valid:
             raise ValidationError('Выберите специализацию для текущей группы техники.')
         watch_period = get_object_or_404(
             WatchPeriod,
@@ -1419,7 +1698,7 @@ def deputy_mining_manager_temporary_transfer_request_view(request):
         return JsonResponse({'ok': False, 'error': 'Проверьте выбранные данные и повторите запрос.'}, status=400)
     return JsonResponse({
         'ok': True,
-        'payload': build_crew_plan_payload(plan, request=request),
+        'payload': build_crew_plan_payload(plan, deputy=access.employee),
     })
 
 
@@ -1433,7 +1712,7 @@ def deputy_mining_manager_reports_view(request):
         .select_related('role', 'published_by')
         .annotate(
             slot_count=Count('slots'),
-            assigned_count=Count('slots', filter=Q(slots__employee__isnull=False)),
+            assigned_count=Count('slots', filter=Q(slots__employee__isnull=False) | Q(slots__reported_employee__isnull=False)),
         )
         .order_by('-work_date', '-revision')[:30]
     )

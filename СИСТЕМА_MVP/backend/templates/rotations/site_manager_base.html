@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load static management_workplace %}
+
+{% block title %}Начальник участка{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+{% block extra_head %}
+{% include "reports/includes/management_pwa_head.html" %}
+{% include "reports/includes/management_workplace_assets.html" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=4">
+{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board" aria-label="Продлёнка">
+        {% management_workplace_header "extensions" %}
+        <section class="rotation-shell management-extensions-pane" aria-labelledby="management-extensions-title">
+            <h2 id="management-extensions-title" class="management-section-heading">Продлёнка</h2>
+            {% for message in messages %}
+                <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+            {% endfor %}
+            {% block manager_content %}{% endblock %}
+        </section>
+    </section>
+</main>
+{% include "reports/includes/management_report_theme.html" %}
+{% endblock %}

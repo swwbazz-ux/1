@@ -1,18 +1,14 @@
 #!/usr/bin/env node
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 
-const backendRoot = path.resolve(__dirname, "../../..");
-const excavatorTemplate = fs.readFileSync(
-    path.join(backendRoot, "templates", "trips", "excavator_work.html"),
-    "utf8"
-);
+const excavatorTemplate = excavatorScreenSource();
 const miningMasterTemplate = dispatcherScreenSource();
 
 class EventTargetStub {
@@ -163,17 +159,11 @@ function createMessageChannel() {
 
 function extractExcavatorPwaSource() {
     const startMarker = "function formatExcavatorVersion(version) {";
-    const endMarker = "\ndocument.addEventListener(\"DOMContentLoaded\", function () {";
+    const endMarker = "window.ExcavatorWorkPwa =";
     const startIndex = excavatorTemplate.indexOf(startMarker);
     const endIndex = excavatorTemplate.indexOf(endMarker, startIndex);
-    assert.ok(startIndex >= 0, `missing ${startMarker}`);
-    assert.ok(endIndex > startIndex, "missing Excavator PWA runtime terminator");
-    return excavatorTemplate
-        .slice(startIndex, endIndex)
-        .replaceAll(
-            "{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}",
-            "/excavator/"
-        );
+    assert.ok(startIndex >= 0 && endIndex > startIndex, "missing Excavator PWA runtime");
+    return 'var excavatorServiceWorkerScope = "/excavator/";\n' + excavatorTemplate.slice(startIndex, endIndex);
 }
 
 function extractMiningMasterPwaSource() {

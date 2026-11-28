@@ -1,5 +1,6 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
 const {dispatcherScreenSource} = require("./dispatcher-screen-source");
@@ -8,17 +9,13 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-
 const TEMPLATE_ROOT = path.resolve(__dirname, "..", "..", "..", "templates");
 const BASE_TEMPLATE_SOURCE = fs.readFileSync(
     path.join(TEMPLATE_ROOT, "base.html"),
     "utf8"
 );
 const DRIVER_TEMPLATE_SOURCE = driverScreenSource();
-const EXCAVATOR_TEMPLATE_SOURCE = fs.readFileSync(
-    path.join(TEMPLATE_ROOT, "trips", "excavator_work.html"),
-    "utf8"
-).replace(/\r\n?/g, "\n");
+const EXCAVATOR_TEMPLATE_SOURCE = excavatorScreenSource().replace(/\r\n?/g, "\n");
 const DISPATCHER_TEMPLATE_SOURCE = dispatcherScreenSource();
 
 const FRAGMENT_CLIENT_START = "/* OPERATIONAL_FRAGMENT_CLIENT_START */";
@@ -372,6 +369,39 @@ test("production fragment helper sends a versioned JSON-only request", async () 
 });
 
 
+test("SSE snapshot requests use the reset URL and explicit consistent-snapshot marker", async () => {
+    const fetchCalls = [];
+    const payload = {
+        contract: FRAGMENT_CONTRACT,
+        screen: "driver",
+        version: 91,
+        html: '<main data-driver-shell="1"></main>',
+    };
+    const {runtimeWindow} = createFragmentRuntime((url) => {
+        fetchCalls.push(String(url));
+        return Promise.resolve({
+            ok: true,
+            headers: {get: () => "application/json"},
+            status: 200,
+            json: () => Promise.resolve(payload),
+        });
+    });
+
+    const result = await runtimeWindow.AppOperationalFragment.request("driver", 90, {
+        snapshot: true,
+        snapshotUrl: "/driver/?from=sse-reset",
+    });
+
+    const requestUrl = new URL(fetchCalls[0]);
+    assert.equal(requestUrl.pathname, "/driver/");
+    assert.equal(requestUrl.searchParams.get("from"), "sse-reset");
+    assert.equal(requestUrl.searchParams.get("_operational_fragment"), "driver");
+    assert.equal(requestUrl.searchParams.get("_operational_version"), "90");
+    assert.equal(requestUrl.searchParams.get("_operational_snapshot"), "1");
+    assert.equal(result.snapshot_version, 91);
+});
+
+
 test("production fragment helper rejects contract and screen mismatches", async () => {
     const responses = [
         {
@@ -504,8 +534,9 @@ test("concurrent Excavator refresh triggers share one in-flight request", async 
 });
 
 
-test("successful Excavator Shift save clears its draft before owned fragment reconciliation", async () => {
+test("successful Excavator shift start opens Work before refreshing the saved shift", async () => {
     const refreshCalls = [];
+    const tabs = [];
     let clearCalls = 0;
     let reloadCalls = 0;
     const shiftScreen = {dataset: {eoShiftDirty: "true"}};
@@ -521,7 +552,9 @@ test("successful Excavator Shift save clears its draft before owned fragment rec
             return Promise.resolve(true);
         },
         action: "open",
+        activateTab(name) { tabs.push(name); },
         refreshExcavatorWorkFromServer(options) {
+            assert.deepEqual(tabs, ["trucks"]);
             refreshCalls.push(options);
             return Promise.resolve(true);
         },

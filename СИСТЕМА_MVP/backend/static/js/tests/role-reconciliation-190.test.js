@@ -1,4 +1,5 @@
 "use strict";
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
@@ -7,7 +8,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 const templates = process.env.ROLE_RECONCILIATION_TEMPLATE_ROOT || path.resolve(__dirname, "../../../templates");
 const driver = driverScreenSource();
-const excavator = fs.readFileSync(path.join(templates, "trips/excavator_work.html"), "utf8");
+const excavator = excavatorScreenSource(path.join(templates, "trips/excavator_work.html"));
 // The existing brace extractor understands comments and quoted braces; use it
 // to execute the production functions, never a test copy of their algorithm.
 const helperSource = fs.readFileSync(path.join(__dirname, "operational-fragment-runtime.test.js"), "utf8");
@@ -207,13 +208,16 @@ test("excavator POST acknowledgement maps server IDs but leaves DOM applied vers
     const requested = [];
     const document = {body: {dataset: {operationalStateVersion: "100"}}, querySelector: () => badge};
     const window = {AppRealtime: {requestReconcile: (...args) => requested.push(args)}, sessionStorage: {setItem() {}}, setTimeout() {}, clearTimeout() {}};
-    const context = {window, document, Promise, freeBucketController: null, cardByTruckId: () => card, downtimeCard: null};
-    vm.runInNewContext(extract(excavator, "function storeExcavatorRealtimeVersion(version)") + ";\n" + extract(excavator, "window.confirmExcavatorFieldEvent = function (event, result)"), context);
+    const truckLoadProjections = new WeakMap([[card, {eventId: "event"}]]);
+    const context = {window, document, Promise, freeBucketController: null, cardByTruckId: () => card, downtimeCard: null, truckLoadProjections};
+    vm.runInNewContext(extract(excavator, "window.confirmExcavatorFieldEvent = function (event, result)"), context);
     await window.confirmExcavatorFieldEvent({event_type: "excavator.trip.loaded", event_id: "event", payload: {truck_id: 8}}, {server_version: 101, server_ids: {trip_id: 810}});
     assert.equal(document.body.dataset.operationalStateVersion, "100");
     assert.equal(badge.dataset.tripId, "810");
     assert.equal(card.dataset.eoOpenTripId, "810");
     assert.equal(badge.dataset.eoLocalTripId, undefined);
+    assert.equal(card.dataset.eoLocalOpenTripId, undefined);
+    assert.equal(truckLoadProjections.has(card), false);
     assert.deepEqual(requested, [["offline_excavator_events_confirmed", 101]]);
 });
 

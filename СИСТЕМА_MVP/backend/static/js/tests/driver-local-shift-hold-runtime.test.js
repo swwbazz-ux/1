@@ -63,6 +63,12 @@ function closeFormFixture(getShell) {
         addEventListener() {},
         checkValidity() { return this.value.trim() !== ""; },
     }));
+    /* Подписи «Начало» внутри формы закрытия: из них берётся предзаполнение
+       (mobile_shift_screen.html:53,57,61). */
+    const startNodes = ["start_fuel", "start_mileage", "start_engine_hours"].map((name) => ({
+        dataset: {driverShiftStart: name},
+        textContent: "—",
+    }));
     const label = {textContent: "Закрыть смену"};
     const button = {
         disabled: false,
@@ -77,13 +83,20 @@ function closeFormFixture(getShell) {
         querySelector(selector) {
             if (selector === "[data-driver-shift-close-button]") return button;
             if (selector === 'input[name="shift_id"]') return shiftInput;
-            return inputs.find((input) => selector === `[name="${input.name}"]`) || null;
+            const named = /^\[name=["']([^"']+)["']\]$/.exec(selector);
+            if (named) return inputs.find((input) => input.name === named[1]) || null;
+            const start = /^\[data-driver-shift-start=["']([^"']+)["']\]$/.exec(selector);
+            if (start) return startNodes.find((node) => node.dataset.driverShiftStart === start[1]) || null;
+            return null;
         },
-        querySelectorAll() { return []; },
+        querySelectorAll(selector) {
+            if (selector === "[data-driver-shift-start]") return startNodes;
+            return [];
+        },
         closest(selector) { return selector === "[data-driver-shell]" ? getShell() : null; },
         contains(node) { return inputs.includes(node); },
     };
-    return {form, inputs, button};
+    return {form, inputs, button, startNodes};
 }
 
 function setup(options = {}) {
@@ -186,8 +199,21 @@ function setup(options = {}) {
     const openingBinding = block(SCREEN, "function bindDriverShiftOpeningForm(shell)");
     const refreshGuard = block(SCREEN, "function isDriverOperationalRefreshUnsafe(shell)");
     const typingCheck = block(SCREEN, "function driverIsTypingIntoForm(shell)");
+    /* Настоящие показания закрытия смены: предзаполнение и снятие прошлых
+       значений (driver-shift-close-v1.js). Ветка driver-local-shift-v1.js,
+       которая их зовёт, иначе оставалась бы без теста (QA T-025, 8.4). */
+    const readingHelpers = [
+        block(SCREEN, "var DRIVER_SHIFT_END_READING_LABELS = {"),
+        block(SCREEN, "function driverShiftEndReadingInputs(form)"),
+        block(SCREEN, "function driverShiftStartReading(form, name)"),
+        block(SCREEN, "function setDriverShiftReadingValue(input, value)"),
+        block(SCREEN, "function prefillDriverShiftCloseReadings(form)"),
+        block(SCREEN, "function clearDriverShiftCloseReadings(form)"),
+        "window.prefillDriverShiftCloseReadings = prefillDriverShiftCloseReadings;",
+        "window.clearDriverShiftCloseReadings = clearDriverShiftCloseReadings;",
+    ].join("\n");
     vm.runInNewContext(
-        `${HOLD_SOURCE}\n${holdAdapter}\n${openingBinding}\n${refreshGuard}\n${typingCheck}\n${LOCAL_SHIFT_SOURCE}`,
+        `${HOLD_SOURCE}\n${holdAdapter}\n${openingBinding}\n${refreshGuard}\n${typingCheck}\n${readingHelpers}\n${LOCAL_SHIFT_SOURCE}`,
         context,
         {filename: "driver-local-shift-hold-runtime"}
     );
@@ -209,6 +235,13 @@ function setup(options = {}) {
         form, button, label, inputs, shell, queued, context, close,
         completeHold: () => holdOptions.onComplete(),
         closeShift: () => windowObject.DriverLocalShift.close(close.form),
+        project: () => windowObject.DriverLocalShift.project(shell),
+        /* Как bindDriverShiftControls при загрузке страницы (driver-shift-v1.js). */
+        prefillCloseReadings: () => windowObject.prefillDriverShiftCloseReadings(close.form),
+        type: (values) => inputs.forEach((input, index) => {
+            input.value = values[index];
+            input.dispatch("input");
+        }),
     };
 }
 
@@ -298,4 +331,114 @@ test("a hidden opening form still carrying stale busy marks does not hold the sc
     assert.equal(run.context.driverIsTypingIntoForm(run.shell), false);
     run.form.hidden = false;
     assert.equal(run.context.isDriverOperationalRefreshUnsafe(run.shell), true);
+});
+
+/* QA T-025, 8.2. Форма закрытия не пересоздаётся между сменами: после
+   «закрыл → открыл» в ней оставались показания прошлой смены, а подписи
+   «Начало» уже новые. Сервер ловит уменьшение одометра/моточасов, а
+   устаревшее топливо прошло бы молча. Новая местная смена должна получить
+   свои показания начала. */
+test("second local shift in a row: close form shows its own start readings, not the previous end", async () => {
+    const run = setup({withCloseForm: true});
+
+    run.type(["400", "100000", "5000"]);
+    run.completeHold();
+    await run.form.lastOpen;
+    assert.equal(run.close.form.hidden, false);
+    assert.deepEqual(run.close.inputs.map((input) => input.value), ["400", "100000", "5000"]);
+
+    run.close.inputs.forEach((input, index) => { input.value = ["380", "100120", "5010"][index]; });
+    await run.closeShift();
+    assert.equal(run.close.form.hidden, true);
+
+    /* Вторая смена: водитель сам вписал новые показания при открытии. */
+    run.type(["450", "100200", "5020"]);
+    run.completeHold();
+    await run.form.lastOpen;
+    assert.equal(run.close.form.hidden, false);
+    assert.deepEqual(
+        run.close.startNodes.map((node) => node.textContent),
+        ["450", "100200", "5020"],
+        "подписи «Начало» новой смены"
+    );
+    assert.deepEqual(
+        run.close.inputs.map((input) => input.value),
+        ["450", "100200", "5020"],
+        "поля закрытия получили показания начала новой смены, а не прошлой"
+    );
+
+    await run.closeShift();
+    const lastClose = run.queued.filter((event) => event.event_type === "driver.shift.closed").pop();
+    assert.equal(lastClose.payload.end_fuel, "450");
+    assert.equal(lastClose.payload.end_mileage, "100200");
+    assert.equal(lastClose.payload.end_engine_hours, "5020");
+});
+
+/* Требование карточки: не стирать ввод, пока форма закрытия текущей смены
+   открыта/редактируется. Повторное применение состояния той же смены
+   (фрагмент, подтверждение сервера) не трогает ни введённое, ни очищенное. */
+test("close form keeps what the driver typed while the same shift is open", async () => {
+    const run = setup({withCloseForm: true});
+
+    run.type(["400", "100000", "5000"]);
+    run.completeHold();
+    await run.form.lastOpen;
+    assert.deepEqual(run.close.inputs.map((input) => input.value), ["400", "100000", "5000"]);
+
+    run.close.inputs[0].value = "470";
+    run.close.inputs[1].value = "";
+    run.project();
+    run.project();
+    assert.deepEqual(
+        run.close.inputs.map((input) => input.value),
+        ["470", "", "5000"],
+        "повторное применение той же смены не затирает и не добирает поля"
+    );
+});
+
+/* QA T-025, итерация 2 (блокер). Реальная цепочка на стенде: страница открыта
+   с СЕРВЕРНОЙ сменой (21/19), водитель офлайн закрывает её, затем офлайн
+   открывает новую смену с изменёнными показаниями начала. Форма закрытия
+   серверной смены была предзаполнена при загрузке (bindDriverShiftControls),
+   и первая местная смена обязана получить свои показания, а не серверные. */
+test("server shift → offline close → local open: close form gets the new shift readings", async () => {
+    const run = setup({withCloseForm: true});
+    /* Разметка сервера: смена 19 открыта, подписи «Начало» — из неё. */
+    run.shell.dataset.driverShiftId = "19";
+    run.shell.dataset.driverServerShiftId = "19";
+    const serverStarts = {start_fuel: "400", start_mileage: "100000", start_engine_hours: "5000"};
+    run.close.startNodes.forEach((node) => {
+        node.textContent = serverStarts[node.dataset.driverShiftStart];
+    });
+    run.project();
+    run.prefillCloseReadings();
+    assert.equal(run.shell.dataset.driverShiftId, "19");
+    assert.deepEqual(run.close.inputs.map((input) => input.value), ["400", "100000", "5000"]);
+
+    /* Офлайн-закрытие серверной смены 19 (показания те же, что на экране). */
+    await run.closeShift();
+    assert.equal(run.close.form.hidden, true);
+
+    /* Новая местная смена: водитель изменил показания при открытии. */
+    run.type(["450", "100200", "5020"]);
+    run.completeHold();
+    await run.form.lastOpen;
+
+    assert.equal(run.close.form.hidden, false);
+    assert.deepEqual(
+        run.close.startNodes.map((node) => node.textContent),
+        ["450", "100200", "5020"],
+        "подписи «Начало» новой смены"
+    );
+    assert.deepEqual(
+        run.close.inputs.map((input) => input.value),
+        ["450", "100200", "5020"],
+        "первая местная смена после серверной не оставляет показания серверной"
+    );
+
+    await run.closeShift();
+    const lastClose = run.queued.filter((event) => event.event_type === "driver.shift.closed").pop();
+    assert.equal(lastClose.payload.end_fuel, "450");
+    assert.equal(lastClose.payload.end_mileage, "100200");
+    assert.equal(lastClose.payload.end_engine_hours, "5020");
 });

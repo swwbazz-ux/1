@@ -16,6 +16,23 @@ from .models import (
 )
 
 
+def approved_watch_extensions_on(work_date, *, employee_ids=None):
+    """Return approved cases by employee ID for an inclusive local work date."""
+    cases = WatchExtensionCase.objects.filter(
+        decision_status=WatchExtensionCase.DecisionStatus.APPROVED,
+        extension_start__lte=work_date,
+        extension_end__gte=work_date,
+    )
+    if employee_ids is not None:
+        cases = cases.filter(response__employee_id__in=employee_ids)
+    cases = cases.select_related('response__employee').order_by('-decision_at', '-pk')
+    by_employee = {}
+    for case in cases:
+        # Existing data can contain overlapping cases from different cycles.
+        by_employee.setdefault(case.response.employee_id, case)
+    return by_employee
+
+
 def _snapshot_position(employee):
     if employee.personnel_position_id:
         return employee.personnel_position.name
@@ -155,12 +172,12 @@ def _validate_extension_sequence(response, extension_start):
 
 @transaction.atomic
 def submit_response(response, *, actor, cleaned_data, by_timekeeper=False):
+    cycle = RotationCollectionCycle.objects.select_for_update().get(pk=response.cycle_id)
     response = (
-        RotationResponse.objects.select_for_update()
+        RotationResponse.objects.select_for_update(of=('self',))
         .select_related('cycle__target_watch_period', 'employee')
         .get(pk=response.pk)
     )
-    cycle = RotationCollectionCycle.objects.select_for_update().get(pk=response.cycle_id)
     if cycle.status != 'open':
         raise ValidationError('Сбор закрыт. Ответ больше нельзя изменить.')
     if cycle.response_deadline < timezone.now() and not by_timekeeper:
@@ -238,29 +255,56 @@ def submit_response(response, *, actor, cleaned_data, by_timekeeper=False):
     return response
 
 
+def _lock_extension_case(extension_case):
+    # Serialize decisions and edits in the same order as submit_response.
+    try:
+        cycle = RotationCollectionCycle.objects.select_for_update(of=('self',)).get(
+            responses__extension_case=extension_case,
+        )
+        case = WatchExtensionCase.objects.select_for_update(of=('self',)).select_related(
+            'response',
+        ).get(pk=extension_case.pk)
+    except (RotationCollectionCycle.DoesNotExist, WatchExtensionCase.DoesNotExist) as error:
+        raise ValidationError('Заявка отозвана. Обновите очередь.') from error
+    return case, cycle
+
+
 @transaction.atomic
-def decide_extension(extension_case, *, actor, decision, comment=''):
+def decide_extension(
+    extension_case, *, actor, decision, comment='', approved_end=None, expected_updated_at=None,
+):
     if decision not in {'approved', 'rejected'}:
         raise ValidationError('Неизвестное решение по заявке.')
-    extension_case = (
-        WatchExtensionCase.objects.select_for_update()
-        .select_related('response__cycle')
-        .get(pk=extension_case.pk)
-    )
+    extension_case, cycle = _lock_extension_case(extension_case)
     if extension_case.decision_status != 'pending':
-        if extension_case.decision_status == decision:
+        if (
+            extension_case.decision_status == decision
+            and (approved_end is None or approved_end == extension_case.extension_end)
+        ):
             return extension_case
-        raise ValidationError('По заявке уже принято другое решение.')
+        raise ValidationError('По заявке уже принято решение. Проверьте сохранённый результат.')
+    if expected_updated_at is not None and extension_case.updated_at != expected_updated_at:
+        raise ValidationError('Заявка изменилась. Проверьте актуальные данные перед решением.')
     if decision == 'rejected' and not (comment or '').strip():
         raise ValidationError('При отклонении укажите причину.')
+
+    requested_end = extension_case.extension_end
+    if decision == 'approved':
+        agreed_end = approved_end if approved_end is not None else requested_end
+        if agreed_end < extension_case.extension_start:
+            raise ValidationError('Дата окончания продления не может быть раньше начала.')
+        extension_case.extension_end = agreed_end
+
     extension_case.decision_status = decision
     extension_case.decision_by = actor
     extension_case.decision_at = timezone.now()
     extension_case.decision_comment = (comment or '').strip()
     extension_case.save(
-        update_fields=['decision_status', 'decision_by', 'decision_at', 'decision_comment', 'updated_at']
+        update_fields=[
+            'extension_end', 'decision_status', 'decision_by', 'decision_at',
+            'decision_comment', 'updated_at',
+        ],
     )
-    cycle = extension_case.response.cycle
     _bump_cycle_revision(cycle)
     _log(
         cycle=cycle,
@@ -268,18 +312,19 @@ def decide_extension(extension_case, *, actor, decision, comment=''):
         extension_case=extension_case,
         actor=actor,
         action_code=f'rotation_extension_{decision}',
-        details={'comment': extension_case.decision_comment},
+        details={
+            'comment': extension_case.decision_comment,
+            'requested_start': extension_case.extension_start.isoformat(),
+            'requested_end': requested_end.isoformat(),
+            'approved_end': extension_case.extension_end.isoformat() if decision == 'approved' else None,
+        },
     )
     return extension_case
 
 
 @transaction.atomic
 def mark_documentation_complete(extension_case, *, actor, note=''):
-    extension_case = (
-        WatchExtensionCase.objects.select_for_update()
-        .select_related('response__cycle')
-        .get(pk=extension_case.pk)
-    )
+    extension_case, cycle = _lock_extension_case(extension_case)
     if extension_case.decision_status != 'approved':
         raise ValidationError('Оформлять можно только одобренное продление.')
     extension_case.documentation_status = 'completed'
@@ -292,7 +337,6 @@ def mark_documentation_complete(extension_case, *, actor, note=''):
             'documentation_note', 'updated_at',
         ]
     )
-    cycle = extension_case.response.cycle
     _bump_cycle_revision(cycle)
     _log(
         cycle=cycle,

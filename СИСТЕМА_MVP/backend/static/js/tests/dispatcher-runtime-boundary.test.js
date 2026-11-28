@@ -193,7 +193,7 @@ test("detail-карточка живёт в отдельном упакован�
 test("desktop-приглашение уведомлений живёт в отдельном упакованном include", () => {
     assert.match(
         SHARED_TEMPLATE,
-        /{% if not mining_master_mobile_enabled %}\s*{% include "trips\/includes\/dispatcher_push_invite\.html" %}\s*{% endif %}/
+        /{% if not mining_master_mobile_enabled and not deputy_dispatcher_viewer %}\s*{% include "trips\/includes\/dispatcher_push_invite\.html" %}\s*{% endif %}/
     );
     assert.doesNotMatch(SHARED_TEMPLATE, /class="dispatcher-push-invite"/);
     assert.match(DISPATCHER_PUSH_INVITE, /class="dispatcher-push-invite"/);

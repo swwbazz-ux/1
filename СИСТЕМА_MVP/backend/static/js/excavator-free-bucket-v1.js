@@ -23,6 +23,7 @@
     var opener = null;
     var historyOwned = false;
     var closing = false;
+    var bucketCoveringIncoming = new WeakMap();
 
     function text(value) {
         return String(value == null ? "" : value).trim();
@@ -287,11 +288,17 @@
             return card.dataset.eoFreeBucketUsed !== "1";
         });
         if (!cards.length) return 0;
-        results.appendChild(make("h3", "eo-free-bucket__active-title", "Уже приняты"));
+        results.appendChild(make("h3", "eo-free-bucket__active-title", "Под свободным ковшом"));
         cards.forEach(function (card) {
             var row = make("div", "eo-free-bucket__active-item");
             var copy = make("div");
             copy.appendChild(make("strong", "", "№ " + text(card.dataset.eoTruckNumber)));
+            if (card.dataset.eoFreeBucketDriverSelected === "1") {
+                copy.appendChild(make("span", "", "Под свободным ковшом"));
+                row.appendChild(copy);
+                results.appendChild(row);
+                return;
+            }
             copy.appendChild(make("span", "", card.classList.contains("is-saved-on-device")
                 ? "Сохранено на телефоне" : "Подтверждено сервером"));
             var remove = make("button", "eo-free-bucket__remove", "Убрать");
@@ -388,8 +395,9 @@
     }
 
     function openModal(button) {
-        if (!modal || !shell || shell.dataset.eoCurrentExcavatorId === "") return;
+        if (!modal || !modal.hidden || button.disabled || !shell || shell.dataset.eoCurrentExcavatorId === "") return;
         if (root.ExcavatorHourlyReport && root.ExcavatorHourlyReport.isOpen()) return;
+        if (typeof root.excavatorRoundControlFeedback === "function") root.excavatorRoundControlFeedback();
         opener = button;
         selectedTruck = null;
         input.value = "";
@@ -430,6 +438,12 @@
         var grid = gridForShell();
         if (!grid) return;
         var cards = Array.prototype.filter.call(grid.querySelectorAll("[data-eo-truck-card]"), function (card) {
+            var bucket = bucketCoveringIncoming.get(card);
+            // Cancelling restores the pending transfer. A used truck waits for its fresh trip state.
+            if (bucket && !bucket.isConnected && bucket.dataset.eoFreeBucketUsed !== "1") {
+                card.hidden = false;
+                bucketCoveringIncoming.delete(card);
+            }
             return !card.hidden;
         });
         grid.classList.toggle("is-empty", cards.length === 0);
@@ -459,8 +473,9 @@
         var truckId = truckIdOf(item) || text(event && event.payload && event.payload.truck_id);
         if (!truckId) return null;
         var existing = cardForTruck(truckId);
-        if (existing) {
-            if (existing.dataset.eoFreeBucket === "1" && event && event.event_id) {
+        if (existing && existing.dataset.eoTransferDirection !== "incoming") {
+            if (existing.dataset.eoFreeBucket !== "1") return null;
+            if (event && event.event_id) {
                 existing.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
                 existing.classList.toggle("is-free-bucket-conflict", !!conflict);
             }
@@ -511,6 +526,10 @@
         var accent = make("u", "eo-free-bucket-card-accent");
         accent.setAttribute("aria-hidden", "true");
         card.appendChild(accent);
+        if (existing) {
+            existing.hidden = true;
+            bucketCoveringIncoming.set(existing, card);
+        }
         grid.insertBefore(card, grid.firstElementChild);
         if (typeof bindTruckCard === "function") bindTruckCard(card);
         normalizeGrid();
@@ -661,7 +680,7 @@
     function acceptSelected() {
         if (!selectedTruck || !queueEvent || !acceptButton) return;
         var existing = cardForTruck(truckIdOf(selectedTruck));
-        if (existing) {
+        if (existing && existing.dataset.eoTransferDirection !== "incoming") {
             requestClose();
             root.setTimeout(function () { highlightCard(existing); }, 80);
             return;
@@ -693,7 +712,8 @@
     }
 
     function cancelAcceptedCard(card) {
-        if (!queueEvent || !card || card.dataset.eoFreeBucket !== "1") return Promise.resolve(false);
+        if (!queueEvent || !card || card.dataset.eoFreeBucket !== "1"
+                || card.dataset.eoFreeBucketDriverSelected === "1") return Promise.resolve(false);
         if (card.dataset.eoFreeBucketCancelPending === "1" || card.dataset.eoFreeBucketUsed === "1") {
             return Promise.resolve(false);
         }
@@ -742,6 +762,7 @@
 
     function removeLoadedCard(card) {
         if (!card || card.dataset.eoFreeBucket !== "1") return;
+        card.dataset.eoFreeBucketUsed = "1";
         storeConsumedReferences([
             card.dataset.eoFreeBucketAcceptanceId,
             card.dataset.eoFreeBucketAcceptanceLocalId
@@ -762,6 +783,7 @@
             var card = renderLocalCard(cardItem, event, false);
             if (card) {
                 card.classList.remove("is-saved-on-device");
+                card.dataset.eoFreeBucketDriverSelected = item.driver_selected ? "1" : "0";
                 card.dataset.eoFreeBucketAcceptanceId = text(item.id || item.free_bucket_acceptance_id);
                 card.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
             }
@@ -773,7 +795,7 @@
         var payload = event.payload || {};
         if (event.event_type === "excavator.free_bucket.accepted") {
             var card = cardForTruck(payload.truck_id);
-            if (card) {
+            if (card && card.dataset.eoFreeBucket === "1") {
                 card.classList.remove("is-saved-on-device");
                 card.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
                 card.dataset.eoFreeBucketAcceptanceId = text(result && result.server_ids && result.server_ids.free_bucket_acceptance_id);
@@ -802,7 +824,7 @@
             return;
         }
         var card = cardForTruck(payload.truck_id);
-        if (card) {
+        if (card && card.dataset.eoFreeBucket === "1") {
             card.classList.add("is-free-bucket-conflict");
             card.dataset.eoCanLoad = "0";
             var marker = card.querySelector(".eo-free-bucket-card-marker");

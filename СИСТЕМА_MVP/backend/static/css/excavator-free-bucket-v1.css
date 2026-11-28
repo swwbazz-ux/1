@@ -72,6 +72,114 @@ body.excavator-operator-screen .eo-dashboard-plan-widget {
     cursor: default;
 }
 
+/* The two operator controls share the space beside the name on every screen. */
+body.excavator-operator-screen .eo-dashboard-plan-widget[data-eo-round-controls] {
+    --eo-control-diameter: clamp(52px, calc(23px + 7.9vw), 59px);
+    grid-template-columns: repeat(2, var(--eo-control-diameter)) !important;
+    min-height: clamp(58px, 15.8vw, 72px);
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget[data-eo-round-controls] > :is(.eo-free-bucket-button, .eo-dashboard-plan-ring) {
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: var(--eo-control-diameter) !important;
+    height: var(--eo-control-diameter) !important;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--eo-control-face, linear-gradient(154deg, #47575f -18%, #2a393f 24%, #1a272c 59%, #0d191f 100%)) !important;
+    box-shadow: inset 0 1px 0 #93a6ad, inset 1px 0 0 #65767c, inset -1px -1px 0 #39464b,
+        var(--eo-control-depth, inset 0 -4px 5px #0610159c), 0 2px 0 #070c0f, 0 3px 0 #010609, 0 4px 5px #0007 !important;
+    transition: none;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget[data-eo-round-controls] > :is(.eo-free-bucket-button, .eo-dashboard-plan-ring)::after {
+    content: "";
+    position: absolute;
+    inset: 4% !important;
+    border: calc(var(--eo-control-diameter) * .06) solid var(--eo-control-track, #506169) !important;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+[data-eo-round-controls] .eo-dashboard-plan-ring.is-progress-overrun {
+    --eo-control-track: var(--eo-dashboard-complete-color);
+}
+[data-eo-round-controls] .eo-dashboard-plan-ring.is-plan-missing {
+    --eo-control-track: #ff4540;
+}
+
+[data-eo-round-controls] .eo-dashboard-plan-arc {
+    inset: 0;
+    z-index: 2;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: var(--eo-dashboard-loop-color);
+    stroke-width: 6;
+    stroke-linecap: round;
+    stroke-dasharray: 100 100;
+    stroke-dashoffset: calc(100% - var(--eo-dashboard-loop-progress, 0%));
+    pointer-events: none;
+}
+.eo-dashboard-plan-ring:is([data-progress-percent="0"], .is-plan-missing) .eo-dashboard-plan-arc {
+    visibility: hidden;
+}
+
+[data-eo-round-controls] .eo-free-bucket-button > svg {
+    width: calc(var(--eo-control-diameter) * .50);
+    height: calc(var(--eo-control-diameter) * .50);
+    color: #ffcf55;
+}
+body.excavator-operator-screen [data-eo-round-controls] .eo-dashboard-plan-ring > span:first-child {
+    font-size: clamp(15px, 4.2vw, 18px) !important;
+    font-weight: 800;
+    line-height: 1 !important;
+    letter-spacing: -.035em !important;
+    text-shadow: 0 1px 1px #0008 !important;
+}
+
+[data-eo-round-controls] .eo-dashboard-plan-ring.is-progress-overrun > span {
+    top: -4px;
+}
+body.excavator-operator-screen [data-eo-round-controls] .eo-dashboard-progress-loop {
+    top: calc(50% + 5px);
+    right: auto !important;
+    bottom: auto !important;
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+}
+
+.eo-dashboard-plan-widget[data-eo-round-controls] > :is(.eo-free-bucket-button, .eo-dashboard-plan-ring):active:not(:disabled) {
+    --eo-control-face: radial-gradient(circle at 50% 72%, #49616b, #263740 54%, #0e1b23 92%);
+    --eo-control-depth: inset 0 7px 10px #010609;
+    transform: none;
+    filter: brightness(1.2);
+}
+body.excavator-operator-screen .eo-dashboard-plan-widget[data-eo-round-controls] > :is(.eo-free-bucket-button, .eo-dashboard-plan-ring):active:not(:disabled)::after {
+    box-shadow: 0 0 5px #cbe4f499, inset 0 1px 4px #000a;
+}
+body.excavator-operator-screen [data-eo-round-controls] > :is(.eo-free-bucket-button, .eo-dashboard-plan-ring):focus-visible {
+    outline: 2px solid #e1e8eb;
+    outline-offset: 2px;
+}
+@media (prefers-reduced-motion: no-preference) {
+    [data-eo-round-controls] > :active:not(:disabled) > :is(span, svg:not(.eo-dashboard-plan-arc)):first-child {
+        transform: translateY(3px) scale(.9);
+        transition-duration: 55ms;
+    }
+    [data-eo-round-controls] > * > :is(span, svg:not(.eo-dashboard-plan-arc)):first-child {
+        transition: transform 155ms cubic-bezier(.2, .85, .25, 1.2);
+    }
+}
+
 body.eo-free-bucket-open {
     overflow: hidden !important;
 }
@@ -350,6 +458,10 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket .eo-free-
     white-space: nowrap;
 }
 
+body.excavator-operator-screen .eo-shell[data-eo-active-tab] .eo-dashboard-truck-grid .eo-dashboard-truck-card.is-transfer-incoming[hidden] {
+    display: none !important;
+}
+
 body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket[data-eo-free-bucket-used="1"] .eo-free-bucket-card-marker {
     display: none !important;
 }
@@ -395,33 +507,34 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket.is-free-b
     opacity: .66;
 }
 
-/* Основная карточка остаётся в своём комплексе, но явно показывает временную
-   работу у другого экскаватора. Метка не подменяет производственный цвет. */
-body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote {
-    grid-template-areas: "icon" "number" "freebucket" "target" !important;
+/* Слот занят временно отсутствующим самосвалом. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.is-free-bucket-remote {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "icon" "number" "freebucket" !important;
+    grid-template-rows: minmax(0, 1fr) auto auto !important;
+    border: 1px dashed #586873 !important;
+    filter: grayscale(1) !important;
+    cursor: default;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-outgoing,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-incoming {
+    grid-template-areas: "icon" "number" "transfer" "freebucket" !important;
     grid-template-rows: minmax(0, 1fr) auto auto auto !important;
 }
 
-body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-outgoing,
-body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-incoming {
-    grid-template-areas: "icon" "number" "transfer" "freebucket" "target" !important;
-    grid-template-rows: minmax(0, 1fr) auto auto auto auto !important;
-}
-
-body.excavator-operator-screen .eo-dashboard-truck-card .eo-free-bucket-remote-marker {
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card > .eo-free-bucket-remote-marker {
     grid-area: freebucket !important;
     position: relative !important;
     z-index: 8 !important;
     display: block !important;
-    max-width: calc(100% - 4px) !important;
+    justify-self: stretch;
+    min-width: 0;
     box-sizing: border-box;
-    padding: 2px 5px;
+    padding: 2px 0;
     overflow: hidden;
-    border: 1px solid rgba(255, 211, 72, .52);
-    border-radius: 999px;
-    background: rgba(37, 31, 9, .86);
-    color: #ffe071;
-    font-size: clamp(7px, 1.9vw, 10px);
+    color: #d5dee3;
+    font-size: clamp(9px, 2.8vw, 13px);
     font-weight: 900;
     line-height: 1.05;
     text-align: center;
@@ -430,14 +543,14 @@ body.excavator-operator-screen .eo-dashboard-truck-card .eo-free-bucket-remote-m
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote {
-    grid-template-areas: "icon" "number" "freebucket" "target" !important;
-    grid-template-rows: minmax(12px, 1fr) auto auto auto !important;
+    grid-template-areas: "icon" "number" "freebucket" !important;
+    grid-template-rows: minmax(12px, 1fr) auto auto !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-outgoing,
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-incoming {
-    grid-template-areas: "icon" "number" "transfer" "freebucket" "target" !important;
-    grid-template-rows: minmax(8px, 1fr) auto auto auto auto !important;
+    grid-template-areas: "icon" "number" "transfer" "freebucket" !important;
+    grid-template-rows: minmax(8px, 1fr) auto auto auto !important;
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-highlight {
@@ -461,6 +574,9 @@ body.excavator-operator-screen .eo-dashboard-truck-grid.is-free-bucket-overflow 
 }
 
 @media (max-width: 370px) {
+    body.excavator-operator-screen .eo-dashboard-plan-widget[data-eo-round-controls] {
+        --eo-control-diameter: clamp(51px, calc(22px + 7.9vw), 58px);
+    }
     body.excavator-operator-screen .eo-dashboard-plan-widget {
         grid-template-columns: 44px auto !important;
         column-gap: 7px !important;

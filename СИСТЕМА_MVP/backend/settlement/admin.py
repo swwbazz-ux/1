@@ -17,13 +17,15 @@ class PhysicalRoomAdmin(admin.ModelAdmin):
         'number',
         'room_type',
         'transfer_status',
-        'sex_restriction',
         'capacity',
         'corridor_side',
         'side_position',
     )
-    list_filter = ('dormitory', 'floor', 'room_type', 'transfer_status', 'sex_restriction')
+    list_filter = ('dormitory', 'floor', 'room_type', 'transfer_status')
     search_fields = ('dormitory__number', 'number', 'beds__stable_id')
+    # T-036 backend-16: `sex_restriction` — legacy-поле схемы; пол комнаты
+    # вычисляется по жильцам, поэтому атрибут не редактируется в админке.
+    exclude = ('sex_restriction',)
     inlines = (PhysicalBedInline,)
 
 

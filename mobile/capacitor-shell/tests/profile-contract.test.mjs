@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, resolve } from "node:path";
@@ -7,6 +8,9 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const backendRoot = resolve(root, "..", "..", "СИСТЕМА_MVP", "backend");
+const {excavatorScreenSource} = createRequire(import.meta.url)(
+  resolve(backendRoot, "static/js/tests/excavator-screen-source.js")
+);
 
 // Разметка, стили и код экрана водителя разложены по отдельным файлам —
 // собираем тот же набор, что и СИСТЕМА_MVP/backend/static/js/tests/driver-screen-source.js,
@@ -43,8 +47,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "46",
-    versionName: "0.1.29",
+    versionCode: "62",
+    versionName: "0.1.36",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -54,8 +58,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "53",
-    versionName: "0.1.32",
+    versionCode: "56",
+    versionName: "0.1.35",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -76,7 +80,7 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "55",
+    versionCode: "58",
     versionName: "0.1.32",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
@@ -87,7 +91,7 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "54",
+    versionCode: "57",
     versionName: "0.1.32-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
@@ -109,7 +113,7 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "48",
+    versionCode: "64",
     versionName: "0.1.29",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
@@ -120,7 +124,7 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "47",
+    versionCode: "63",
     versionName: "0.1.29-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
@@ -543,7 +547,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
   const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
   const driverTemplate = driverScreenSource();
-  const excavatorTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "trips", "excavator_work.html"), "utf8");
+  const excavatorTemplate = excavatorScreenSource();
 
   assert.match(plugin, /public void announceEquipment\(PluginCall call\)/);
   assert.match(plugin, /public void announceEquipmentBatch\(PluginCall call\)/);
@@ -568,7 +572,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   assert.match(excavatorTemplate, /excavator_truck_removed/);
   assert.match(excavatorTemplate, /excavator_truck_sent/);
   const excavatorShellVersion = excavatorTemplate.match(
-    /var excavatorShellVersion = "(excavator-mobile-shell-v\d+)";/
+    /data-eo-pwa-version="(excavator-mobile-shell-v\d+)"/
   )?.[1];
   const roleApps = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "users", "role_apps.py"), "utf8");
   const declaredShell = roleApps.match(/shell_version=['"](excavator-mobile-shell-v\d+)['"]/)?.[1];
@@ -596,8 +600,10 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
   assert.match(plugin, /DriverDumpPointAnnouncer\.announce/);
   assert.match(announcer, /private static DriverVoicePlayer sharedPlayer/);
-  assert.match(announcer, /lastScheduledTripId/);
-  assert.match(announcer, /last_driver_dump_point_alert_trip_id[\s\S]*?tripId == persistedTripId[\s\S]*?tripId == lastScheduledTripId/);
+  assert.match(announcer, /OperationalVoiceAnnouncer\.claimOperation/);
+  assert.match(announcer, /"driver-dump:" \+ tripId \+ ":"/);
+  assert.match(announcer, /dumpPointId > 0L[\s\S]*?displayName\.toLowerCase/);
+  assert.match(announcer, /OperationalVoiceAnnouncer\.commitOperation/);
   assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?0L,[\s\S]*?playCue/);
   assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?preferences\.edit\(\)/);
   assert.match(plugin, /result\.announced[\s\S]*?cuePlayed/);
@@ -860,6 +866,8 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
   assert.match(updater, /data-native-app-version/);
   assert.match(updater, /Update checksum mismatch/);
   assert.match(updater, /Update signing certificate mismatch/);
+  assert.match(updater, /archiveFlags = flags \| PackageManager\.GET_SIGNATURES;/);
+  assert.match(updater, /getPackageArchiveInfo\(apk\.getAbsolutePath\(\), archiveFlags\)/);
   assert.match(updater, /activity\.getPackageName\(\)\.equals\(archive\.packageName\)/);
   assert.match(updater, /!hostResumed \|\| !pageLoaded/);
   assert.match(activity, /onPageStarted\(loadingWebView\)[\s\S]*?appUpdateManager\.onPageStarted\(loadingWebView\)/);

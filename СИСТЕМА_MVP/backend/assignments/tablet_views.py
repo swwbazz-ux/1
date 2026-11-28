@@ -124,6 +124,7 @@ def start_or_resume_tablet_shift(request, access, *, confirm_handover=False):
     handle_shift_action(request, 'start_shift', access, current_shift, blocking_shift, announce_start=False)
 
 
+@never_cache
 @tablet_workplace
 @sensitive_post_parameters('reauth_access_code')
 def mining_master_tablet_view(request):

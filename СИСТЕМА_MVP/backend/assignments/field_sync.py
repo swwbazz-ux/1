@@ -28,7 +28,7 @@ from core.models import (
 )
 from references.models import Equipment
 from shifts.models import EmployeeShift
-from shifts.services import lock_active_employee_for_shift
+from shifts.services import can_work_parallel_roles, employee_shift_scope, lock_active_employee_for_shift
 from users.active_role import role_session_state
 from users.forms import is_valid_russian_mobile_phone, normalize_phone
 from users.mining_master_tablet_auth import _eligible, _version
@@ -119,6 +119,11 @@ def _shared_draft(live):
     return {"revision": 0, "payload": live}
 
 
+def _server_local_shift_id(device, shift_id):
+    digest = hashlib.sha256(f"{device}:master-shift:{shift_id}".encode()).hexdigest()
+    return str(UUID(hex=digest[:32], version=4))
+
+
 def _snapshot(access, device, *, live=None, v2=False):
     current = live or _live_state()
     shift = _own_shift(access)
@@ -138,12 +143,7 @@ def _snapshot(access, device, *, live=None, v2=False):
             .first()
         )
         local_id = binding.context_snapshot.get("local_shift_id") if binding else None
-        local_id = local_id or str(
-            UUID(
-                hex=hashlib.sha256(f"{device}:master-shift:{shift.pk}".encode()).hexdigest()[:32],
-                version=4,
-            )
-        )
+        local_id = local_id or _server_local_shift_id(device, shift.pk)
     version = lock_production_state().version
     snapshot = {
         "actor": _actor(access),
@@ -161,6 +161,8 @@ def _snapshot(access, device, *, live=None, v2=False):
 
     if v2:
         snapshot["portrait_revision"] = field_portrait.revision(access.employee)
+        snapshot["can_archive_duplicate_shift"] = True
+        snapshot["queue_archive_version"] = 2
         snapshot["live_tokens"] = {"trucks": current[0]["trucks"], "zones": current[0]["zones"]}
         return field_commands.enrich_snapshot(access, snapshot)
     return snapshot
@@ -503,10 +505,12 @@ def _process(access, proof, event, occurred):
             raise FieldProblem(
                 "shift_mismatch", "Открытие смены должно сохранить свой исходный номер."
             )
-        lock_active_employee_for_shift(access.employee, role_code=ROLE)
+        employee = lock_active_employee_for_shift(access.employee, role_code=ROLE)
+        parallel_roles = can_work_parallel_roles(employee)
+        scope = employee_shift_scope(ROLE, parallel_roles=parallel_roles)
         if (
             EmployeeShift.objects.filter(
-                employee_id=access.employee_id, closed_at__isnull=True
+                scope, employee=employee, closed_at__isnull=True
             ).exists()
             or mining_master_shift_queryset().exists()
         ):
@@ -518,20 +522,23 @@ def _process(access, proof, event, occurred):
             .filter(Q(opened_at__gt=occurred) | Q(closed_at__gt=occurred))
             .exists()
             or EmployeeShift.objects.filter(
-                employee_id=access.employee_id, closed_at__gt=occurred
+                scope, employee=employee, closed_at__gt=occurred
             ).exists()
         ):
             raise FieldProblem(
                 "late_shift", "После этой смены уже началась другая. История сохранена для сверки."
             )
         shift = EmployeeShift.objects.create(
-            employee=access.employee,
-            opened_by=access.employee,
+            employee=employee,
+            opened_by=employee,
             workplace_code=ROLE,
+            parallel_role_slot=parallel_roles,
             shift_type=get_shift_type_for_now(occurred),
             opened_at=occurred,
         )
         return shift, {}
+    if event["type"] == "shift.close" and _is_archived_duplicate_close(access, event):
+        return None, {"reconciliation": "unbound_duplicate_close"}
     shift = _shift_for_event(access, proof, event, occurred)
     if event["type"] in field_commands.COMMANDS:
         return shift, field_commands.execute(access, event, occurred)
@@ -648,9 +655,43 @@ def _advance_sequence(key):
         key.save(update_fields=["result_payload", "updated_at"])
 
 
+def _is_archived_duplicate_close(access, event):
+    deps = event.get("depends_on", [])
+    if event.get("format_version") != 2:
+        return False
+    prior = OfflineFieldEvent.objects.filter(
+        actor=access.employee,
+        access=access,
+        role_code=ROLE,
+        device_id=event["device_id"],
+        sequence=event["sequence"] - 1,
+        event_type=EVENT_PREFIX + "shift.open",
+        status=OfflineFieldEventStatus.CONFLICT,
+        error_code="shift_occupied",
+        shift__isnull=True,
+        result_payload__archive_close_event_id__isnull=False,
+    ).first()
+    if not prior:
+        return False
+    if not (
+        deps == [prior.event_id]
+        and not event.get("server_shift_id")
+        and not event["payload"]
+        and prior.result_payload.get("archive_close_event_id") == event["id"]
+        and prior.result_payload.get("resolved_by")
+        and prior.context_snapshot.get("local_shift_id") == event["local_shift_id"]
+        and prior.context_snapshot.get("actor_key") == event["actor_key"]
+        and prior.context_snapshot.get("actor_generation") == event["actor_generation"]
+    ):
+        raise FieldProblem("resolution_scope", "Завершение не соответствует отклонённой локальной смене.")
+    return True
+
+
 def _resolve(access, event):
     data = event["payload"]
-    if not _uuid(data.get("event_id")) or data.get("decision") != "accept_server":
+    decision = data.get("decision")
+    archival = decision == "archive_duplicate_shift"
+    if not _uuid(data.get("event_id")) or decision not in ("accept_server", "archive_duplicate_shift"):
         raise FieldProblem("invalid_resolution", "Не выбран конфликт и способ сверки.")
     prior = (
         OfflineFieldEvent.objects.select_for_update()
@@ -667,6 +708,22 @@ def _resolve(access, event):
     )
     if not prior:
         raise FieldProblem("resolution_target", "Указанное действие не находится на сверке.")
+    if archival:
+        close_id = data.get("close_event_id")
+        if (
+            event.get("format_version") != 2
+            or set(data) != {"event_id", "decision", "close_event_id"}
+            or not _uuid(close_id)
+            or close_id in {event["id"], prior.event_id}
+            or prior.sequence != event["sequence"] - 2
+            or prior.event_type != EVENT_PREFIX + "shift.open"
+            or prior.error_code != "shift_occupied"
+            or prior.shift_id is not None
+            or prior.context_snapshot.get("local_shift_id") != event["local_shift_id"]
+            or prior.result_payload.get("resolved_by")
+        ):
+            raise FieldProblem("resolution_scope", "Указанная пара не относится к отклонённой локальной смене.")
+        prior.result_payload = {**prior.result_payload, "archive_close_event_id": close_id}
     if not prior.result_payload.get("resolved_by"):
         prior.result_payload = {**prior.result_payload, "resolved_by": event["id"]}
         prior.save(update_fields=["result_payload", "updated_at"])
@@ -804,6 +861,8 @@ def _receive(ticket, event, *, key=None, signed_hash=None, envelope=None):
                     key: val for key, val in after.items() if before.get(key) != val
                 }
             result = _reply(event, "applied")
+            if v2 and shift is not None:
+                result["server_shift_id"] = shift.pk
             receipt.shift = shift
             receipt.status = OfflineFieldEventStatus.ACCEPTED
             receipt.retryable = False
@@ -836,6 +895,7 @@ def _receive(ticket, event, *, key=None, signed_hash=None, envelope=None):
                 if (
                     lock_production_state().version == state_version
                     and event["type"] != "conflict.resolve"
+                    and extra.get("reconciliation") != "unbound_duplicate_close"
                 ):
                     bump_operational_state(
                         "MasterField:" + event["type"],
@@ -1020,12 +1080,276 @@ def _consume_personal_read(ticket, event, key, op):
     fresh[nonce] = now.timestamp()
     key.context_snapshot = {**key.context_snapshot, "used_read_challenges": fresh}
     key.save(update_fields=["context_snapshot", "updated_at"])
-    return access
+    return access, proof
+
+
+def authorize_tablet_stream(body):
+    """Consume a one-time device proof for one open shift."""
+    if not isinstance(body, dict) or body.get("protocol") != field_signing.PROTOCOL:
+        raise ValueError("invalid field protocol")
+    event, key, _ = field_signing.checked_event(body)
+    with transaction.atomic():
+        access, proof = _consume_personal_read(body.get("ticket"), event, key, "stream")
+        shift = _own_shift(access)
+        if (
+            not shift
+            or type(event.get("shift_id")) is not int
+            or event["shift_id"] != shift.pk
+            or event.get("actor_id") != access.employee_id
+            or event.get("actor_access_id") != access.pk
+        ):
+            raise FieldProblem("shift_scope_changed", "Смена мастера изменилась.", status="auth")
+    return {
+        "shift_id": shift.pk,
+        "employee_id": access.employee_id,
+        "access_id": access.pk,
+        "access_version": proof["access_version"],
+        "generation": proof["generation"],
+        "grant_until": proof["grant_until"],
+        "device_id": event["device_id"],
+        "fingerprint": key.fingerprint,
+    }
+
+
+def tablet_stream_grant_is_current(grant):
+    access = (
+        EmployeeAccess.objects.select_related("employee", "role", "employee__contractor_organization")
+        .filter(pk=grant["access_id"], employee_id=grant["employee_id"])
+        .first()
+    )
+    if (
+        not _eligible(access)
+        or _version(access) != grant["access_version"]
+        or not _read_grant(access, grant)
+    ):
+        return False
+    key = field_signing.registration(grant["device_id"])
+    return bool(
+        key and key.fingerprint == grant["fingerprint"]
+        and mining_master_shift_queryset().filter(pk=grant["shift_id"], employee_id=access.employee_id).exists()
+    )
+
+
+def _queue_scope(access, device):
+    return OfflineFieldEvent.objects.filter(
+        device_id=device, role_code=ROLE, actor_id=access.employee_id, access_id=access.pk,
+        sequence__gt=0,
+    )
+
+
+def _queue_binding(scope, local_shift):
+    return (
+        scope.filter(
+            context_snapshot__local_shift_id=local_shift,
+            status=OfflineFieldEventStatus.ACCEPTED,
+            shift__isnull=False,
+        )
+        .order_by("sequence")
+        .first()
+    )
+
+
+def _queue_receipt(row):
+    return {
+        "id": row.event_id,
+        "sequence": row.sequence,
+        "type": row.event_type,
+        "status": row.status,
+        "code": row.error_code,
+        "shift_id": row.shift_id,
+        "local_shift_id": row.context_snapshot.get("local_shift_id"),
+        "occurred_at": row.occurred_at.isoformat(),
+        "fingerprint": row.fingerprint,
+        "resolved": bool(row.result_payload.get("resolved_by")),
+    }
+
+
+def _queue_receipts(access, event, key):
+    event_ids = event.get("event_ids")
+    local_shift = event.get("local_shift_id")
+    if (
+        not _uuid(local_shift)
+        or not isinstance(event_ids, list)
+        or not 1 <= len(event_ids) <= 64
+        or any(not _uuid(event_id) for event_id in event_ids)
+        or len(set(event_ids)) != len(event_ids)
+    ):
+        raise FieldProblem("invalid_queue_receipts", "Передайте от 1 до 64 исходных номеров записей.")
+    scope = _queue_scope(access, event["device_id"])
+    binding = _queue_binding(scope, local_shift)
+    shift = binding.shift if binding else None
+    return JsonResponse({
+        "protocol": field_signing.PROTOCOL,
+        "contiguous_sequence": key.result_payload.get("contiguous_sequence", 0),
+        "bound_shift": (
+            {"id": shift.pk, "opened_at": shift.opened_at, "closed_at": shift.closed_at}
+            if shift else None
+        ),
+        "receipts": [
+            _queue_receipt(row) for row in scope.filter(event_id__in=event_ids).order_by("sequence")
+        ],
+    })
+
+
+def _archive_closed_queue(access, event, key):
+    """Record original signed commands for a closed shift without executing them."""
+    local_shift, originals = event.get("local_shift_id"), event.get("originals")
+    if not _uuid(local_shift) or not isinstance(originals, list) or not 1 <= len(originals) <= 64:
+        raise FieldProblem("invalid_archive", "Неверный состав архива очереди.")
+    key.refresh_from_db(fields=["result_payload"])
+    device = event["device_id"]
+    scope = _queue_scope(access, device)
+    binding = _queue_binding(scope, local_shift)
+    shift = EmployeeShift.objects.select_for_update().get(pk=binding.shift_id) if binding else None
+    if shift and (shift.closed_at is None or scope.filter(
+        context_snapshot__local_shift_id=local_shift, status=OfflineFieldEventStatus.ACCEPTED,
+        shift__isnull=False,
+    ).exclude(shift_id=shift.pk).exists()):
+        raise FieldProblem("archive_shift_active", "Сервер не подтвердил единственную закрытую смену.")
+    # Legacy tablets sometimes had no accepted shift binding. Never guess an
+    # EmployeeShift from timestamps. Store these originals with a null shift.
+    current = None if shift else _own_shift(access)
+    closed_id = shift.pk if shift else None
+
+    contiguous = key.result_payload.get("contiguous_sequence", 0)
+    verified = []
+    ids = set()
+    for envelope in originals:
+        if not isinstance(envelope, dict):
+            raise FieldProblem("invalid_archive", "Не удалось прочитать исходную запись.")
+        if "event" not in envelope:
+            content = field_signing.unpack(envelope.get("signed_bytes"), limit=field_signing.MAX_BYTES)
+            envelope = {**envelope, "event": json.loads(content)}
+        raw, original_key, fingerprint = field_signing.checked_event(envelope)
+        occurred, _ = _validate_event(raw, v2=True)
+        if (
+            original_key.pk != key.pk
+            or raw["local_shift_id"] != local_shift
+            or raw["type"] not in {"live.assign", "live.move", "draft.save", "shift.close"}
+            or raw["actor_id"] != access.employee_id
+            or raw["actor_access_id"] != access.pk
+            or raw["actor_key"] != event["actor_key"]
+            or raw.get("server_shift_id") not in (None, closed_id)
+            or (shift and occurred < shift.opened_at)
+            or raw["id"] in ids
+        ):
+            raise FieldProblem("archive_scope_mismatch", "Запись относится к другому сотруднику или смене.")
+        ids.add(raw["id"])
+        verified.append((raw, occurred, fingerprint, envelope))
+
+    verified.sort(key=lambda item: item[0]["sequence"])
+    sequences = [raw["sequence"] for raw, *_ in verified]
+    if (binding and sequences[0] <= binding.sequence) or sequences[0] > contiguous + 1 or any(
+        following != previous + 1 for previous, following in zip(sequences, sequences[1:])
+    ):
+        raise FieldProblem("archive_sequence_gap", "Перед архивом нужна сверка предыдущих записей.")
+    existing = OfflineFieldEvent.objects.filter(
+        Q(event_id__in=ids)
+        | Q(device_id=device, role_code=ROLE, sequence__in=sequences)
+    ).select_for_update()
+    by_id = {}
+    fingerprints = {raw["id"]: fingerprint for raw, _, fingerprint, _ in verified}
+    expected_sequences = {raw["id"]: raw["sequence"] for raw, *_ in verified}
+    for row in existing:
+        if (
+            row.event_id not in fingerprints or row.fingerprint != fingerprints[row.event_id]
+            or row.device_id != device or row.role_code != ROLE
+            or row.actor_id != access.employee_id or row.access_id != access.pk
+            or row.sequence != expected_sequences[row.event_id]
+            or row.shift_id not in (None, closed_id)
+            or row.status not in {OfflineFieldEventStatus.ACCEPTED, OfflineFieldEventStatus.CONFLICT,
+                                  OfflineFieldEventStatus.RETRY}
+        ):
+            raise FieldProblem("archive_receipt_mismatch", "Квитанция не совпала с оригинальной записью.")
+        by_id[row.event_id] = row
+
+    first = verified[0][0]
+    head = by_id.get(first["id"])
+    generations = {event["actor_generation"]}
+    if head:
+        generations.add(head.context_snapshot.get("actor_generation"))
+    # Closing a retained offline shift after signing in again can legitimately
+    # use a third generation. Its original server grant must attest that exact
+    # author, key and timestamp. It is never used to read or execute a command.
+    grants = {raw["actor_generation"]: envelope["original_grant"]
+              for raw, _, _, envelope in verified if isinstance(envelope.get("original_grant"), str)}
+    for raw, _, _, _ in verified:
+        generation = raw["actor_generation"]
+        if generation in generations:
+            continue
+        if not shift or raw["type"] != "shift.close" or not grants.get(generation):
+            raise FieldProblem("archive_grant_missing", "Нет подтверждения ранее подписанного входа.")
+        original_access, _ = _ticket_access(grants[generation], raw, key=key)
+        if original_access.pk != access.pk or original_access.employee_id != access.employee_id:
+            raise FieldProblem("archive_scope_mismatch", "Исходный допуск выдан другому сотруднику.")
+    if any(raw["type"] == "shift.close" for raw, *_ in verified[:-1]):
+        raise FieldProblem("archive_scope_mismatch", "Завершение должно быть последней записью смены.")
+    if not shift:
+        if (not current or not head or head.status != OfflineFieldEventStatus.CONFLICT
+            or head.context_snapshot.get("local_shift_id") != local_shift
+            or head.context_snapshot.get("key_sha256") != key.fingerprint
+            or head.context_snapshot.get("actor_key") != first["actor_key"]
+            or first["type"] not in {"live.assign", "live.move", "draft.save"}
+            or verified[-1][0]["type"] != "shift.close"
+            or any(occurred >= current.opened_at for _, occurred, _, _ in verified[:-1])
+            or local_shift == _server_local_shift_id(device, current.pk)):
+            raise FieldProblem("archive_shift_unbound", "Принадлежность закрытой локальной очереди не подтверждена.")
+    for previous, following in zip(verified, verified[1:]):
+        if previous[0]["id"] not in following[0]["depends_on"] or following[1] < previous[1]:
+            raise FieldProblem("archive_sequence_gap", "Нарушена подписанная цепочка очереди.")
+
+    results = []
+    for raw, occurred, fingerprint, envelope in verified:
+        row = by_id.get(raw["id"])
+        if raw["sequence"] <= contiguous and (not row or not _accepted_or_resolved(row)):
+            raise FieldProblem("archive_receipt_mismatch", "Оригинал ранее подтверждённой записи не найден.")
+        if row and _accepted_or_resolved(row):
+            results.append(_queue_receipt(row))
+            continue
+        if row is None:
+            row = OfflineFieldEvent(
+                event_id=raw["id"], event_type=EVENT_PREFIX + raw["type"], format_version=2,
+                actor=access.employee, access=access, role_code=ROLE, device_id=device,
+                sequence=raw["sequence"], depends_on=raw["depends_on"], occurred_at=occurred,
+                shift=shift, fingerprint=fingerprint, payload=raw["payload"],
+                context_snapshot={
+                    "local_shift_id": local_shift, "actor_key": raw["actor_key"],
+                    "actor_generation": raw["actor_generation"], "base_payload": raw.get("base_payload"),
+                    "signed_bytes": envelope["signed_bytes"], "signature": envelope["signature"],
+                    "key_sha256": key.fingerprint,
+                },
+            )
+        if row.status != OfflineFieldEventStatus.CONFLICT:
+            row.error_code = "archived_closed_shift" if shift else "archived_local_history"
+            row.error_message = "Сохранено в истории закрытой смены без применения к текущей расстановке."
+        row.status = OfflineFieldEventStatus.CONFLICT
+        row.retryable = False
+        row.result_payload = {
+            **_reply(raw, "conflict", code=row.error_code, message=row.error_message),
+            "resolved_by": event["id"], "resolution": "archived_closed_shift" if shift else "archived_local_history",
+        }
+        row.save()
+        results.append(_queue_receipt(row))
+    _advance_sequence(key)
+    return JsonResponse({"protocol": field_signing.PROTOCOL, "receipts": results})
+
 
 
 def _pull(ticket, event, key, op, csrf_secret):
     with transaction.atomic():
-        access = _consume_personal_read(ticket, event, key, op)
+        if op == "archive_closed_queue":
+            lock_idempotency_key("master-device-sequence", event["device_id"])
+        access, _ = _consume_personal_read(ticket, event, key, op)
+        if op == "queue_receipts":
+            return _queue_receipts(access, event, key)
+        if op == "archive_closed_queue":
+            return _archive_closed_queue(access, event, key)
+        if op == "board":
+            shift_id = event.get("shift_id")
+            if (type(shift_id) is not int or shift_id <= 0
+                or event.get("actor_id") != access.employee_id or event.get("actor_access_id") != access.pk):
+                raise FieldProblem("shift_scope_changed", "Смена мастера изменилась.", status="auth")
+            return field_commands.render_board_fragment(access, shift_id, csrf_secret)
         if op == "report":
             return field_reports.render_report(access, event.get("path"), csrf_secret)
         if op == "snapshot":
@@ -1088,7 +1412,7 @@ def field_sync_view(request):
                     request, data.get("device_id", ""), v2=True, enroll_key=data["public_key"]
                 )
             event, key, digest = field_signing.checked_event(data)
-            if data.get("op") in {"snapshot", "report", "portrait"}:
+            if data.get("op") in {"snapshot", "board", "report", "portrait", "queue_receipts", "archive_closed_queue"}:
                 return _pull(
                     data.get("ticket"), event, key, data["op"], request.META.get("CSRF_COOKIE")
                 )

@@ -312,7 +312,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(complex_card['mobile_truck_overflow'], 2)
         self.assertContains(response, 'data-mm-truck-transfer-bar')
         self.assertContains(response, 'data-mm-mobile-open-truck-list')
-        self.assertContains(response, 'var visibleLimit = 3;')
+        self.assertContains(response, 'var visibleLimit = Math.max(3, bucketTiles.length);')
         # Карточки комплексов больше не переставляются под пальцем: раньше
         # исходная карточка занимала слот под указателем, цель уезжала на
         # 77-302 px уже после выбора направления, и самосвал попадал в чужой
@@ -644,7 +644,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v165')
+        self.assertContains(response, 'mining-master-mobile-shell-v167')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -664,7 +664,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '>версия v165</span>')
+        self.assertContains(response, '>версия v167</span>')
         self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
@@ -721,10 +721,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v165', script)
+        self.assertIn('mining-master-mobile-shell-v167', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v165',
+            'mining-master-mobile-shell-v167',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',
@@ -746,6 +746,13 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertIn('/static/img/pwa/mining-master-maskable-512.png', script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
+        mining_master_script = script.split(
+            'const ROLE_CODE = "mining_master";', 1
+        )[1]
+        install_handler = mining_master_script.split(
+            'self.addEventListener("install"', 1
+        )[1].split('self.addEventListener("activate"', 1)[0]
+        self.assertIn('self.skipWaiting();', install_handler)
 
     def test_mining_master_mobile_shell_renders_closed_shift_status(self):
         self.shift.closed_at = timezone.now()
@@ -850,11 +857,21 @@ class MiningMasterAssignmentsViewTests(TestCase):
     def test_carryover_trip_created_before_master_shift_remains_visible(self):
         rock_type = RockType.objects.create(name='Щебень переходящий')
         dump_point = DumpPoint.objects.create(name='Накопитель переходящий')
+        driver = Employee.objects.create(full_name='Водитель переходящего рейса')
+        driver_shift = EmployeeShift.objects.create(
+            employee=driver,
+            opened_by=driver,
+            equipment=self.assigned_truck,
+            workplace_code='driver',
+            shift_type=self.shift.shift_type,
+            opened_at=self.shift.opened_at - timedelta(minutes=20),
+        )
         trip = Trip.objects.create(
             truck=self.assigned_truck,
             excavator=self.excavator,
             rock_type=rock_type,
             dump_point=dump_point,
+            driver_control_shift=driver_shift,
             status=TripStatus.LOADED_WAITING_UNLOAD,
         )
         Trip.objects.filter(pk=trip.pk).update(
@@ -1683,9 +1700,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'placeholder="00-00-00"')
         self.assertContains(response, 'maxlength="8"')
         self.assertContains(response, 'pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}"')
-        self.assertContains(response, 'name="device_kind"')
-        self.assertContains(response, 'value="personal"')
-        self.assertContains(response, 'value="shared"')
+        self.assertContains(response, 'type="hidden" name="device_kind" value="shared"')
+        self.assertNotContains(response, 'shared-shift-device-choice')
         self.assertContains(response, 'на этом устройстве')
 
         response = self.client.post(reverse('mining_master_assignments'), {'action': 'start_shift'})

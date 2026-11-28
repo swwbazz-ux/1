@@ -121,6 +121,12 @@ def role_app(request):
             request.session.get('pending_activation_target_app_code', '')
         )
     path_app = pending_activation_app or get_role_app_for_path(request.path)
+    # The mechanics report belongs to the management PWA on its dedicated host.
+    if (
+        host_app and host_app.role_code == 'manager'
+        and resolver_match and resolver_match.url_name == 'mechanic_dashboard'
+    ):
+        path_app = host_app
     app = host_app
     if (
         host_app
@@ -135,8 +141,10 @@ def role_app(request):
         else ''
     )
     state = getattr(request, 'role_session_state', None) or role_session_state(request)
+    from trips.dispatcher_duty_offline import recorder_context
     is_yandex_android = _is_yandex_android(request)
     return {
+        'dispatcher_duty_recorder': recorder_context(request, state),
         'role_app': app,
         'role_app_isolated': app is not None,
         'role_app_pwa_scope': metadata_scope if app else '',
@@ -173,4 +181,5 @@ def role_app(request):
         'current_absolute_url': request.build_absolute_uri() if is_yandex_android else '',
         'qa_environment_enabled': getattr(settings, 'EXCAVATOR_QA_ENABLED', False),
         'qa_environment_label': getattr(settings, 'EXCAVATOR_QA_LABEL', ''),
+        'sse_pilot_enabled': bool(getattr(settings, 'SSE_PILOT_ENABLED', False)),
     }

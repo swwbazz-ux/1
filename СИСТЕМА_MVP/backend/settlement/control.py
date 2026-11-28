@@ -12,6 +12,7 @@ from django.db import IntegrityError, connections, router, transaction
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare, salted_hmac
 
+from shifts.models import WatchPeriod
 from users.employee_access_locks import (
     EmployeeAccessLockPlanError,
     LockedEmployeeAccessRows,
@@ -20,10 +21,16 @@ from users.employee_access_locks import (
 )
 from users.models import Employee, EmployeeAccess
 
-from .models import SettlementControlEvent, SettlementControlLease
+from .models import (
+    SettlementClerkShift,
+    SettlementControlEvent,
+    SettlementControlLease,
+)
 
 
 CONTROL_SCOPE = 'settlement'
+CLERK_ROLE_CODE = 'settlement_clerk'
+ADMIN_ROLE_CODE = 'admin'
 SESSION_HASH_SALT = 'settlement.control.session'
 DEFAULT_LEASE_TTL_SECONDS = 120
 CONTROL_SESSION_OWNER_ACCESS_ID_KEY = 'settlement_control_owner_access_id'
@@ -277,6 +284,25 @@ def _ensure_control_lease_locked(
     return lease
 
 
+def _admin_scope(access_id):
+    return f'{CONTROL_SCOPE}:admin:{access_id}'
+
+
+def _lock_session_lease(*, owner_access_id, lease_token, using):
+    # The shared row also serializes writes to beds across both workspaces.
+    if isinstance(owner_access_id, bool) or not isinstance(owner_access_id, int) or owner_access_id <= 0:
+        raise _validation_error('invalid_access', 'Доступ сотрудника не найден.')
+    shared = _ensure_control_lease_locked(scope=CONTROL_SCOPE, using=using)
+    if shared.owner_access_id == owner_access_id and str(shared.lease_token) == str(lease_token):
+        return shared
+    personal = (
+        SettlementControlLease.objects.using(using).select_for_update(of=('self',))
+        .filter(scope=_admin_scope(owner_access_id), owner_access_id=owner_access_id,
+                owner_access__role__code=ADMIN_ROLE_CODE).first()
+    )
+    return personal or shared
+
+
 def ensure_control_lease(*, scope: str = CONTROL_SCOPE) -> SettlementControlLease:
     scope = _validated_scope(scope)
     using = router.db_for_write(SettlementControlLease)
@@ -505,6 +531,16 @@ def acquire_control_lease(
             owner_access_id=owner_access_id,
             using=using,
         )
+        if owner_access.role.code == ADMIN_ROLE_CODE and not (
+            lease.owner_access_id == owner_access.pk and lease.expires_at > current_time
+        ):
+            lease = _ensure_control_lease_locked(scope=_admin_scope(owner_access.pk), using=using)
+        if owner_access.role.code == CLERK_ROLE_CODE:
+            _require_clerk_shift_for_write(
+                owner_access=owner_access,
+                now=current_time,
+                using=using,
+            )
 
         if lease.owner_access_id is not None and lease.expires_at <= current_time:
             _expire_locked_lease(
@@ -684,6 +720,162 @@ def takeover_control_lease(
         return grant
 
 
+def force_release_control_lease(
+    *,
+    actor_access_id: int,
+    reason: str,
+    source: str,
+    expected_owner_access_id: int | None = None,
+    session_metadata: Mapping[str, Any] | None = None,
+    now: datetime | None = None,
+    scope: str = CONTROL_SCOPE,
+) -> ControlLeaseTransition | None:
+    """Освободить аренду без согласия её владельца (передача вахты, T-031).
+
+    Требует причину и актора с ролью ``settlement_clerk``/``admin``; увеличивает
+    ``fencing_revision`` и пишет ``RELEASED`` с прежним владельцем, поэтому
+    старая сессия теряет право записи.
+
+    ``expected_owner_access_id`` ограничивает освобождение: чужая аренда
+    (например, администратора, который действует параллельно) не трогается.
+    Если текущий владелец не совпал, свободная или истёкшая аренда — ничего не
+    пишется и возвращается ``None``.
+    """
+    scope = _validated_scope(scope)
+    current_time = _resolved_now(now)
+    event_source = _validated_source(source)
+    if (
+        expected_owner_access_id is not None
+        and (
+            isinstance(expected_owner_access_id, bool)
+            or not isinstance(expected_owner_access_id, int)
+            or expected_owner_access_id <= 0
+        )
+    ):
+        raise _validation_error(
+            'invalid_expected_owner',
+            'Ожидаемый владелец управления указан некорректно.',
+        )
+    normalized_reason = (
+        reason.strip() if isinstance(reason, str) else ''
+    )
+    if not normalized_reason or len(normalized_reason) > TAKEOVER_REASON_MAX_LENGTH:
+        raise _validation_error(
+            'force_release_reason_required',
+            'Для принудительного освобождения управления требуется причина.',
+        )
+    safe_metadata = _safe_session_metadata(session_metadata)
+    using = router.db_for_write(SettlementControlLease)
+
+    with transaction.atomic(using=using):
+        lease = _ensure_control_lease_locked(scope=scope, using=using)
+        actor_access = _validated_owner_access(
+            owner_access_id=actor_access_id,
+            using=using,
+        )
+        if lease.owner_access_id is None:
+            return None
+        if lease.expires_at <= current_time:
+            _expire_locked_lease(
+                lease,
+                using=using,
+                now=current_time,
+                source=event_source,
+                session_metadata={},
+            )
+            return None
+        if (
+            expected_owner_access_id is not None
+            and lease.owner_access_id != expected_owner_access_id
+        ):
+            # Аренда принадлежит другому участнику (например, администратору):
+            # не трогаем её и не пишем событие.
+            return None
+        forbidden_values = (
+            lease.owner_session_hash,
+            str(lease.lease_token or ''),
+        )
+        normalized_reason = _validated_takeover_reason(
+            normalized_reason,
+            forbidden_values=forbidden_values,
+        )
+        previous_owner_access_id = lease.owner_access_id
+        previous_revision = lease.fencing_revision
+        new_revision = previous_revision + 1
+        _create_event(
+            using=using,
+            event_type=SettlementControlEvent.EventType.RELEASED,
+            scope=lease.scope,
+            actor_access_id=actor_access.pk,
+            previous_owner_access_id=previous_owner_access_id,
+            new_owner_access_id=None,
+            occurred_at=current_time,
+            source=event_source,
+            previous_revision=previous_revision,
+            new_revision=new_revision,
+            session_metadata=safe_metadata,
+            reason=normalized_reason,
+        )
+        _set_lease_free(lease, new_revision=new_revision)
+        return ControlLeaseTransition(
+            event_type=SettlementControlEvent.EventType.RELEASED,
+            fencing_revision=new_revision,
+            occurred_at=current_time,
+        )
+
+
+def _require_clerk_shift_for_write(*, owner_access, now, using):
+    """T-031: строгий режим вахтенной смены делопроизводителя.
+
+    Решение владельца 22.11.2026:
+
+    - администратор пишет **без** открытой смены клерка — это разрешено;
+    - если активной вахты (``WatchPeriod``) нет — действует прежний (legacy)
+      путь, смена не требуется;
+    - если активная вахта есть, делопроизводитель обязан держать **свою** OPEN
+      ``SettlementClerkShift`` на эту вахту: без смены — отказ
+      ``shift_required``; чужая открытая смена — отказ ``shift_taken``
+      (нужна передача вахты).
+
+    Если в данных несколько активных вахт на сегодня (аномалия, которую модель
+    допускает), достаточно своей OPEN-смены на любую из них; ``shift_taken``
+    выдаётся только когда ни одной своей смены нет, а чья-то открытая есть.
+    """
+    if owner_access.role.code == ADMIN_ROLE_CODE:
+        return
+    today = timezone.localdate(now)
+    active_watch_ids = list(
+        WatchPeriod.objects.using(using)
+        .filter(
+            is_active=True,
+            starts_on__lte=today,
+            ends_on__gte=today,
+        )
+        .values_list('pk', flat=True)
+    )
+    if not active_watch_ids:
+        return
+    open_shifts = (
+        SettlementClerkShift.objects.using(using)
+        .filter(
+            status=SettlementClerkShift.Status.OPEN,
+            watch_period_id__in=active_watch_ids,
+        )
+        .order_by('pk')
+    )
+    if open_shifts.filter(clerk_access_id=owner_access.pk).exists():
+        return
+    if open_shifts.exists():
+        raise _validation_error(
+            'shift_taken',
+            'Вахту ведёт другой делопроизводитель. Нужна передача вахты.',
+        )
+    raise _validation_error(
+        'shift_required',
+        'Откройте вахтенную смену делопроизводителя.',
+    )
+
+
 def _validated_held_lease(
     lease: SettlementControlLease,
     *,
@@ -742,7 +934,11 @@ def lock_settlement_write_lease(
     if not control_context.raw_session_key:
         raise _validation_error('not_held', 'Управление расселением свободно.')
 
-    lease = _ensure_control_lease_locked(scope=CONTROL_SCOPE, using=using)
+    lease = _lock_session_lease(
+        owner_access_id=control_context.owner_access_id,
+        lease_token=control_context.lease_token,
+        using=using,
+    )
     _validated_held_lease(
         lease,
         owner_access_id=control_context.owner_access_id,
@@ -787,7 +983,9 @@ def lock_settlement_write_access(
             'Доступ сотрудника не найден.',
         ) from None
 
-    if owner_access.role_id != expected_role_id:
+    if owner_access.role_id != expected_role_id or (
+        lease.scope != CONTROL_SCOPE and owner_access.role.code != ADMIN_ROLE_CODE
+    ):
         raise _validation_error(
             'invalid_access',
             'Доступ сотрудника не найден.',
@@ -842,7 +1040,7 @@ def heartbeat_control_lease(
     grant: ControlLeaseGrant | None = None
 
     with transaction.atomic(using=using):
-        lease = _ensure_control_lease_locked(scope=scope, using=using)
+        lease = _lock_session_lease(owner_access_id=owner_access_id, lease_token=lease_token, using=using)
         _validated_held_lease(
             lease,
             owner_access_id=owner_access_id,
@@ -903,7 +1101,7 @@ def release_control_lease(
     transition: ControlLeaseTransition | None = None
 
     with transaction.atomic(using=using):
-        lease = _ensure_control_lease_locked(scope=scope, using=using)
+        lease = _lock_session_lease(owner_access_id=owner_access_id, lease_token=lease_token, using=using)
         _validated_held_lease(
             lease,
             owner_access_id=owner_access_id,

@@ -1,0 +1,56 @@
+{% load l10n %}
+<div data-duty-slots data-date="{{ report.date|date:'Y-m-d' }}" data-as-of="{{ report.as_of|date:'d.m.Y H:i' }}" data-history-from="{{ history_from|date:'Y-m-d' }}">
+{% for day in report.days %}
+<section class="duty-day" data-duty-day="{{ day.date|date:'Y-m-d' }}" aria-labelledby="duty-day-{{ day.date|date:'Y-m-d' }}">
+  <h3 class="duty-day-heading" id="duty-day-{{ day.date|date:'Y-m-d' }}"><time datetime="{{ day.date|date:'Y-m-d' }}">{{ day.date|date:"j E Y" }}</time></h3>
+  {% for slot in day.slots %}
+  <article class="duty-slot{% if slot.live %} is-current{% endif %}" data-duty-slot="{{ slot.key }}">
+    <div class="duty-slot-head">
+      <div class="duty-slot-title"><h4>{{ slot.label }} <span>{{ slot.start }}–{{ slot.end }}</span></h4>{% if slot.current_duty %}<span class="duty-current duty-current-{{ slot.current_duty.0 }}">{{ slot.current_duty.1 }}</span>{% endif %}</div>
+      <button class="duty-journal-link" type="button" data-open-duty>Журнал смены <span aria-hidden="true">›</span></button>
+    </div>
+    <div class="duty-staff">
+      {% for member in slot.staff %}<span><strong>{{ member.person }}</strong> · Вход {{ member.opened }}{% if member.closed %} · Завершение {{ member.closed }}{% else %} · Смена открыта{% endif %}{% if slot.staff|length > 1 %} · Операций {{ member.operations }}{% endif %}</span>
+      {% empty %}<span>{% if slot.totals.0.state == 'future' %}Дежурство предстоит{% else %}Записей об открытии смены нет{% endif %}</span>{% endfor %}
+    </div>
+    <button type="button" class="duty-plot duty-scale" data-open-duty aria-label="{{ day.date|date:'d.m.Y' }} · {{ slot.label }} {{ slot.start }}–{{ slot.end }}. Открыть журнал">
+      {% if slot.live %}<span class="duty-marker-row duty-scale-axis"><span style="--left:{{ slot.marker|unlocalize }}%">{{ report.now_clock }}</span></span>{% endif %}
+      {% include "reports/includes/dispatcher_duty_tracks.html" with interactive=True %}
+      {% if slot.window_marks %}<span class="duty-window-marks duty-scale-axis">{% for mark in slot.window_marks %}<i class="duty-window-{{ mark.state }}" style="left:{{ mark.left|unlocalize }}%" data-duty-window-mark="{{ mark.id }}" title="{{ mark.time }} · {{ mark.title }} · {{ mark.person }}"></i>{% endfor %}</span>{% endif %}
+      <span class="duty-marks duty-scale-axis">{% for mark in slot.marks %}<i class="duty-diamond" style="left:{{ mark.left|unlocalize }}%" data-duty-mark="{{ mark.at }}" title="{{ mark.time }} · {{ mark.title }}"></i>{% endfor %}</span>
+      <span class="duty-axis duty-scale-axis">{% for tick in slot.ticks %}<span style="left:{{ tick.left|unlocalize }}%">{{ tick.label }}</span>{% endfor %}</span>
+    </button>
+    <div class="duty-totals">
+      {% for total in slot.overview_totals %}{% if total.state != 'no-shift' %}<span>{{ total.label }} <b>{{ total.exact_duration }}</b></span>{% endif %}{% endfor %}
+      <span data-duty-operations>Операций <b>{{ slot.count }}</b>{% if slot.last_op %} · последняя в {{ slot.last_op }}{% if slot.last_op_age %} ({{ slot.last_op_age }} назад){% endif %}{% endif %}</span>
+    </div>
+    <template data-duty-entries>
+      {% for event in slot.events %}
+        {% ifchanged event.day %}<h3 class="duty-log-date">{{ event.day }}</h3>{% endifchanged %}
+        <div class="duty-event" data-kind="{{ event.kind }}" data-at="{{ event.at }}" tabindex="-1"{% if event.kind == 'operation' %} data-operation-band="{{ event.operation_band }}"{% endif %}{% if event.signal %} data-signal="{{ event.signal }}"{% endif %}{% if event.window_mark %} data-window-event="{{ event.window_mark }}"{% endif %}>
+          <time datetime="{{ event.at }}">{{ event.time }}</time>
+          <div>
+            <strong>{{ event.title }}</strong>
+            {% if event.closure %}
+              <dl class="duty-closure">
+                {% if event.closure.owner %}<dt>Чья смена</dt><dd>{{ event.closure.owner }}</dd>
+                {% else %}<dt>Какую смену закрыли</dt><dd>{{ event.closure.target|default:"Нет данных" }}</dd>{% endif %}
+                <dt>Кто закрыл</dt><dd>{{ event.closure.actor|default:"Нет данных" }}</dd>
+                {% if event.closure.show_reason %}<dt>Причина закрытия</dt><dd>{{ event.closure.reason|default:"Не указана" }}</dd>{% endif %}
+              </dl>
+              {% if event.closure.detail %}<p>{{ event.closure.detail }}</p>{% endif %}
+            {% else %}
+              {% if event.detail %}<p>{{ event.detail }}</p>{% endif %}
+              {% if event.person %}<small>{{ event.person }}</small>{% endif %}
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </template>
+    <template data-duty-overview>{% include "reports/includes/dispatcher_duty_overview.html" %}</template>
+  </article>
+  {% endfor %}
+</section>
+{% endfor %}
+<div class="duty-paging" data-duty-paging>{% if report.next_before %}<a class="duty-older" href="{% url 'management_dispatcher_duty' %}?before={{ report.next_before }}" data-duty-older>Показать предыдущие смены</a>{% endif %}</div>
+</div>

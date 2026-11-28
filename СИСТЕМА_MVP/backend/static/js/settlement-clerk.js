@@ -12,25 +12,48 @@
     var rooms = Array.from(root.querySelectorAll("[data-room-card]"));
     var dormitorySections = Array.from(root.querySelectorAll("[data-dormitory-section]"));
     var floorSections = Array.from(root.querySelectorAll("[data-floor-section]"));
-    var selectedRoomCount = root.querySelector("[data-selected-room-count]");
-    var selectedTransferredRoomCount = root.querySelector("[data-selected-transferred-room-count]");
-    var globalFreeCount = root.querySelector("[data-free-bed-count]");
-    var globalOccupiedCount = root.querySelector("[data-occupied-bed-count]");
-    var selectedUnavailableBedCount = root.querySelector("[data-selected-unavailable-bed-count]");
+    var watchExtensionDetails = root.querySelector("[data-watch-extensions]");
+    var watchExtensionStateNode = root.querySelector("#settlement-watch-extension-state");
+    var watchExtensionList = root.querySelector("[data-watch-extension-list]");
+    var watchExtensionCount = root.querySelector("[data-watch-extension-count]");
+    var watchExtensionEmpty = root.querySelector("[data-watch-extension-empty]");
     var searchInput = root.querySelector("[data-settlement-search]");
+    var residentFinder = root.querySelector("#settlement-resident-finder");
+    var quickSearchOrigin = null;
+    var renderRoomOptions = bindSearchList(searchInput, root.querySelector("[data-room-popup]"), refreshRoomOptions, showFoundRoom);
+    var renderResidentOptions = bindSearchList(residentFinder, root.querySelector("[data-resident-popup]"), refreshResidentSearch, showResidentBed);
+    var residentMatches = [];
+    var chosenRoomId = "";
+    var chosenResidentId = "";
     var panel = root.querySelector("[data-room-panel]");
     var panelBackdrop = root.querySelector("[data-room-panel-backdrop]");
     var panelClose = root.querySelector("[data-room-panel-close]");
+    var panelKind = panel.querySelector("[data-panel-kind]");
+    var panelRoomLink = panel.querySelector("[data-panel-room-link]");
+    var panelEmployeeLink = panel.querySelector("[data-panel-employee-link]");
+    var panelTrigger = null;
+    var avatarClickTimer = null;
     var employeePanel = root.querySelector("[data-employee-panel]");
     var employeePanelBackdrop = root.querySelector("[data-employee-panel-backdrop]");
     var employeePanelClose = root.querySelector("[data-employee-panel-close]");
     var employeePanelTitle = root.querySelector("[data-employee-panel-title]");
     var employeePanelBody = root.querySelector("[data-employee-panel-body]");
+    var residentEditButton = root.querySelector("[data-resident-card-edit]");
+    var residentEditForm = root.querySelector("[data-resident-card-form]");
+    var residentCardActions = root.querySelector("[data-resident-card-actions]");
+    var residentCardStart = root.querySelector("[data-resident-card-start]");
+    var residentCardFeedback = root.querySelector("[data-resident-card-feedback]");
+    var openedResident = null;
+    var residentCardRequest = 0;
+    var residentCardSaving = false;
     var panelTitle = root.querySelector("[data-room-panel-title]");
     var panelLocation = root.querySelector("[data-room-panel-location]");
     var panelStatus = root.querySelector("[data-room-panel-status]");
+    var roomTransferToggle = root.querySelector("[data-room-transfer-toggle]");
+    var roomTransferMessage = root.querySelector("[data-room-transfer-message]");
     var panelOccupiedCount = root.querySelector("[data-room-occupied-count]");
     var panelFreeCount = root.querySelector("[data-room-free-count]");
+    var panelFreeLabel = root.querySelector("[data-room-free-label]");
     var panelBeds = root.querySelector("[data-room-panel-beds]");
     var placementHint = root.querySelector("[data-placement-hint]");
     var placementPanel = root.querySelector("[data-placement-panel]");
@@ -46,6 +69,9 @@
     var assignmentEnd = root.querySelector("[data-assignment-end]");
     var assignmentEndInput = root.querySelector("[data-assignment-end-input]");
     var settleButton = root.querySelector("[data-settle-button]");
+    var rosterException = settlementForm.querySelector("[data-category-exception-confirmation]");
+    var approveRosterException = rosterException.querySelector("[data-category-exception-checkbox]");
+    var rosterCategoryException = "";
     var placementTitle = root.querySelector("[data-placement-title]");
     var occupiedActions = root.querySelector("[data-occupied-actions]");
     var relocateButton = root.querySelector("[data-relocate-button]");
@@ -74,6 +100,7 @@
     var autoShiftButtons = Array.from(root.querySelectorAll("[data-auto-apply-shift]"));
     var mapModeButtons = Array.from(root.querySelectorAll("[data-map-mode]"));
     var mapModePanels = Array.from(root.querySelectorAll("[data-map-mode-panel]"));
+    var watchTemplateButton = root.querySelector("[data-watch-template-open]");
     var planMap = root.querySelector("[data-plan-map]");
     var planStatus = root.querySelector("[data-plan-status]");
     var planLists = root.querySelector("[data-plan-lists]");
@@ -93,13 +120,34 @@
     var controlMessage = root.querySelector("[data-control-message]");
     var controlAcquireButton = root.querySelector("[data-control-acquire]");
     var controlReleaseButton = root.querySelector("[data-control-release]");
+    var swapDialog = root.querySelector("[data-swap-dialog]");
+    var swapPersonTemplate = swapDialog.querySelector("[data-swap-person-template]").content;
+    var swapTitle = swapDialog.querySelector("#settlement-swap-title");
+    var swapPicker = swapDialog.querySelector("[data-swap-picker]");
+    var swapSearch = swapDialog.querySelector("#settlement-swap-search");
+    var swapResults = swapDialog.querySelector("[data-swap-results]");
+    var swapEmpty = swapDialog.querySelector("[data-swap-empty]");
+    var swapPlan = swapDialog.querySelector("[data-swap-plan]");
+    var swapActions = swapDialog.querySelector("[data-swap-actions]");
+    var swapBack = swapDialog.querySelector("[data-swap-back]");
+    var swapCancel = swapDialog.querySelector("[data-swap-cancel]");
+    var swapNotice = root.querySelector("[data-swap-notice]");
+    var swapError = swapDialog.querySelector("[data-swap-error]");
+    var swapConfirm = swapDialog.querySelector("[data-swap-confirm]");
+    var swapSource = null;
+    var swapTarget = null;
     var activeRoom = null;
     var selectedBed = null;
     var selectedEmployee = null;
     var relocationSourceBed = null;
+    var moveSource = null;
+    var movePicker = root.querySelector("[data-move-picker]");
+    var moveHint = root.querySelector("[data-move-hint]");
+    var moveReason = root.querySelector("[data-relocation-reason-input]");
     var searchTimer = null;
     var searchSequence = 0;
     var saving = false;
+    var roomTransferPending = false;
     var unsettledShift = "all";
     var unsettledPanelTrigger = null;
     var autoPreviewOpenOnceKey = "settlement:auto-preview-open-once";
@@ -107,16 +155,26 @@
     var autoMutationInFlight = false;
     var autoReadSequence = 0;
     var activeMapMode = "current";
+    var watchExtensionState = null;
+    var watchExtensionClockOffset = 0;
+    var watchExtensionTimer = null;
+    var watchExtensionInFlight = false;
     var planDragSource = null;
     var controlHeld = false;
     var controlState = "free";
     var controlActionInFlight = false;
     var heartbeatInFlight = false;
+    var controlRefreshPending = false;
     var heartbeatTimer = null;
     var heartbeatRetryCount = 0;
     var heartbeatRecoveryPending = false;
     var controlAccessDenied = false;
     var heartbeatRetryDelays = [2500, 6000];
+    var rosterPlacement = root.querySelector("[data-roster-placement]");
+    var checkinStart = root.querySelector("[data-checkin-start]");
+    var checkin = window.createSettlementBedCheckin && window.createSettlementBedCheckin(
+        root.querySelector("[data-bed-checkin]"), updateMapAfterSettlement
+    );
 
     function hasFloorSelection(dormitory, floor) {
         return floorSections.some(function (section) {
@@ -291,10 +349,10 @@
 
     function compactShiftLabel(value) {
         var label = String(value || "").trim();
-        if (!label || label === "Не указано") return "";
+        if (!label || label === "Не указано") return "?";
         if (label === "День") return "Д";
         if (label === "Ночь") return "Н";
-        return label;
+        return "?";
     }
 
     function renderBedHoverCard(bed, occupied) {
@@ -312,18 +370,25 @@
             bed.appendChild(hoverCard);
         }
 
-        var shortName = document.createElement("strong");
-        shortName.textContent = shortPersonName(bed.dataset.occupantName);
-        var position = document.createElement("span");
-        position.textContent = bed.dataset.positionLabel || "";
-        var work = document.createElement("span");
-        work.textContent = bed.dataset.workLabel || "";
-        var shiftLabel = String(bed.dataset.shiftLabel || "").trim();
-        hoverCard.replaceChildren(shortName, position, work);
-        if (shiftLabel && shiftLabel !== "Не указано") {
-            var shift = document.createElement("small");
-            shift.textContent = shiftLabel;
-            hoverCard.appendChild(shift);
+        var name = document.createElement("strong");
+        name.textContent = bed.dataset.occupantName || "";
+        var shift = document.createElement("strong");
+        shift.textContent = "Смена: " + (String(bed.dataset.tooltipShiftLabel || bed.dataset.shiftLabel || "").trim() || "Не указано");
+        hoverCard.replaceChildren(name, window.settlementPersonnelNumber(bed.dataset.personnelNumber));
+        if (bed.dataset.tooltipWorkLabel) {
+            var work = document.createElement("span");
+            work.textContent = bed.dataset.tooltipWorkLabel;
+            hoverCard.appendChild(work);
+        }
+        hoverCard.appendChild(shift);
+        if (bed.dataset.shiftConflict) hoverCard.appendChild(element("strong", "", bed.dataset.shiftConflict));
+        if (bed.dataset.assignmentWarning) hoverCard.appendChild(element("strong", "", bed.dataset.assignmentWarning));
+        if (bed.dataset.categoryException) hoverCard.appendChild(element("strong", "", bed.dataset.categoryException));
+        if (bed.dataset.onExtension === "true") {
+            var extension = document.createElement("span");
+            extension.className = "settlement-bed-extension-label";
+            extension.textContent = "На продлении";
+            hoverCard.appendChild(extension);
         }
     }
 
@@ -336,37 +401,49 @@
         );
     }
 
+    function syncBedDragHandle(bed) {
+        var dragHandle = bed.querySelector("[data-bed-photo-slot]");
+        if (!dragHandle) return;
+        if (controlHeld && bed.dataset.occupied === "true" && isTransferredBed(bed) && !bed.disabled) {
+            dragHandle.setAttribute("data-bed-drag-handle", "");
+            dragHandle.setAttribute("draggable", "true");
+        } else {
+            dragHandle.removeAttribute("data-bed-drag-handle");
+            dragHandle.removeAttribute("draggable");
+        }
+    }
+
     function renderMapBed(bed) {
         var occupied = bed.dataset.occupied === "true";
         var unavailable = !isTransferredBed(bed) || Boolean(bed.disabled);
         var occupantName = shortPersonName(bed.dataset.occupantName);
-        var photoUrl = occupied ? String(bed.dataset.occupantPhotoUrl || "").trim() : "";
         var shiftLabel = compactShiftLabel(bed.dataset.shiftLabel);
-        var photo = bed.querySelector("[data-bed-photo-image]");
-        var photoFallback = bed.querySelector("[data-bed-photo-fallback]");
         var avatar = bed.querySelector("[data-bed-avatar-initial]");
         var emptyIcon = bed.querySelector("[data-bed-empty-icon]");
         var person = bed.querySelector("[data-bed-person-label]");
         var status = bed.querySelector("[data-bed-status]");
         var shift = bed.querySelector("[data-bed-shift-badge]");
-        var dragHandle = bed.querySelector("[data-bed-photo-slot]");
-
+        var label = [
+            bed.dataset.dormitoryLabel,
+            bed.dataset.floorLabel,
+            bed.dataset.roomLabel,
+            "блок " + bed.dataset.blockLabel,
+            bed.dataset.positionLabel
+        ];
+        if (occupied) {
+            label.push("занято", bed.dataset.occupantName, "смена: " + (bed.dataset.shiftLabel || "Не указано"));
+            if (bed.dataset.shiftConflict) label.push(bed.dataset.shiftConflict);
+            if (bed.dataset.assignmentWarning) label.push(bed.dataset.assignmentWarning);
+            if (bed.dataset.categoryException) label.push(bed.dataset.categoryException);
+            if (bed.dataset.onExtension === "true") label.push("на продлении");
+        } else {
+            label.push(unavailable ? "недоступно" : "свободно");
+        }
+        bed.setAttribute("aria-label", label.join(", "));
         bed.dataset.bedState = unavailable ? "unavailable" : (occupied ? "occupied" : "free");
         bed.classList.toggle("is-occupied", occupied);
         bed.classList.toggle("is-free", !occupied);
-        bed.classList.remove("is-drag-source", "is-drop-target", "is-dragging");
-        if (dragHandle) {
-            dragHandle.classList.remove("is-dragging");
-            dragHandle.removeAttribute("aria-grabbed");
-            dragHandle.style.removeProperty("pointer-events");
-            if (controlHeld && occupied && !unavailable) {
-                dragHandle.setAttribute("data-bed-drag-handle", "");
-                dragHandle.setAttribute("draggable", "true");
-            } else {
-                dragHandle.removeAttribute("data-bed-drag-handle");
-                dragHandle.removeAttribute("draggable");
-            }
-        }
+        syncBedDragHandle(bed);
         if (avatar) {
             avatar.textContent = personInitials(bed.dataset.occupantName);
             avatar.hidden = !occupied;
@@ -385,6 +462,14 @@
             shift.hidden = !occupied || !shiftLabel;
         }
         renderBedHoverCard(bed, occupied);
+
+        renderBedPhoto(bed, occupied);
+    }
+
+    function renderBedPhoto(bed, occupied) {
+        var photoUrl = occupied ? String(bed.dataset.occupantPhotoUrl || "").trim() : "";
+        var photo = bed.querySelector("[data-bed-photo-image]");
+        var photoFallback = bed.querySelector("[data-bed-photo-fallback]");
 
         function showPhotoFallback() {
             if (photo) {
@@ -446,11 +531,10 @@
     function matchesRoom(room) {
         var dormitoryMatch = room.dataset.dormitory === state.dormitory;
         var floorMatch = room.dataset.floor === state.floor;
-        var searchMatch = (
-            !state.search
-            || String(room.dataset.search || "").includes(state.search)
-        );
-        return dormitoryMatch && floorMatch && searchMatch;
+        var searchMatch = /^\d+$/.test(state.search)
+            ? Number(room.dataset.roomNumber) === Number(state.search)
+            : String(room.dataset.search || "").includes(state.search);
+        return dormitoryMatch && floorMatch && searchMatch && (!chosenRoomId || room.dataset.roomId === chosenRoomId);
     }
 
     function selectedFloorRooms() {
@@ -463,6 +547,8 @@
     }
 
     function updateSelectionSummary() {
+        var floor = floorSections.find(function (section) { return !section.hidden; });
+        if (!floor) return;
         var selectedRooms = selectedFloorRooms();
         var transferredRooms = selectedRooms.filter(function (room) {
             return room.dataset.transferStatus === "transferred";
@@ -485,16 +571,25 @@
             }).length;
         });
 
-        if (selectedRoomCount) selectedRoomCount.textContent = String(selectedRooms.length);
-        if (selectedTransferredRoomCount) {
-            selectedTransferredRoomCount.textContent = String(transferredRooms.length);
-        }
-        if (globalFreeCount) globalFreeCount.textContent = String(freeBeds);
-        if (globalOccupiedCount) globalOccupiedCount.textContent = String(occupiedBeds);
-        if (selectedUnavailableBedCount) {
-            selectedUnavailableBedCount.textContent = String(unavailableBeds);
-        }
+        var counts = {
+            "selected-room-count": selectedRooms.length,
+            "selected-transferred-room-count": transferredRooms.length,
+            "free-bed-count": freeBeds,
+            "occupied-bed-count": occupiedBeds,
+            "selected-unavailable-bed-count": unavailableBeds
+        };
+        Object.keys(counts).forEach(function (key) {
+            var node = floor.querySelector("[data-" + key + "]");
+            var value = String(counts[key]);
+            if (node && node.textContent !== value) node.textContent = value;
+        });
     }
+
+    root.querySelectorAll("[data-floor-legend-toggle]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            button.setAttribute("aria-expanded", String(button.getAttribute("aria-expanded") !== "true"));
+        });
+    });
 
     function applyFilters() {
         dormitorySections.forEach(function (section) {
@@ -512,23 +607,199 @@
             section.querySelectorAll("[data-bed]").forEach(renderMapBed);
         });
 
-        rooms.forEach(function (room) {
-            var match = matchesRoom(room);
-            var selectedFloor = (
-                room.dataset.dormitory === state.dormitory
-                && room.dataset.floor === state.floor
-            );
-            room.classList.toggle("is-filter-muted", selectedFloor && !match);
-            room.setAttribute("data-filter-match", String(match));
-        });
+        highlightRooms();
         root.querySelectorAll("[data-plan-room]").forEach(function (room) {
             room.hidden = (
                 room.dataset.dormitory !== state.dormitory
                 || room.dataset.floor !== state.floor
             );
         });
-        if (activeRoom && !selectedFloorRooms().includes(activeRoom)) closePanel();
+        if (activeRoom && !panel.hidden && !selectedFloorRooms().includes(activeRoom)) closePanel();
         updateSelectionSummary();
+    }
+
+    function highlightRooms() {
+        rooms.forEach(function (room) {
+            var match = matchesRoom(room);
+            var selectedFloor = room.dataset.dormitory === state.dormitory && room.dataset.floor === state.floor;
+            room.classList.toggle("is-room-match", Boolean(state.search) && match);
+            room.classList.toggle("is-filter-muted", selectedFloor && !match);
+            room.setAttribute("data-filter-match", String(match));
+        });
+    }
+
+    function bindSearchList(input, popup, refresh, choose) {
+        if (!input || !popup) return function () {};
+        var list = popup.querySelector('[role="listbox"]');
+        var empty = popup.querySelector('[role="status"]');
+        var matches = [];
+        var active = -1;
+        function close() {
+            popup.hidden = true;
+            input.setAttribute("aria-expanded", "false");
+            input.removeAttribute("aria-activedescendant");
+            active = -1;
+        }
+        input.addEventListener("focus", refresh);
+        input.addEventListener("click", function () {
+            quickSearchOrigin = null;
+            if (popup.hidden && input.value) refresh();
+        });
+        input.addEventListener("blur", function () {
+            quickSearchOrigin = null;
+            close();
+        });
+        input.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !popup.hidden) {
+                event.preventDefault();
+                close();
+                if (quickSearchOrigin) {
+                    var origin = quickSearchOrigin;
+                    input.blur();
+                    origin.focus({preventScroll: true});
+                }
+            } else if (event.key === "Enter" && !popup.hidden && matches.length) {
+                event.preventDefault();
+                choose(matches[Math.max(active, 0)]);
+            } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && input.value.trim()) {
+                if (popup.hidden) refresh();
+                if (!matches.length) return;
+                event.preventDefault();
+                if (active >= 0) list.children[active].setAttribute("aria-selected", "false");
+                if (event.key === "ArrowDown") active = (active + 1) % matches.length;
+                else active = active <= 0 ? matches.length - 1 : active - 1;
+                var option = list.children[active];
+                option.setAttribute("aria-selected", "true");
+                input.setAttribute("aria-activedescendant", option.id);
+                option.scrollIntoView({block: "nearest"});
+            }
+        });
+        list.addEventListener("pointerdown", function (event) {
+            if (event.target.closest('[role="option"]')) event.preventDefault();
+        });
+        list.addEventListener("click", function (event) {
+            var option = event.target.closest("[data-match-index]");
+            if (option) choose(matches[Number(option.dataset.matchIndex)]);
+        });
+        return function render(items, describe) {
+            close();
+            matches = items;
+            list.replaceChildren();
+            if (!input.value.trim() || document.activeElement !== input) return;
+            matches.forEach(function (match, index) {
+                var option = element("div");
+                option.id = list.id + "-" + index;
+                option.dataset.matchIndex = String(index);
+                option.setAttribute("role", "option");
+                option.setAttribute("aria-selected", "false");
+                var labels = describe(match);
+                var heading = element("strong", "settlement-person-identity", labels[0]);
+                if (labels.length > 2) heading.append(window.settlementPersonnelNumber(labels[2]));
+                option.append(heading, element("small", "", labels[1]));
+                list.appendChild(option);
+            });
+            empty.hidden = matches.length > 0;
+            popup.hidden = false;
+            popup.scrollTop = 0;
+            input.setAttribute("aria-expanded", "true");
+        };
+    }
+
+    function refreshRoomOptions() {
+        var query = state.search;
+        var numeric = /^\d+$/.test(query);
+        var matches = query ? rooms.filter(function (room) {
+            return numeric ? room.dataset.roomNumber.startsWith(query) : String(room.dataset.search || "").includes(query);
+        }) : [];
+        matches.sort(function (left, right) {
+            return Number(left.dataset.roomNumber) - Number(right.dataset.roomNumber)
+                || Number(left.dataset.dormitory) - Number(right.dataset.dormitory)
+                || Number(left.dataset.floor) - Number(right.dataset.floor);
+        });
+        renderRoomOptions(matches, function (room) {
+            return ["Комната " + room.dataset.roomNumber, "КИС-" + room.dataset.dormitory + " · " + room.dataset.floor + " этаж"];
+        });
+    }
+
+    function showFoundRoom(room) {
+        if (!room.isConnected) {
+            var id = room.dataset.roomId;
+            room = rooms.find(function (current) { return current.dataset.roomId === id; });
+            if (!room) return refreshRoomOptions();
+        }
+        chosenRoomId = room.dataset.roomId;
+        state.search = room.dataset.roomNumber;
+        searchInput.value = state.search;
+        showMapFloor(room);
+        var header = room.querySelector("[data-room-open]");
+        header.focus({preventScroll: true});
+        room.scrollIntoView({block: "nearest", inline: "nearest"});
+    }
+
+    function residentSearchName(value) {
+        return normalizeSearch(value).replace(/ё/g, "е").replace(/\s+/g, " ");
+    }
+
+    function rankedResidentMatches(query) {
+        if (!query) return [];
+        var tokens = query.split(" ");
+        var matches = [];
+        root.querySelectorAll('[data-room-card] [data-occupied="true"]').forEach(function (bed) {
+            var name = residentSearchName(bed.dataset.occupantName);
+            var surname = name.split(" ", 1)[0];
+            var number = residentSearchName(bed.dataset.personnelNumber);
+            var numberMatch = Boolean(number && number.startsWith(query));
+            var nameMatch = tokens.length === 1
+                ? surname.startsWith(query)
+                : tokens.every(function (token) { return name.includes(token); });
+            if (!nameMatch && !numberMatch) return;
+            var rank = 3;
+            if (name === query || number === query) rank = 0;
+            else if (surname === tokens[0]) rank = 1;
+            else if (surname.startsWith(tokens[0]) || numberMatch) rank = 2;
+            matches.push({bed: bed, name: name, number: number, rank: rank});
+        });
+        return matches.sort(function (left, right) {
+            return left.rank - right.rank || left.name.localeCompare(right.name, "ru") || left.number.localeCompare(right.number, "ru");
+        });
+    }
+
+    function refreshResidentSearch() {
+        if (!residentFinder) return;
+        var query = residentSearchName(residentFinder.value);
+        residentMatches.forEach(function (match) { match.bed.classList.remove("is-resident-match"); });
+        residentMatches = rankedResidentMatches(query);
+        residentMatches.forEach(function (match) {
+            var highlighted = chosenResidentId
+                ? match.bed.dataset.residentId === chosenResidentId
+                : match.rank === residentMatches[0].rank;
+            match.bed.classList.toggle("is-resident-match", highlighted);
+        });
+        renderResidentOptions(residentMatches, function (match) {
+            var bed = match.bed;
+            var location = [bed.dataset.dormitoryLabel, bed.dataset.floorLabel, bed.dataset.roomLabel,
+                "блок " + bed.dataset.blockLabel, bed.dataset.positionLabel].join(" · ");
+            return [bed.dataset.occupantName, location, bed.dataset.personnelNumber];
+        });
+    }
+
+    function showMapFloor(room) {
+        state.dormitory = room.dataset.dormitory;
+        state.floor = room.dataset.floor;
+        syncMapSelectionButtons();
+        persistMapSelection();
+        applyFilters();
+    }
+
+    function showResidentBed(match) {
+        var bed = match.bed;
+        showMapFloor(bed.closest("[data-room-card]"));
+        chosenResidentId = bed.dataset.residentId;
+        residentFinder.value = bed.dataset.occupantName;
+        residentFinder.blur();
+        refreshResidentSearch();
+        bed.focus({preventScroll: true});
+        bed.scrollIntoView({block: "nearest", inline: "nearest"});
     }
 
     function element(tagName, className, text) {
@@ -538,10 +809,81 @@
         return node;
     }
 
-    function addBedDetail(list, label, value) {
+    function renderWatchExtensions(entries) {
+        var markedOccupancies = new Set(entries.map(function (entry) { return String(entry.occupancy_id); }));
+        rooms.forEach(function (room) {
+            room.querySelectorAll('[data-occupied="true"]').forEach(function (bed) {
+                var onExtension = markedOccupancies.has(bed.dataset.occupancyId);
+                if (onExtension === (bed.dataset.onExtension === "true")) return;
+                bed.dataset.onExtension = String(onExtension);
+                renderMapBed(bed);
+            });
+        });
+
+        var items = entries.map(function (entry) {
+            var item = element("li");
+            item.append(
+                element("strong", "", entry.name),
+                window.settlementPersonnelNumber(entry.personnel_number),
+                element("small", "", entry.location + " · по " + entry.ends_on)
+            );
+            return item;
+        });
+        watchExtensionList.replaceChildren(...items);
+        watchExtensionCount.textContent = String(items.length);
+        watchExtensionEmpty.hidden = items.length > 0;
+    }
+
+    function updateWatchExtensions() {
+        window.clearTimeout(watchExtensionTimer);
+        if (!watchExtensionState || document.hidden) return;
+        var now = Date.now() + watchExtensionClockOffset;
+        renderWatchExtensions(watchExtensionState.entries.filter(function (entry) {
+            return Date.parse(entry.expires_at) > now;
+        }));
+        var refreshAt = Date.parse(watchExtensionState.refresh_at);
+        if (refreshAt <= now) {
+            refreshWatchExtensions();
+            refreshAt = now + 60000;
+        }
+        watchExtensionTimer = window.setTimeout(updateWatchExtensions, refreshAt - now);
+    }
+
+    function acceptWatchExtensions(payload, requestedAt) {
+        var serverTime = Date.parse(payload.server_time);
+        if (!Number.isFinite(serverTime) || !Number.isFinite(Date.parse(payload.refresh_at)) || !Array.isArray(payload.entries)) return;
+        watchExtensionClockOffset = serverTime - (requestedAt + Date.now()) / 2;
+        watchExtensionState = payload;
+        updateWatchExtensions();
+    }
+
+    async function refreshWatchExtensions() {
+        if (!watchExtensionState || document.hidden || watchExtensionInFlight) return;
+        watchExtensionInFlight = true;
+        var requestedAt = Date.now();
+        try {
+            var response = await fetch(root.dataset.watchExtensionsUrl, {cache: "no-store"});
+            if (response.ok && !response.redirected) {
+                acceptWatchExtensions(await response.json(), requestedAt);
+            }
+        } catch (error) {
+            // The deadlines already received from the server still apply offline.
+        } finally {
+            watchExtensionInFlight = false;
+        }
+    }
+
+    function resumeWatchExtensions() {
+        updateWatchExtensions();
+        refreshWatchExtensions();
+    }
+
+    function addBedDetail(list, label, value, badge) {
         var item = document.createElement("div");
         item.appendChild(element("dt", "", label));
-        item.appendChild(element("dd", "", value || "Не указано"));
+        var definition = element("dd", "", value || (badge ? "" : "Не указано"));
+        if (badge) definition.append(badge);
+        item.appendChild(definition);
         list.appendChild(item);
     }
 
@@ -552,37 +894,46 @@
     function renderBedCards() {
         if (!activeRoom || !panelBeds) return;
         panelBeds.replaceChildren();
-        Array.from(activeRoom.querySelectorAll("[data-bed]")).forEach(function (bed) {
+        var beds = selectedBed ? [selectedBed] : activeRoom.querySelectorAll("[data-bed]");
+        beds.forEach(function (bed) {
             var occupied = bed.dataset.occupied === "true";
+            var available = isTransferredBed(bed);
+            if (selectedBed && !occupied) return;
             var card = element(
-                "button",
-                "settlement-room-bed-card " + (occupied ? "is-occupied" : "is-free")
+                selectedBed ? "article" : "button",
+                "settlement-room-bed-card " + (occupied ? "is-occupied" : available ? "is-free" : "")
             );
-            card.type = "button";
             card.dataset.panelBedId = bed.dataset.bedId;
-            card.classList.toggle("is-selected", selectedBed === bed);
-            card.setAttribute("aria-pressed", String(selectedBed === bed));
-
-            var main = element("span", "settlement-room-bed-card-main");
-            main.appendChild(element("strong", "", bedLabel(bed)));
-            main.appendChild(element("span", "", occupied ? "Занято" : "Свободно"));
-            card.appendChild(main);
-
-            var details = document.createElement("dl");
-            addBedDetail(details, "Жилец", bed.dataset.occupantName);
-            addBedDetail(details, "День / ночь", bed.dataset.shiftLabel);
-            addBedDetail(details, "Техника / должность", bed.dataset.workLabel);
-            addBedDetail(details, "Закрепление", bed.dataset.assignmentTypeLabel);
-            card.appendChild(details);
-
-            card.addEventListener("click", function () {
-                selectBed(bed);
-            });
+            if (!selectedBed) {
+                card.type = "button";
+                var main = element("span", "settlement-room-bed-card-main");
+                main.appendChild(element("strong", "", bedLabel(bed)));
+                main.appendChild(element("span", "", occupied ? "Занято" : available ? "Свободно" : "Недоступно"));
+                card.appendChild(main);
+                card.addEventListener("click", function () { openRoom(activeRoom, bed); });
+            }
+            if (occupied) {
+                var details = document.createElement("dl");
+                addBedDetail(details, "Жилец", bed.dataset.occupantName);
+                addBedDetail(details, "Табельный номер", "", window.settlementPersonnelNumber(bed.dataset.personnelNumber, {label: false}));
+                addBedDetail(details, "День / ночь", bed.dataset.tooltipShiftLabel || bed.dataset.shiftLabel);
+                if (bed.dataset.shiftConflict) addBedDetail(details, "Конфликт смен", bed.dataset.shiftConflict);
+                addBedDetail(details, bed.dataset.workCaption || "Техника / должность", bed.dataset.workLabel);
+                if (bed.dataset.assignmentWarning) addBedDetail(details, "Требует внимания", bed.dataset.assignmentWarning);
+                if (bed.dataset.categoryException) addBedDetail(details, "Исключение при заселении", bed.dataset.categoryException);
+                addBedDetail(details, "Закрепление", bed.dataset.assignmentTypeLabel);
+                if (bed.dataset.stayStart) {
+                    addBedDetail(details, "Заселение на койку", bed.dataset.stayStart);
+                    addBedDetail(details, "Выезд с койки", bed.dataset.stayEnd || "Дата не указана");
+                }
+                card.appendChild(details);
+            }
             panelBeds.appendChild(card);
         });
     }
 
     function resetEmployeeSelection() {
+        setRosterCategoryException();
         selectedEmployee = null;
         if (selectedEmployeeCard) selectedEmployeeCard.hidden = true;
         if (selectedEmployeeName) selectedEmployeeName.textContent = "";
@@ -608,6 +959,15 @@
 
     function resetRelocation() {
         relocationSourceBed = null;
+        if (moveReason) {
+            moveReason.required = false;
+            moveReason.value = "";
+            moveReason.closest("label").hidden = true;
+        }
+        if (assignmentType) {
+            assignmentType.disabled = false;
+            assignmentType.closest("label").hidden = false;
+        }
         if (panel) panel.classList.remove("is-relocating-with-target");
         resetEmployeeSelection();
     }
@@ -622,6 +982,172 @@
             bed.dataset.positionLabel
         ].filter(Boolean).join(", ");
     }
+
+    function swapParticipant(bed) {
+        return {
+            bed: bed,
+            occupancyId: Number(bed.dataset.occupancyId),
+            bedId: bed.dataset.bedId,
+            name: bed.dataset.occupantName
+        };
+    }
+
+    function canSwapWith(bed) {
+        return swapSource && bed !== swapSource.bed && isTransferredBed(bed)
+            && !bed.disabled && bed.dataset.occupied === "true" && Number(bed.dataset.occupancyId);
+    }
+
+    function startBedSwap(bed, destination) {
+        if (!controlHeld || saving || swapDialog.open || !bed || !isTransferredBed(bed) || !Number(bed.dataset.occupancyId)) return;
+        swapSource = swapParticipant(bed);
+        swapNotice.hidden = true;
+        closePanel();
+        if (destination) {
+            if (canSwapWith(destination)) openSwapConfirmation(destination);
+            else swapSource = null;
+            return;
+        }
+        var badge = swapPersonTemplate.querySelector("[data-swap-badge]").cloneNode(true);
+        showSwapBadge(badge, bed);
+        swapPicker.querySelector("[data-swap-picked-badge]").replaceChildren(badge);
+        swapPicker.querySelector("[data-swap-picked-name]").replaceChildren(
+            swapSource.name, window.settlementPersonnelNumber(bed.dataset.personnelNumber)
+        );
+        swapPicker.querySelector("[data-swap-picked-address]").textContent = bedLocation(bed);
+        swapSearch.value = "";
+        showSwapPicker();
+    }
+
+    function showSwapPicker() {
+        if (saving) return;
+        swapTarget = null;
+        swapTitle.textContent = "С кем поменять местами?";
+        swapPicker.hidden = false;
+        swapPlan.hidden = swapActions.hidden = swapError.hidden = true;
+        renderSwapMatches();
+        if (!swapDialog.open) swapDialog.showModal();
+        swapSearch.focus();
+    }
+
+    function renderSwapMatches() {
+        var query = residentSearchName(swapSearch.value);
+        var matches = rankedResidentMatches(query).filter(function (match) { return canSwapWith(match.bed); });
+        swapResults.replaceChildren(...matches.map(function (match) {
+            var item = element("li");
+            var button = element("button", "settlement-swap-match");
+            button.type = "button";
+            var heading = element("strong", "settlement-person-identity", match.bed.dataset.occupantName);
+            heading.append(window.settlementPersonnelNumber(match.bed.dataset.personnelNumber));
+            button.append(heading, element("span", "", bedLocation(match.bed)));
+            button.addEventListener("click", function () { openSwapConfirmation(match.bed); });
+            item.append(button);
+            return item;
+        }));
+        swapResults.hidden = !matches.length;
+        swapEmpty.hidden = !query || Boolean(matches.length);
+        swapEmpty.textContent = swapEmpty.hidden ? "" : "Жильцы не найдены. Проверьте фамилию.";
+    }
+
+    function showSwapBadge(badge, bed) {
+        var visual = bed.querySelector("[data-bed-photo-slot]").cloneNode(true);
+        visual.removeAttribute("data-bed-drag-handle");
+        visual.removeAttribute("draggable");
+        badge.append(visual, bed.querySelector("[data-bed-shift-badge]").cloneNode(true),
+            bed.querySelector(".settlement-bed-warning").cloneNode(true));
+        ["shiftLabel", "onExtension", "assignmentWarning", "categoryException", "causeOccupancy", "occupantPhotoUrl"].forEach(function (key) {
+            if (key in bed.dataset) badge.dataset[key] = bed.dataset[key];
+        });
+        renderBedPhoto(badge, true);
+    }
+
+    function showSwapAddress(container, bed) {
+        var labels = bed.dataset;
+        container.append(
+            element("span", "swap-floor", labels.dormitoryLabel + " · " + labels.floorLabel),
+            element("span", "swap-place", labels.roomLabel + " · койка " + labels.bedNumber)
+        );
+    }
+
+    function openSwapConfirmation(bed) {
+        if (saving || !controlHeld || !canSwapWith(bed)) return;
+        swapTarget = swapParticipant(bed);
+        var entries = [[swapSource, swapTarget], [swapTarget, swapSource]].map(function (pair) {
+            var item = swapPersonTemplate.firstElementChild.cloneNode(true);
+            item.querySelector("[data-swap-name]").replaceChildren(
+                pair[0].name, window.settlementPersonnelNumber(pair[0].bed.dataset.personnelNumber)
+            );
+            showSwapBadge(item.querySelector("[data-swap-badge]"), pair[0].bed);
+            showSwapAddress(item.querySelector("[data-swap-current]"), pair[0].bed);
+            showSwapAddress(item.querySelector("[data-swap-next]"), pair[1].bed);
+            return item;
+        });
+        swapDialog.querySelector("[data-swap-addresses]").replaceChildren(...entries);
+        swapTitle.textContent = "Поменять жильцов местами?";
+        swapBack.hidden = !swapDialog.open;
+        swapPicker.hidden = swapError.hidden = true;
+        swapPlan.hidden = swapActions.hidden = false;
+        if (!swapDialog.open) swapDialog.showModal();
+        swapCancel.focus();
+    }
+
+    function cancelBedSwap() {
+        if (saving) return;
+        swapSource = swapTarget = null;
+        if (swapDialog.open) swapDialog.close();
+        refreshResidentSearch();
+    }
+
+    async function submitBedSwap() {
+        if (!swapSource || !swapTarget || saving) return;
+        if (!controlHeld) {
+            swapError.textContent = "Управление завершено. Начните работу заново.";
+            swapError.hidden = false;
+            return;
+        }
+        saving = swapConfirm.disabled = true;
+        swapError.hidden = true;
+        try {
+            var response = await fetch(root.dataset.occupancyCreateUrl, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {"Content-Type": "application/json", "X-CSRFToken": csrfToken()},
+                body: JSON.stringify({
+                    action: "swap",
+                    first_occupancy_id: swapSource.occupancyId, first_bed_id: swapSource.bedId,
+                    second_occupancy_id: swapTarget.occupancyId, second_bed_id: swapTarget.bedId
+                })
+            });
+            var body = await response.json();
+            if (!response.ok || !body.ok) throw new Error(body.error || "Не удалось выполнить обмен.");
+            updateBedOccupancy(swapTarget.bed, body.placements[0].occupancy);
+            updateBedOccupancy(swapSource.bed, body.placements[1].occupancy);
+            residentFinder.value = "";
+            updateShiftConflicts();
+            updateSelectionSummary();
+            refreshWatchExtensions();
+            swapNotice.textContent = "Жильцы поменялись местами.";
+            swapNotice.hidden = false;
+            swapDialog.close();
+            swapSource = swapTarget = null;
+            refreshResidentSearch();
+        } catch (error) {
+            swapError.textContent = error.message || "Не удалось выполнить обмен.";
+            swapError.hidden = false;
+        } finally {
+            saving = swapConfirm.disabled = false;
+        }
+    }
+
+    root.querySelector("[data-swap-start]").addEventListener("click", function () { startBedSwap(selectedBed); });
+    swapSearch.addEventListener("input", renderSwapMatches);
+    swapBack.addEventListener("click", showSwapPicker);
+    swapCancel.addEventListener("click", cancelBedSwap);
+    swapDialog.querySelector("[data-swap-close]").addEventListener("click", cancelBedSwap);
+    swapDialog.addEventListener("cancel", function (event) {
+        event.preventDefault();
+        cancelBedSwap();
+    });
+    swapConfirm.addEventListener("click", submitBedSwap);
 
     function updateRelocationDetails() {
         var hasTarget = Boolean(
@@ -646,7 +1172,7 @@
 
     function updateAssignmentEndVisibility() {
         if (!assignmentEnd || !assignmentEndInput || !assignmentType) return;
-        var temporary = assignmentType.value === "temporary";
+        var temporary = !relocationSourceBed && assignmentType.value === "temporary";
         assignmentEnd.hidden = !temporary;
         assignmentEndInput.required = temporary;
         if (!temporary) assignmentEndInput.value = "";
@@ -665,8 +1191,19 @@
         placementFeedback.hidden = !message;
     }
 
+    function setRosterCategoryException(confirmation = "") {
+        rosterCategoryException = confirmation;
+        rosterException.hidden = !confirmation;
+        approveRosterException.checked = false;
+        settleButton.textContent = relocationSourceBed ? "Переселить" : "Заселить";
+    }
+
     function updatePlacementPanel() {
         if (!placementHint || !settlementForm) return;
+        var freeBed = selectedBed && isTransferredBed(selectedBed) && selectedBed.dataset.occupied !== "true";
+        if (checkin) checkin.select(controlHeld && freeBed && !relocationSourceBed ? selectedBed : null);
+        syncCheckinStart();
+        if (rosterPlacement && relocationSourceBed) rosterPlacement.open = true;
         updateRelocationDetails();
         showFeedback("", false);
         settlementForm.hidden = true;
@@ -674,6 +1211,11 @@
         if (occupiedActions) occupiedActions.hidden = true;
         updateEmployeeSearchAvailability();
 
+        if (activeRoom && activeRoom.dataset.transferStatus !== "transferred") {
+            if (placementTitle) placementTitle.textContent = "Заселение сотрудника";
+            placementHint.textContent = "Комната не передана. Заселение в неё недоступно.";
+            return;
+        }
         if (!controlHeld) {
             if (placementTitle) placementTitle.textContent = "Действия недоступны";
             placementHint.textContent = "Сначала начните работу и дождитесь подтверждения управления.";
@@ -697,11 +1239,6 @@
             if (occupiedActions) occupiedActions.hidden = false;
             return;
         }
-        if (!activeRoom || activeRoom.dataset.transferStatus !== "transferred") {
-            placementHint.textContent = "Комната не передана. Заселение в неё недоступно.";
-            return;
-        }
-
         if (placementTitle) {
             placementTitle.textContent = relocationSourceBed
                 ? "Переселение сотрудника"
@@ -709,13 +1246,13 @@
         }
         placementHint.hidden = true;
         settlementForm.hidden = false;
-        if (settleButton) {
+        if (settleButton && (relocationSourceBed || !approveRosterException.checked)) {
             settleButton.textContent = relocationSourceBed ? "Переселить" : "Заселить";
         }
         if (relocationSourceBed && selectedEmployeeCard) {
             selectedEmployeeCard.hidden = false;
         }
-        if (employeeSearch && !relocationSourceBed) employeeSearch.focus();
+        if (employeeSearch && !relocationSourceBed && (!rosterPlacement || rosterPlacement.open)) employeeSearch.focus();
     }
 
     function selectBed(bed) {
@@ -725,12 +1262,12 @@
             selectedBed.setAttribute("aria-pressed", "false");
         }
         selectedBed = bed;
-        selectedBed.classList.add("is-selected");
-        selectedBed.setAttribute("aria-pressed", "true");
+        if (bed) {
+            bed.classList.add("is-selected");
+            bed.setAttribute("aria-pressed", "true");
+        }
+        if (changed && rosterPlacement && !relocationSourceBed) rosterPlacement.open = false;
         if (changed && !relocationSourceBed) resetEmployeeSelection();
-        renderBedCards();
-        updatePlacementPanel();
-        updateSettleButton();
     }
 
     function roomCounts(room) {
@@ -743,40 +1280,103 @@
 
     function renderRoom(room) {
         var counts = roomCounts(room);
+        var transferred = room.dataset.transferStatus === "transferred";
         room.dataset.occupiedBeds = String(counts.occupied);
         room.dataset.freeBeds = String(counts.free);
-        panelTitle.textContent = "Комната " + room.dataset.roomNumber;
+        var roomLabel = "Комната " + room.dataset.roomNumber;
+        panel.dataset.panelView = selectedBed ? "bed" : "room";
+        panelKind.textContent = selectedBed ? "Койко-место" : "Комната";
+        panelTitle.textContent = selectedBed ? bedLabel(selectedBed) : roomLabel;
+        panelRoomLink.hidden = !selectedBed;
+        panelRoomLink.textContent = roomLabel;
+        panelEmployeeLink.hidden = !selectedBed || !Number(selectedBed.dataset.residentId);
         panelLocation.textContent = "КИС-" + room.dataset.dormitory + " · " + room.dataset.floor + " этаж";
-        panelStatus.textContent = (
-            room.dataset.transferStatus === "transferred"
-                ? "Передана для расселения"
-                : "Не передана · действия недоступны"
-        );
+        panelStatus.textContent = transferred ? "Передана" : "Не передана";
+        if (roomTransferToggle) roomTransferToggle.setAttribute("aria-checked", String(transferred));
         panelOccupiedCount.textContent = String(counts.occupied);
         panelFreeCount.textContent = String(counts.free);
+        if (panelFreeLabel) panelFreeLabel.textContent = transferred ? "свободно" : "недоступно";
         renderBedCards();
         updatePlacementPanel();
     }
 
     function openRoom(room, bed) {
+        clearTimeout(avatarClickTimer);
         closeUnsettledPanel(false);
+        if (activeRoom !== room || panel.hidden) showRoomTransferMessage("");
+        if (panel.hidden) panelTrigger = bed || room.querySelector("[data-room-open]");
         activeRoom = room;
-        if (selectedBed && !room.contains(selectedBed)) {
-            selectedBed.classList.remove("is-selected");
-            selectedBed.setAttribute("aria-pressed", "false");
-            selectedBed = null;
-            resetEmployeeSelection();
-        }
+        selectBed(bed);
         panel.hidden = false;
         panel.setAttribute("aria-hidden", "false");
         panelBackdrop.hidden = false;
         renderRoom(room);
-        if (bed) {
-            selectBed(bed);
+        updateSettleButton();
+        panel.querySelector(".settlement-room-panel-body").scrollTop = 0;
+        panelTitle.focus({preventScroll: true});
+    }
+
+    function showRoomTransferMessage(message, isError) {
+        if (!roomTransferMessage) return;
+        roomTransferMessage.hidden = !message;
+        roomTransferMessage.textContent = message;
+        roomTransferMessage.classList.toggle("is-error", Boolean(isError));
+    }
+
+    async function changeRoomTransfer() {
+        if (!activeRoom || roomTransferPending || saving || relocationSourceBed) return;
+        var room = activeRoom;
+        var transferStatus = room.dataset.transferStatus === "transferred" ? "not_transferred" : "transferred";
+        var failure = "Не удалось изменить статус комнаты. Повторите попытку.";
+        roomTransferPending = true;
+        roomTransferToggle.disabled = true;
+        showRoomTransferMessage("Сохраняем статус комнаты…");
+        try {
+            var response = await fetch(root.dataset.roomTransferUrl, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {"X-CSRFToken": csrfToken()},
+                body: new URLSearchParams({room: room.dataset.roomId, status: transferStatus})
+            });
+            var payload = await response.json().catch(function () { return {}; });
+            if (!response.ok) {
+                if (activeRoom === room) showRoomTransferMessage(payload.error || failure, true);
+                return;
+            }
+            var fragment = document.createElement("template");
+            fragment.innerHTML = payload.room_card || "";
+            var updatedRoom = fragment.content.firstElementChild;
+            if (!updatedRoom || updatedRoom.dataset.roomId !== room.dataset.roomId) throw new Error(failure);
+            rooms[rooms.indexOf(room)] = updatedRoom;
+            room.replaceWith(updatedRoom);
+            if (activeRoom === room) {
+                activeRoom = updatedRoom;
+                if (panelTrigger && room.contains(panelTrigger)) {
+                    panelTrigger = panelTrigger.matches("[data-bed]")
+                        ? updatedRoom.querySelector('[data-bed-id="' + CSS.escape(panelTrigger.dataset.bedId) + '"]')
+                        : updatedRoom.querySelector("[data-room-open]");
+                }
+                if (selectedBed && room.contains(selectedBed)) {
+                    selectBed(updatedRoom.querySelector('[data-bed-id="' + CSS.escape(selectedBed.dataset.bedId) + '"]'));
+                }
+                renderRoom(updatedRoom);
+                showRoomTransferMessage("");
+            }
+            applyFilters();
+        } catch (error) {
+            if (activeRoom === room) showRoomTransferMessage(failure, true);
+        } finally {
+            roomTransferPending = false;
+            roomTransferToggle.disabled = false;
         }
     }
 
     function closePanel() {
+        clearTimeout(avatarClickTimer);
+        if (!panel.hidden && panelTrigger && panelTrigger.isConnected) panelTrigger.focus({preventScroll: true});
+        panelTrigger = null;
+        selectBed(null);
+        if (checkin) checkin.select(null);
         panel.hidden = true;
         panel.setAttribute("aria-hidden", "true");
         panelBackdrop.hidden = true;
@@ -784,17 +1384,19 @@
     }
 
     function closeRelocationModal(force) {
-        if (saving && !force) return;
+        if (saving && force !== true) return;
         if (!relocationModal || relocationModal.hidden) return;
         relocationModal.hidden = true;
         relocationModal.setAttribute("aria-hidden", "true");
         if (relocationModalBackdrop) relocationModalBackdrop.hidden = true;
         document.body.classList.remove("settlement-relocation-modal-open");
-        if (placementPanel && settlementForm) placementPanel.appendChild(settlementForm);
+        if (rosterPlacement && settlementForm) rosterPlacement.appendChild(settlementForm);
+        else if (placementPanel && settlementForm) placementPanel.appendChild(settlementForm);
         if (placementPanel && placementFeedback) placementPanel.appendChild(placementFeedback);
         if (selectedBed) {
             selectedBed.classList.remove("is-selected");
             selectedBed.setAttribute("aria-pressed", "false");
+            selectedBed.focus({preventScroll: true});
             selectedBed = null;
         }
         resetRelocation();
@@ -811,7 +1413,7 @@
         relocationModal.setAttribute("aria-hidden", "false");
         relocationModalBackdrop.hidden = false;
         document.body.classList.add("settlement-relocation-modal-open");
-        if (assignmentType) assignmentType.focus();
+        (moveReason && moveReason.required ? moveReason : relocationModalCancel).focus();
     }
 
     function setAutoPreviewModal(open) {
@@ -910,6 +1512,10 @@
 
     function setMapMode(mode) {
         activeMapMode = mode === "next" ? "next" : "current";
+        const currentExcel = root.querySelector("[data-current-excel]");
+        if (currentExcel) currentExcel.hidden = activeMapMode === "next";
+        if (watchExtensionDetails) watchExtensionDetails.hidden = activeMapMode === "next";
+        if (watchTemplateButton) watchTemplateButton.hidden = activeMapMode === "next";
         mapModeButtons.forEach(function (button) {
             var active = button.dataset.mapMode === activeMapMode;
             button.classList.toggle("is-active", active);
@@ -921,8 +1527,106 @@
         clearDragState();
         clearPlanDragState();
         if (activeMapMode === "next") {
+            endMovePicker();
+            cancelBedSwap();
             loadAutoState(autoCohort && autoCohort.value, 0);
         }
+    }
+
+    if (watchTemplateButton) {
+        const dialog = root.querySelector("[data-watch-template-dialog]");
+        const form = dialog.querySelector("form");
+        const name = form.elements.namedItem("name");
+        const period = form.elements.namedItem("period_id");
+        const save = form.querySelector("button[type='submit']");
+        const close = dialog.querySelector("[data-watch-template-close]");
+        const result = dialog.querySelector("[data-watch-template-result]");
+        const receipt = dialog.querySelector("[data-watch-template-receipt]");
+        const heading = dialog.querySelector("h2");
+        const formTitle = heading.textContent;
+        const history = dialog.querySelector("[data-watch-template-history]");
+        const list = history.querySelector("ul");
+        let workDate;
+        let loading = 0;
+
+        function templateLink(template) {
+            const link = element("a", "", template.name + " · " + template.saved_at);
+            link.href = template.url;
+            return link;
+        }
+
+        watchTemplateButton.addEventListener("click", async function () {
+            const request = ++loading;
+            heading.textContent = formTitle;
+            form.hidden = false;
+            receipt.hidden = true;
+            save.disabled = true;
+            history.hidden = true;
+            period.parentElement.hidden = true;
+            name.value = "";
+            result.textContent = "Загружаем…";
+            dialog.showModal();
+            try {
+                const response = await fetch(form.action, {cache: "no-store"});
+                if (!response.ok) throw new Error("Не удалось загрузить шаблоны. Откройте окно заново.");
+                const data = await response.json();
+                if (request !== loading || !dialog.open) return;
+                workDate = data.work_date;
+                name.value = data.default_name;
+                period.replaceChildren(new Option("Без привязки к календарю", ""));
+                data.periods.forEach(item => period.add(new Option(item.name, item.id)));
+                if (data.periods.length === 1) period.selectedIndex = 1;
+                period.parentElement.hidden = data.periods.length === 0;
+                list.replaceChildren(...data.recent.map(function (item) {
+                    const row = element("li", "");
+                    row.append(templateLink(item));
+                    return row;
+                }));
+                history.hidden = data.recent.length === 0;
+                result.textContent = "";
+                save.disabled = false;
+            } catch (error) {
+                if (request === loading) result.textContent = error.message;
+            }
+        });
+        close.addEventListener("click", () => dialog.close());
+        receipt.querySelector("[data-template-done]").addEventListener("click", () => dialog.close());
+        dialog.addEventListener("cancel", event => { if (close.disabled) event.preventDefault(); });
+        form.addEventListener("submit", async function (event) {
+            event.preventDefault();
+            if (save.disabled) return;
+            save.disabled = close.disabled = true;
+            name.disabled = period.disabled = true;
+            save.textContent = "Сохраняем…";
+            result.textContent = "";
+            try {
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json", "X-CSRFToken": csrfToken()},
+                    body: JSON.stringify({
+                        name: name.value, period_id: period.value ? Number(period.value) : null, work_date: workDate
+                    })
+                });
+                const data = await response.json().catch(() => null);
+                if (!data) throw new Error("Сервер не подтвердил сохранение. Попробуйте ещё раз.");
+                if (!response.ok) throw new Error(data.error || "Не удалось сохранить шаблон.");
+                receipt.querySelector("[data-template-name]").textContent = data.template.name;
+                receipt.querySelector("[data-template-stats]").textContent = data.template.saved_at +
+                    " · Занятых коек " + data.occupied_beds + " · Коек с отметками " + data.marked_beds;
+                receipt.querySelector("[data-template-link]").href = data.template.url;
+                heading.textContent = data.created ? "Шаблон сохранён" : "Этот шаблон уже сохранён";
+                form.hidden = history.hidden = true;
+                receipt.hidden = false;
+                dialog.scrollTop = 0;
+                heading.focus();
+            } catch (error) {
+                result.textContent = error instanceof TypeError ? "Нет ответа от сервера. Проверьте связь и повторите сохранение." : error.message;
+            } finally {
+                name.disabled = period.disabled = close.disabled = false;
+                save.disabled = form.hidden;
+                save.textContent = "Сохранить шаблон";
+            }
+        });
     }
 
     function planResidentCard(row) {
@@ -934,6 +1638,7 @@
         card.dataset.planResidentName = row.resident.name;
         var heading = element("div", "settlement-plan-resident-heading");
         heading.appendChild(element("strong", "", row.resident.name));
+        heading.appendChild(window.settlementPersonnelNumber(row.resident.personnel_number));
         heading.appendChild(element("span", "settlement-plan-shift", row.work_shift_label));
         card.appendChild(heading);
         if (row.manually_changed) {
@@ -989,6 +1694,7 @@
         rows.forEach(function (row) {
             var item = element("article", "settlement-plan-history-item");
             item.appendChild(element("strong", "", row.action + " · " + row.resident));
+            item.appendChild(window.settlementPersonnelNumber(row.personnel_number));
             item.appendChild(element("span", "", row.work_shift));
             item.appendChild(element("span", "", row.previous_place + " → " + row.new_place));
             item.appendChild(element("small", "", row.actor + " · " + new Date(row.created_at).toLocaleString("ru-RU")));
@@ -1161,6 +1867,7 @@
                 var item = element("article", "settlement-auto-row");
                 var copy = element("div", "");
                 copy.appendChild(element("strong", "", autoResidentLabel(row.resident)));
+                copy.appendChild(window.settlementPersonnelNumber(row.resident.personnel_number));
                 copy.appendChild(element("span", "", row.room + " · койка " + row.bed));
                 copy.appendChild(element("small", "", row.arrival_at + " — " + row.departure_at));
                 item.appendChild(copy);
@@ -1176,6 +1883,7 @@
                 var item = element("article", "settlement-auto-row");
                 var copy = element("div", "");
                 copy.appendChild(element("strong", "", autoResidentLabel(row.resident)));
+                copy.appendChild(window.settlementPersonnelNumber(row.resident.personnel_number));
                 copy.appendChild(element("span", "", row.reason || "Требуется уточнение данных."));
                 item.appendChild(copy);
                 unresolved.appendChild(item);
@@ -1337,72 +2045,260 @@
 
     function closeEmployeePanel() {
         if (!employeePanel || !employeePanelBackdrop) return;
+        residentCardRequest += 1;
+        openedResident = null;
         employeePanel.hidden = true;
         employeePanel.setAttribute("aria-hidden", "true");
         employeePanelBackdrop.hidden = true;
     }
 
-    function renderEmployeePanel(employee) {
-        if (!employeePanelBody || !employeePanelTitle) return;
-        employeePanelTitle.textContent = employee.full_name;
-        employeePanelBody.textContent = "";
-        var details = element("dl", "settlement-employee-panel-details");
-        [
-            ["Табельный номер", employee.personnel_number],
-            ["Должность", employee.position],
-            ["Подразделение", employee.department],
-            ["График", employee.work_schedule],
-            ["Бригада", employee.brigade],
-            ["Пол", employee.sex],
-            ["Телефон", employee.phone],
-            ["Фактическое место", employee.residence]
-        ].forEach(function (row) {
-            details.appendChild(element("dt", "", row[0]));
-            details.appendChild(element("dd", "", row[1]));
-        });
-        employeePanelBody.appendChild(details);
+    function residentInput(name, value, {type = "text", maxLength, required = false} = {}) {
+        var input = document.createElement("input");
+        input.name = name;
+        input.type = type;
+        input.value = value || "";
+        input.required = required;
+        if (maxLength) input.maxLength = maxLength;
+        return input;
     }
 
-    function openEmployeePanel(employeeId) {
-        if (!employeePanel || !employeePanelBackdrop || !employeeId) return;
-        var url = String(root.dataset.employeeDetailUrl || "").replace("/0/", "/" + employeeId + "/");
-        if (!url) return;
+    function updateResidentWorkFields(assignment = {}) {
+        var values = {
+            shift: assignment.tooltip_shift_label,
+            equipment: assignment.work_caption === "Техника" ? assignment.work_label : "",
+            warning: assignment.assignment_warning
+        };
+        employeePanelBody.querySelectorAll("[data-resident-work]").forEach(function (field) {
+            var value = values[field.dataset.residentWork];
+            field.textContent = value || "";
+            field.hidden = field.previousElementSibling.hidden = !value;
+        });
+    }
+
+    function renderResidentPanel(resident, editing = false) {
+        if (!employeePanelBody || !employeePanelTitle) return;
+        employeePanelTitle.textContent = resident.full_name;
+        employeePanelBody.textContent = "";
+        var details = element("dl", "settlement-employee-panel-details");
+        var externalEdit = editing && resident.is_external;
+        var fields = [];
+        if (externalEdit) {
+            fields.push(["ФИО", "", residentInput("full_name", resident.full_name, {maxLength: 255, required: true})]);
+        }
+        fields.push(["Табельный номер", resident.personnel_number || "Не указан",
+            externalEdit && residentInput("external_personnel_number", resident.personnel_number, {maxLength: 64})]);
+        fields.push(
+            ["Смена", "", null, "", "shift"],
+            ["Техника", "", null, "", "equipment"],
+            ["Уточнить расстановку", "", null, "", "warning"]
+        );
+        if (resident.is_external) {
+            var sex;
+            if (externalEdit) {
+                sex = document.createElement("select");
+                sex.name = "sex";
+                sex.add(new Option("Мужской", "male"));
+                sex.add(new Option("Женский", "female"));
+                sex.value = resident.external_sex;
+            }
+            fields.push(
+                ["Тип жильца", resident.resident_type_label],
+                ["Организация", resident.organization,
+                    externalEdit && residentInput("organization", resident.organization, {maxLength: 255, required: true})],
+                ["Должность", resident.position_title || "Не указана",
+                    externalEdit && residentInput("position_title", resident.position_title, {maxLength: 255})],
+                ["Пол", resident.external_sex === "female" ? "Женский" : "Мужской", sex]
+            );
+        } else {
+            fields.push(
+                ["Должность", resident.position],
+                ["Категория для расселения", resident.settlement_category_label || "Не указана"],
+                ["Подразделение", resident.department],
+                ["График", resident.work_schedule],
+                ["Бригада", resident.brigade],
+                ["Пол", resident.sex]
+            );
+        }
+        fields.push(
+            ["Телефон", resident.phone || "Не указан",
+                externalEdit && residentInput("phone", resident.phone, {type: "tel", maxLength: 64})],
+            ["Фактическое место", resident.residence]
+        );
+        if (resident.stay_period) {
+            var stay = editing && resident.stay_edit;
+            fields.push(
+                [stay ? "Заселение по Владивостоку" : "Заселение на койку", resident.stay_period.start,
+                    stay && residentInput("stay_start", stay.start, {type: "datetime-local", required: true})],
+                [stay ? "Плановый выезд по Владивостоку" : "Выезд с койки", resident.stay_period.end || "Дата не указана",
+                    stay && stay.end_editable && residentInput("stay_end", stay.end, {
+                        type: "datetime-local", required: stay.end_required
+                    })]
+            );
+        }
+        var note;
+        if (editing) {
+            note = document.createElement("textarea");
+            note.name = "housing_note";
+            note.value = resident.housing_note;
+            note.maxLength = 3000;
+            note.rows = 3;
+        }
+        fields.push(["Заметка по проживанию", resident.housing_note || "Нет заметки", note, "settlement-resident-card-note"]);
+        fields.forEach(function (row) {
+            var [label, value, input, cssClass, workField] = row;
+            var term = element("dt", "");
+            var definition = element("dd", cssClass || "");
+            if (input) {
+                input.id = "resident-card-" + input.name;
+                var labelElement = element("label", "", label);
+                labelElement.htmlFor = input.id;
+                term.appendChild(labelElement);
+                definition.appendChild(input);
+            } else if (label === "Табельный номер") {
+                term.textContent = label;
+                definition.append(window.settlementPersonnelNumber(resident.personnel_number, {label: false}));
+            } else {
+                term.textContent = label;
+                definition.textContent = value;
+            }
+            if (workField) definition.dataset.residentWork = workField;
+            details.append(term, definition);
+        });
+        employeePanelBody.appendChild(details);
+        updateResidentWorkFields(resident.work_assignment);
+        residentCardActions.hidden = !editing;
+        residentEditButton.hidden = editing || !resident.editable;
+    }
+
+    function residentCardUrl(id) {
+        return root.dataset.residentDetailUrl.replace("/0/", "/" + id + "/");
+    }
+
+    function showResidentCardFeedback(text, error) {
+        residentCardFeedback.textContent = text;
+        residentCardFeedback.hidden = !text;
+        residentCardFeedback.classList.toggle("is-error", Boolean(error));
+    }
+
+    async function fetchResidentCard(id, options) {
+        var response = await fetch(residentCardUrl(id), options);
+        var payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "Не удалось загрузить данные жильца.");
+        return payload.resident;
+    }
+
+    async function openResidentPanel(id) {
+        if (!employeePanel || !id) return;
+        var request = ++residentCardRequest;
+        openedResident = null;
         closePanel();
-        fetch(url, {
-            credentials: "same-origin",
-            headers: {"X-Requested-With": "XMLHttpRequest"}
-        })
-            .then(function (response) {
-                return response.json().then(function (payload) {
-                    if (!response.ok || !payload.ok) {
-                        throw new Error(payload.error || "Не удалось открыть карточку сотрудника.");
-                    }
-                    return payload.employee;
+        employeePanelBody.hidden = false;
+        employeePanelBody.replaceChildren();
+        employeePanelTitle.textContent = "Карточка жильца";
+        residentCardActions.hidden = residentEditButton.hidden = true;
+        employeePanel.hidden = employeePanelBackdrop.hidden = false;
+        employeePanel.setAttribute("aria-hidden", "false");
+        employeePanelClose.focus();
+        showResidentCardFeedback("Загружаем карточку…");
+        try {
+            var resident = await fetchResidentCard(id);
+            if (request !== residentCardRequest) return;
+            openedResident = resident;
+            renderResidentPanel(resident);
+            showResidentCardFeedback("");
+        } catch (error) {
+            if (request === residentCardRequest) showResidentCardFeedback("Не удалось открыть карточку жильца.", true);
+        }
+    }
+
+    function syncResidentCardControls() {
+        if (!residentCardActions || residentCardActions.hidden) return;
+        var submit = residentEditForm.querySelector("[type=submit]");
+        submit.hidden = !controlHeld;
+        submit.disabled = residentCardSaving;
+        residentCardStart.hidden = controlHeld;
+        residentCardStart.disabled = !controlAcquireButton || controlAcquireButton.disabled;
+    }
+
+    if (residentEditForm) {
+        residentEditButton.addEventListener("click", function () {
+            showResidentCardFeedback("");
+            renderResidentPanel(openedResident, true);
+            syncResidentCardControls();
+            residentEditForm.querySelector("input, textarea").focus();
+        });
+        residentCardStart.addEventListener("click", acquireControl);
+        residentEditForm.querySelector("[data-resident-card-cancel]").addEventListener("click", function () {
+            if (residentCardSaving) return;
+            renderResidentPanel(openedResident);
+            showResidentCardFeedback("");
+            residentEditButton.focus();
+        });
+        residentEditForm.addEventListener("submit", async function (event) {
+            event.preventDefault();
+            if (!openedResident || residentCardActions.hidden || residentCardSaving || !controlHeld) return;
+            var request = residentCardRequest;
+            var changes = Object.fromEntries(new FormData(residentEditForm));
+            changes.revision = openedResident.revision;
+            var oldStay = openedResident.stay_edit;
+            if (oldStay) {
+                var end = changes.stay_end ?? oldStay.end;
+                if (changes.stay_start !== oldStay.start || end !== oldStay.end) {
+                    changes.stay = {
+                        occupancy_id: oldStay.occupancy_id, version: oldStay.version,
+                        start: changes.stay_start, end: end
+                    };
+                }
+                delete changes.stay_start;
+                delete changes.stay_end;
+            }
+            residentCardSaving = true;
+            syncResidentCardControls();
+            showResidentCardFeedback("Сохраняем…");
+            try {
+                var resident = await fetchResidentCard(openedResident.id, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json", "X-CSRFToken": csrfToken()},
+                    body: JSON.stringify(changes)
                 });
-            })
-            .then(function (employee) {
-                renderEmployeePanel(employee);
-                employeePanel.hidden = false;
-                employeePanel.setAttribute("aria-hidden", "false");
-                employeePanelBackdrop.hidden = false;
-            })
-            .catch(function (error) {
-                showFeedback(error.message || "Не удалось открыть карточку сотрудника.", true);
-            });
+                root.querySelectorAll('[data-bed][data-resident-id="' + resident.id + '"]').forEach(function (bed) {
+                    bed.dataset.occupantName = resident.full_name;
+                    bed.dataset.personnelNumber = resident.personnel_number || "";
+                    if (resident.stay_edit && Number(bed.dataset.occupancyId) === resident.stay_edit.occupancy_id) {
+                        bed.dataset.stayStart = resident.stay_period.start;
+                        bed.dataset.stayEnd = resident.stay_period.end;
+                    }
+                    if (resident.is_external) {
+                        bed.dataset.workLabel = bed.dataset.tooltipWorkLabel = resident.organization;
+                    }
+                    renderMapBed(bed);
+                });
+                refreshResidentSearch();
+                if (request !== residentCardRequest) return;
+                openedResident = resident;
+                renderResidentPanel(resident);
+                showResidentCardFeedback("Данные сохранены");
+                residentEditButton.focus();
+            } catch (error) {
+                if (request === residentCardRequest) showResidentCardFeedback(error.message, true);
+            } finally {
+                residentCardSaving = false;
+                syncResidentCardControls();
+            }
+        });
     }
 
     function employeeMeta(employee) {
-        return [
-            "Таб. № " + employee.personnel_number,
-            employee.shift_label,
-            employee.work_label
-        ].join(" · ");
+        var meta = element("small", "settlement-person-identity");
+        meta.append(window.settlementPersonnelNumber(employee.personnel_number),
+            [employee.shift_label, employee.work_label].filter(Boolean).join(" · "));
+        return meta;
     }
 
     function chooseEmployee(employee) {
         selectedEmployee = employee;
         selectedEmployeeName.textContent = employee.full_name;
-        selectedEmployeeMeta.textContent = employeeMeta(employee);
+        selectedEmployeeMeta.replaceChildren(employeeMeta(employee));
         selectedEmployeeCard.hidden = false;
         employeeResults.hidden = true;
         employeeSearch.value = employee.full_name;
@@ -1422,7 +2318,7 @@
                 var button = element("button", "settlement-employee-result");
                 button.type = "button";
                 button.appendChild(element("strong", "", employee.full_name));
-                button.appendChild(element("small", "", employeeMeta(employee)));
+                button.appendChild(employeeMeta(employee));
                 button.addEventListener("click", function () {
                     chooseEmployee(employee);
                 });
@@ -1467,7 +2363,8 @@
     function updateSettleButton() {
         if (!settleButton) return;
         var temporaryNeedsEnd = (
-            assignmentType
+            !relocationSourceBed
+            && assignmentType
             && assignmentType.value === "temporary"
             && (!assignmentEndInput || !assignmentEndInput.value)
         );
@@ -1477,7 +2374,8 @@
             || !selectedEmployee
             || !selectedBed
             || !assignmentType
-            || !assignmentType.value
+            || (!relocationSourceBed && !assignmentType.value)
+            || (moveReason && moveReason.required && !moveReason.value.trim())
             || temporaryNeedsEnd
         );
     }
@@ -1490,25 +2388,19 @@
             || sourceBed.dataset.occupied !== "true"
             || saving
         ) return;
-        if (destinationBed && !isTransferredBed(destinationBed)) return;
-        if (destinationBed) {
-            closeUnsettledPanel(false);
-            activeRoom = destinationBed.closest("[data-room-card]");
-            if (selectedBed) {
-                selectedBed.classList.remove("is-selected");
-                selectedBed.setAttribute("aria-pressed", "false");
-            }
-            selectedBed = destinationBed;
-            selectedBed.classList.add("is-selected");
-            selectedBed.setAttribute("aria-pressed", "true");
-        }
+        if (!destinationBed || destinationBed.disabled || !isTransferredBed(destinationBed)
+            || destinationBed.dataset.occupied === "true") return;
+        swapNotice.hidden = true;
+        closeUnsettledPanel(false);
+        activeRoom = destinationBed.closest("[data-room-card]");
         relocationSourceBed = sourceBed;
+        selectBed(destinationBed);
         selectedEmployee = {
             id: Number(sourceBed.dataset.residentId),
             resident_id: Number(sourceBed.dataset.residentId),
             employee_id: Number(sourceBed.dataset.occupantId),
             full_name: sourceBed.dataset.occupantName,
-            personnel_number: "Не указано",
+            personnel_number: sourceBed.dataset.personnelNumber || "Не указан",
             shift_label: sourceBed.dataset.shiftLabel,
             work_label: sourceBed.dataset.workLabel
         };
@@ -1518,32 +2410,55 @@
             return;
         }
         if (selectedEmployeeName) selectedEmployeeName.textContent = selectedEmployee.full_name;
-        if (selectedEmployeeMeta) selectedEmployeeMeta.textContent = employeeMeta(selectedEmployee);
+        if (selectedEmployeeMeta) selectedEmployeeMeta.replaceChildren(employeeMeta(selectedEmployee));
         if (selectedEmployeeCard) selectedEmployeeCard.hidden = false;
         if (assignmentType) {
             assignmentType.value = sourceBed.dataset.assignmentType || "";
+            // Переселение сохраняет тип закрепления исходной записи.
+            assignmentType.disabled = true;
+            assignmentType.closest("label").hidden = true;
+        }
+        if (moveReason) {
+            moveReason.required = sourceBed.dataset.assignmentType === "temporary_unapproved";
+            moveReason.closest("label").hidden = !moveReason.required;
+            moveReason.value = "";
         }
         updateAssignmentEndVisibility();
-        if (!destinationBed) {
-            selectedBed.classList.remove("is-selected");
-            selectedBed.setAttribute("aria-pressed", "false");
-            selectedBed = null;
-        }
         renderBedCards();
         updatePlacementPanel();
         updateSettleButton();
-        if (destinationBed) {
-            openRelocationModal();
-        } else {
-            panel.hidden = true;
-            panel.setAttribute("aria-hidden", "true");
-            panelBackdrop.hidden = true;
-        }
+        openRelocationModal();
     }
 
-    function startRelocation() {
-        if (!controlHeld || !selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
-        configureRelocation(selectedBed, null);
+    function endMovePicker() {
+        if (!moveSource) return;
+        moveSource = null;
+        movePicker.hidden = true;
+        root.classList.remove("is-picking-move");
+    }
+
+    function startMovePicker(bed) {
+        if (!controlHeld || saving || !bed || !isTransferredBed(bed) || !Number(bed.dataset.occupancyId)) return;
+        closeUnsettledPanel(false);
+        closePanel();
+        moveSource = bed;
+        swapNotice.hidden = true;
+        root.classList.add("is-picking-move");
+        movePicker.querySelector("[data-move-person]").replaceChildren(
+            "Переселение · " + bed.dataset.occupantName + " ", window.settlementPersonnelNumber(bed.dataset.personnelNumber)
+        );
+        moveHint.textContent = "Выберите общежитие, этаж и нажмите свободную койку.";
+        movePicker.hidden = false;
+        root.querySelector('.settlement-toolbar [data-dorm-filter][aria-pressed="true"]').focus();
+    }
+
+    function cancelMovePicker() {
+        var source = moveSource;
+        endMovePicker();
+        if (source) {
+            showMapFloor(source.closest("[data-room-card]"));
+            source.focus();
+        }
     }
 
     function csrfToken() {
@@ -1558,6 +2473,12 @@
             window.clearTimeout(heartbeatTimer);
             heartbeatTimer = null;
         }
+    }
+
+    function syncCheckinStart() {
+        if (!checkinStart) return;
+        checkinStart.hidden = !selectedBed || !isTransferredBed(selectedBed) || selectedBed.dataset.occupied === "true" || controlHeld;
+        checkinStart.disabled = !controlAcquireButton || controlAcquireButton.disabled;
     }
 
     function syncControlInteractivity() {
@@ -1579,9 +2500,8 @@
         if (releaseButton) releaseButton.disabled = Boolean(!controlHeld || saving);
         autoSyncButtons();
         updateSettleButton();
-        root.querySelectorAll("[data-bed]").forEach(renderMapBed);
-        if (!controlHeld) clearDragState();
-        if (placementHint && settlementForm) updatePlacementPanel();
+        syncCheckinStart();
+        syncResidentCardControls();
     }
 
     function setControlState(nextState, message) {
@@ -1591,6 +2511,7 @@
             busy: "Управление занято другим сотрудником",
             lost: "Связь с управлением потеряна"
         };
+        var previouslyHeld = controlHeld;
         controlState = labels[nextState] ? nextState : "lost";
         controlHeld = controlState === "held";
         root.dataset.controlState = controlState;
@@ -1598,6 +2519,14 @@
         if (controlPanel) controlPanel.dataset.controlState = controlState;
         if (controlStatus) controlStatus.textContent = labels[controlState];
         if (controlMessage) controlMessage.textContent = message || "";
+        if (previouslyHeld !== controlHeld) {
+            if (!controlHeld) {
+                clearDragState();
+                endMovePicker();
+            }
+            root.querySelectorAll("[data-bed]").forEach(syncBedDragHandle);
+            if (placementHint && settlementForm) updatePlacementPanel();
+        }
         syncControlInteractivity();
     }
 
@@ -1664,7 +2593,6 @@
 
     function scheduleHeartbeatRetry() {
         stopHeartbeatTimer();
-        controlHeld = false;
         if (heartbeatRetryCount >= heartbeatRetryDelays.length) {
             heartbeatRecoveryPending = false;
             setControlState(
@@ -1682,6 +2610,22 @@
             heartbeatRecoveryPending = false;
             heartbeatControl();
         }, delay);
+    }
+
+    function refreshControlState() {
+        if (heartbeatInFlight || controlActionInFlight) {
+            controlRefreshPending = true;
+            return;
+        }
+        heartbeatControl();
+    }
+
+    function finishControlRequest() {
+        syncControlInteractivity();
+        if (controlRefreshPending) {
+            controlRefreshPending = false;
+            heartbeatControl();
+        }
     }
 
     function heartbeatControl() {
@@ -1704,7 +2648,7 @@
             })
             .finally(function () {
                 heartbeatInFlight = false;
-                syncControlInteractivity();
+                finishControlRequest();
             });
     }
 
@@ -1729,7 +2673,7 @@
             })
             .finally(function () {
                 controlActionInFlight = false;
-                syncControlInteractivity();
+                finishControlRequest();
             });
     }
 
@@ -1753,7 +2697,7 @@
             })
             .finally(function () {
                 controlActionInFlight = false;
-                syncControlInteractivity();
+                finishControlRequest();
             });
     }
 
@@ -1764,67 +2708,81 @@
         heartbeatControl();
     }
 
-    function updateMapAfterSettlement(payload) {
-        var occupancy = payload.occupancy;
-        var movedEmployeeId = occupancy.employee_id;
-        var movedResidentId = occupancy.resident_id;
-        clearDragState();
-        if (relocationSourceBed) {
-            relocationSourceBed.dataset.occupied = "false";
-            relocationSourceBed.dataset.occupancyId = "";
-            relocationSourceBed.dataset.residentId = "";
-            relocationSourceBed.dataset.occupantId = "";
-            relocationSourceBed.dataset.occupantName = "";
-            relocationSourceBed.dataset.occupantPhotoUrl = "";
-            relocationSourceBed.dataset.shiftLabel = "";
-            relocationSourceBed.dataset.workLabel = "";
-            relocationSourceBed.dataset.assignmentTypeLabel = "";
-            relocationSourceBed.dataset.assignmentType = "";
-            relocationSourceBed.classList.remove("is-occupied");
-            relocationSourceBed.classList.add("is-free");
-            renderMapBed(relocationSourceBed);
-        }
-        selectedBed.dataset.occupied = "true";
-        selectedBed.dataset.occupancyId = String(occupancy.id || "");
-        selectedBed.dataset.residentId = String(movedResidentId || "");
-        selectedBed.dataset.occupantId = String(movedEmployeeId || "");
-        selectedBed.dataset.occupantName = occupancy.occupant_name;
-        selectedBed.dataset.occupantPhotoUrl = occupancy.photo_url || "";
-        selectedBed.dataset.shiftLabel = occupancy.shift_label;
-        selectedBed.dataset.workLabel = occupancy.work_label;
-        selectedBed.dataset.assignmentTypeLabel = occupancy.assignment_type_label;
-        selectedBed.dataset.assignmentType = occupancy.assignment_type || "";
-        selectedBed.classList.remove("is-free");
-        selectedBed.classList.add("is-occupied");
-        renderMapBed(selectedBed);
-        selectedBed.setAttribute(
-            "aria-label",
-            [
-                selectedBed.dataset.dormitoryLabel,
-                selectedBed.dataset.floorLabel,
-                selectedBed.dataset.roomLabel,
-                "блок " + selectedBed.dataset.blockLabel,
-                selectedBed.dataset.positionLabel,
-                "занято",
-                occupancy.occupant_name
-            ].join(", ")
-        );
+    function updateBedOccupancy(destination, occupancy) {
+        destination.dataset.occupied = "true";
+        destination.dataset.occupancyId = String(occupancy.id || "");
+        destination.dataset.stayStart = occupancy.stay_period?.start || "";
+        destination.dataset.stayEnd = occupancy.stay_period?.end || "";
+        destination.dataset.residentId = String(occupancy.resident_id || "");
+        destination.dataset.occupantId = String(occupancy.employee_id || "");
+        destination.dataset.occupantName = occupancy.occupant_name;
+        destination.dataset.personnelNumber = occupancy.personnel_number || "";
+        destination.dataset.occupantPhotoUrl = occupancy.photo_url || "";
+        destination.dataset.shiftLabel = occupancy.shift_label;
+        destination.dataset.tooltipShiftLabel = occupancy.tooltip_shift_label || occupancy.shift_label;
+        destination.dataset.onExtension = occupancy.on_extension ? "true" : "false";
+        destination.dataset.assignmentWarning = occupancy.assignment_warning || "";
+        destination.dataset.categoryException = occupancy.category_exception || "";
+        destination.dataset.workLabel = occupancy.work_label;
+        destination.dataset.workCaption = occupancy.work_caption || "";
+        destination.dataset.tooltipWorkLabel = occupancy.tooltip_work_label || "";
+        destination.dataset.assignmentTypeLabel = occupancy.assignment_type_label;
+        destination.dataset.assignmentType = occupancy.assignment_type || "";
+        destination.classList.remove("is-free");
+        destination.classList.add("is-occupied");
+        renderMapBed(destination);
+    }
 
+    function updateMapAfterSettlement(payload, destination, source) {
+        clearDragState();
+        if (source) {
+            source.dataset.occupied = "false";
+            source.dataset.occupancyId = "";
+            delete source.dataset.stayStart;
+            delete source.dataset.stayEnd;
+            source.dataset.residentId = "";
+            source.dataset.occupantId = "";
+            source.dataset.occupantName = "";
+            source.dataset.personnelNumber = "";
+            source.dataset.occupantPhotoUrl = "";
+            source.dataset.shiftLabel = "";
+            source.dataset.tooltipShiftLabel = "";
+            delete source.dataset.onExtension;
+            source.dataset.workLabel = "";
+            source.dataset.tooltipWorkLabel = "";
+            source.dataset.assignmentWarning = "";
+            source.dataset.categoryException = "";
+            source.dataset.assignmentTypeLabel = "";
+            source.dataset.assignmentType = "";
+            source.classList.remove("is-occupied");
+            source.classList.add("is-free");
+            renderMapBed(source);
+        }
+        updateBedOccupancy(destination, payload.occupancy);
+        updateShiftConflicts();
+
+        refreshResidentSearch();
         updateSelectionSummary();
-        renderRoom(activeRoom);
+        if (activeRoom && !panel.hidden && (activeRoom.contains(destination) || activeRoom.contains(source || null))) renderRoom(activeRoom);
+        if (!source) root.dispatchEvent(new Event("settlement:checked-in"));
+        refreshWatchExtensions();
     }
 
     function submitPlacement() {
-        if (!controlHeld || !selectedBed || !selectedEmployee || !assignmentType.value || saving) return;
+        if (!controlHeld || !selectedBed || !selectedEmployee || (!relocationSourceBed && !assignmentType.value) || saving) return;
         if (relocationSourceBed && !Number(relocationSourceBed.dataset.occupancyId)) {
             showFeedback("Не удалось определить точное текущее размещение.", true);
             return;
         }
+        var destination = selectedBed;
+        var source = relocationSourceBed;
+        var employee = selectedEmployee;
         saving = true;
         updateSettleButton();
         showFeedback("Сохраняем заселение…", false);
 
-        fetch(root.dataset.occupancyCreateUrl, {
+        var temporaryMove = source && source.dataset.assignmentType === "temporary_unapproved";
+        fetch(temporaryMove ? root.dataset.temporaryRelocateUrl : root.dataset.occupancyCreateUrl, {
             method: "POST",
             credentials: "same-origin",
             headers: {
@@ -1832,15 +2790,20 @@
                 "X-CSRFToken": csrfToken(),
                 "X-Requested-With": "XMLHttpRequest"
             },
-            body: JSON.stringify(relocationSourceBed ? {
+            body: JSON.stringify(temporaryMove ? {
+                occupancy_id: Number(source.dataset.occupancyId),
+                bed_stable_id: destination.dataset.bedId,
+                reason: moveReason.value.trim()
+            } : relocationSourceBed ? {
                 action: "relocate",
                 occupancy_id: Number(relocationSourceBed.dataset.occupancyId),
                 bed_stable_id: selectedBed.dataset.bedId
             } : {
                 action: "settle",
-                resident_id: selectedEmployee.id,
+                resident_id: employee.id,
                 bed_stable_id: selectedBed.dataset.bedId,
                 assignment_type: assignmentType.value,
+                category_exception: approveRosterException.checked ? rosterCategoryException : "",
                 ends_at: assignmentEndInput && assignmentEndInput.value
                     ? new Date(assignmentEndInput.value).toISOString()
                     : null
@@ -1848,20 +2811,32 @@
         })
             .then(function (response) {
                 return response.json().then(function (payload) {
-                    if (!response.ok) throw new Error(payload.error || "Не удалось сохранить заселение.");
+                    if (!response.ok) {
+                        if (!source && selectedBed === destination && selectedEmployee === employee) {
+                            setRosterCategoryException(payload.category_exception);
+                        }
+                        throw new Error(payload.error || "Не удалось сохранить заселение.");
+                    }
                     return payload;
                 });
             })
             .then(function (payload) {
-                updateMapAfterSettlement(payload);
-                if (relocationSourceBed) {
+                updateMapAfterSettlement(payload, destination, source);
+                if (temporaryMove) root.dispatchEvent(new Event("settlement:checked-in"));
+                if (source && relocationSourceBed === source) {
                     closeRelocationModal(true);
-                } else {
+                    swapNotice.replaceChildren(destination.dataset.occupantName + " · " + bedLocation(destination) + " ",
+                        window.settlementPersonnelNumber(destination.dataset.personnelNumber));
+                    swapNotice.hidden = false;
+                    destination.focus({preventScroll: true});
+                    destination.scrollIntoView({block: "nearest", inline: "nearest"});
+                } else if (selectedBed === destination) {
                     closePanel();
                 }
             })
             .catch(function (error) {
                 showFeedback(error.message || "Не удалось сохранить заселение.", true);
+                if (!rosterException.hidden) rosterException.scrollIntoView({block: "nearest"});
             })
             .finally(function () {
                 saving = false;
@@ -1879,6 +2854,10 @@
             selectedBed.dataset.positionLabel
         ].join(", ");
         var relocating = Boolean(relocationSourceBed);
+        if (approveRosterException.checked) {
+            submitPlacement();
+            return;
+        }
         var message = (relocating ? "Переселить " : "Заселить ")
             + selectedEmployee.full_name + " в " + destination + "?";
         if (typeof window.openAppConfirmDialog === "function") {
@@ -1974,18 +2953,81 @@
         });
     });
 
+    document.addEventListener("keydown", function (event) {
+        if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.isComposing
+            || activeMapMode !== "current" || dragSourceBed || relocationSourceBed || moveSource
+            || !/^[0-9\p{L}]$/u.test(event.key)) return;
+
+        var input = /^\d$/.test(event.key) ? searchInput : residentFinder;
+        var target = event.target;
+        if (!input || target === input) return;
+        var switchingSearch = quickSearchOrigin && (target === searchInput || target === residentFinder);
+        if (!(target instanceof HTMLElement) || target.isContentEditable
+            || (!switchingSearch && target.closest('input, textarea, select, [role="textbox"], [role="combobox"], [role="listbox"], [role="menu"]'))
+            || (!root.contains(target) && target !== document.body && target !== document.documentElement)) return;
+
+        var overlays = document.querySelectorAll('dialog[open], [role="dialog"]:not([hidden]), [data-unsettled-panel]:not([hidden]), [data-employee-panel]:not([hidden])');
+        if (Array.from(overlays).some(function (overlay) { return overlay.getClientRects().length > 0; })) return;
+
+        var origin = quickSearchOrigin || target;
+        event.preventDefault();
+        input.focus();
+        quickSearchOrigin = origin;
+        input.value = event.key;
+        input.setSelectionRange(input.value.length, input.value.length);
+        input.dispatchEvent(new Event("input", {bubbles: true}));
+    });
+
     if (searchInput) {
         searchInput.addEventListener("input", function () {
-            state.search = searchInput.value.trim().toLowerCase();
-            applyFilters();
+            var query = searchInput.value.trim().toLowerCase();
+            var number = /^(?:№\s*)?0*(\d+)$/.exec(query);
+            state.search = number ? number[1] : query;
+            chosenRoomId = "";
+            if (state.search && residentFinder && residentFinder.value) {
+                residentFinder.value = "";
+                chosenResidentId = "";
+                refreshResidentSearch();
+            }
+            highlightRooms();
+            refreshRoomOptions();
+        });
+    }
+
+    if (residentFinder) {
+        residentFinder.addEventListener("input", function () {
+            chosenResidentId = "";
+            if (residentFinder.value && state.search) {
+                state.search = "";
+                chosenRoomId = "";
+                searchInput.value = "";
+                highlightRooms();
+            }
+            refreshResidentSearch();
         });
     }
 
     root.addEventListener("click", function (event) {
-        if (event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]")) return;
+        clearTimeout(avatarClickTimer);
         var bed = event.target.closest("[data-bed]");
-        if (bed && !isTransferredBed(bed)) return;
+        if (moveSource && (bed || event.target.closest("[data-room-open]"))) {
+            if (!bed || bed.disabled || !isTransferredBed(bed) || bed.dataset.occupied === "true") {
+                moveHint.textContent = "Для переселения нажмите свободную койку в переданной комнате.";
+            } else {
+                var source = moveSource;
+                endMovePicker();
+                configureRelocation(source, bed);
+            }
+            return;
+        }
         if (bed) {
+            // Сохраняем двойной щелчок по фото для открытия личной карточки.
+            if (event.detail && Number(bed.dataset.residentId) && event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]")) {
+                if (event.detail === 1) avatarClickTimer = setTimeout(function () {
+                    openRoom(bed.closest("[data-room-card]"), bed);
+                }, 320);
+                return;
+            }
             openRoom(bed.closest("[data-room-card]"), bed);
             return;
         }
@@ -2000,55 +3042,174 @@
         }
     });
 
+    function updateShiftConflicts(previousShifts) {
+        root.querySelectorAll("[data-room-card]").forEach(function (room) {
+            var messages = [];
+            room.querySelectorAll("[data-bed-block-size]").forEach(function (block) {
+                var beds = Array.from(block.querySelectorAll("[data-bed]"));
+                var occupied = beds.filter(bed => bed.dataset.occupied === "true");
+                var reasons = new Map();
+                ["День", "Ночь"].forEach(function (shift) {
+                    var group = occupied.filter(bed => bed.dataset.shiftLabel === shift);
+                    if (group.length < 3) return;
+                    var reason = "Блок " + group[0].dataset.blockLabel + ": " + group.length +
+                        (shift === "День" ? " в дневную смену" : " в ночную смену");
+                    messages.push(reason);
+                    group.forEach(bed => reasons.set(bed, reason));
+                });
+                beds.forEach(function (bed) {
+                    var reason = reasons.get(bed) || "";
+                    var before = previousShifts && previousShifts.get(bed.dataset.occupancyId);
+                    var changed = before && (before === "День" || before === "Ночь") && before !== bed.dataset.shiftLabel;
+                    if (!reason || bed.dataset.causeOccupancy !== bed.dataset.occupancyId) {
+                        delete bed.dataset.causeOccupancy;
+                        delete bed.dataset.shiftChange;
+                    }
+                    if (changed) {
+                        bed.classList.remove("shift-just-changed");
+                        void bed.offsetWidth;
+                        bed.classList.add("shift-just-changed");
+                    }
+                    if (changed && reason) {
+                        bed.dataset.causeOccupancy = bed.dataset.occupancyId;
+                        bed.dataset.shiftChange = before + " → " + bed.dataset.shiftLabel;
+                    }
+                    var explanation = reason;
+                    if (reason && bed.dataset.shiftChange) explanation += ". Смена изменилась: " + bed.dataset.shiftChange;
+                    if ((bed.dataset.shiftConflict || "") !== explanation) {
+                        bed.dataset.shiftConflict = explanation;
+                        renderMapBed(bed);
+                    }
+                });
+            });
+            room.classList.toggle("has-shift-conflict", messages.length > 0);
+            if (room.querySelector('[data-category-exception]:not([data-category-exception=""])')) {
+                messages.push("Заселение с исключением");
+            }
+            var header = room.querySelector("[data-room-open]");
+            if (header) header.title = messages.join(". ");
+        });
+    }
+
+    var assignmentsPending = false;
+    async function refreshPublishedAssignments() {
+        if (!root.dataset.assignmentsUrl || document.hidden || assignmentsPending || saving || dragSourceBed) return;
+        assignmentsPending = true;
+        try {
+            var response = await fetch(root.dataset.assignmentsUrl, {cache: "no-store"});
+            if (!response.ok) return;
+            var snapshot = await response.json();
+            if (!snapshot.beds || saving || dragSourceBed) return;
+            var previous = new Map();
+            var changedRooms = new Set();
+            root.querySelectorAll("[data-bed][data-occupied='true']").forEach(function (bed) {
+                var id = bed.dataset.occupancyId;
+                var fields = snapshot.beds[id];
+                if (!fields) return;
+                previous.set(id, bed.dataset.shiftLabel);
+                if (Object.keys(fields).some(key => bed.dataset[key] !== fields[key])) {
+                    changedRooms.add(bed.closest("[data-room-card]"));
+                    Object.assign(bed.dataset, fields);
+                    renderMapBed(bed);
+                }
+                if (openedResident && String(openedResident.id) === bed.dataset.residentId) {
+                    openedResident.work_assignment = {
+                        tooltip_shift_label: fields.tooltipShiftLabel,
+                        work_caption: fields.workCaption,
+                        work_label: fields.workLabel,
+                        assignment_warning: fields.assignmentWarning
+                    };
+                    updateResidentWorkFields(openedResident.work_assignment);
+                }
+            });
+            updateShiftConflicts(previous);
+            if (changedRooms.has(activeRoom)) renderBedCards();
+        } catch {
+            // Retry on the next poll or on return to the tab.
+        } finally {
+            assignmentsPending = false;
+        }
+    }
+    updateShiftConflicts();
+    window.setInterval(refreshPublishedAssignments, 15000);
+    document.addEventListener("visibilitychange", refreshPublishedAssignments);
+    window.addEventListener("focus", refreshPublishedAssignments);
+
     var dragSourceBed = null;
+    var dropTargetBed = null;
+    var dragTab = null;
+    var dragTabTimer = null;
+
+    function setDragTab(button) {
+        if (button === dragTab) return;
+        clearTimeout(dragTabTimer);
+        if (dragTab) dragTab.classList.remove("is-drag-hover");
+        dragTab = button;
+        if (!button || button.getAttribute("aria-pressed") === "true") return;
+        button.classList.add("is-drag-hover");
+        dragTabTimer = setTimeout(function () {
+            if (dragSourceBed && controlHeld && activeMapMode === "current") button.click();
+            button.classList.remove("is-drag-hover");
+        }, 450);
+    }
+
+    function setDropTarget(bed) {
+        if (dropTargetBed === bed) return;
+        if (dropTargetBed) dropTargetBed.classList.remove("is-drop-target");
+        dropTargetBed = bed;
+        if (dropTargetBed) dropTargetBed.classList.add("is-drop-target");
+    }
 
     function clearDragState() {
-        root.querySelectorAll(".is-drag-source, .is-drop-target").forEach(function (bed) {
-            bed.classList.remove("is-drag-source", "is-drop-target");
-        });
+        setDragTab(null);
+        root.classList.remove("is-dragging-resident");
+        if (dragSourceBed) dragSourceBed.classList.remove("is-drag-source");
         dragSourceBed = null;
+        setDropTarget(null);
     }
 
     root.addEventListener("dragstart", function (event) {
+        clearTimeout(avatarClickTimer);
         if (event.target.closest("[data-plan-resident]")) return;
         var handle = event.target.closest("[data-bed-drag-handle]");
         var bed = handle && handle.closest("[data-bed]");
-        if (!controlHeld || !bed || !isTransferredBed(bed) || bed.dataset.occupied !== "true" || saving) {
+        if (!controlHeld || moveSource || swapSource || !bed || !isTransferredBed(bed) || bed.dataset.occupied !== "true" || saving) {
             event.preventDefault();
             return;
         }
         dragSourceBed = bed;
+        root.classList.add("is-dragging-resident");
         bed.classList.add("is-drag-source");
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", bed.dataset.bedId);
         event.dataTransfer.setData("application/x-settlement-bed", bed.dataset.bedId);
     });
 
-    root.addEventListener("dragenter", function (event) {
-        var bed = event.target.closest("[data-bed]");
-        if (bed && !isTransferredBed(bed)) {
-            bed.classList.remove("is-drop-target");
-        }
-    });
-
     root.addEventListener("dragover", function (event) {
+        if (!dragSourceBed) return;
+        var tab = event.target.closest(".settlement-toolbar [data-dorm-filter], .settlement-toolbar [data-floor-filter]");
+        setDragTab(tab);
+        if (tab) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "none";
+            setDropTarget(null);
+            return;
+        }
         var bed = event.target.closest("[data-bed]");
         if (
             !controlHeld
-            || !dragSourceBed
             || !bed
             || bed === dragSourceBed
             || !isTransferredBed(bed)
             || bed.disabled
-            || bed.dataset.occupied === "true"
             || bed.closest("[data-floor-section]").hidden
-        ) return;
+        ) {
+            setDropTarget(null);
+            return;
+        }
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
-        root.querySelectorAll(".is-drop-target").forEach(function (candidate) {
-            if (candidate !== bed) candidate.classList.remove("is-drop-target");
-        });
-        bed.classList.add("is-drop-target");
+        setDropTarget(bed);
     });
 
     root.addEventListener("drop", function (event) {
@@ -2060,16 +3221,19 @@
             || targetBed === dragSourceBed
             || !isTransferredBed(targetBed)
             || targetBed.disabled
-            || targetBed.dataset.occupied === "true"
             || targetBed.closest("[data-floor-section]").hidden
         ) return;
         event.preventDefault();
         var sourceBed = dragSourceBed;
         clearDragState();
-        configureRelocation(sourceBed, targetBed);
+        if (targetBed.dataset.occupied === "true") startBedSwap(sourceBed, targetBed);
+        else configureRelocation(sourceBed, targetBed);
     });
 
     root.addEventListener("dragend", clearDragState);
+    root.addEventListener("dragleave", function (event) {
+        if (dragTab && dragTab.contains(event.target) && !dragTab.contains(event.relatedTarget)) setDragTab(null);
+    });
 
     root.addEventListener("dragstart", function (event) {
         var card = event.target.closest("[data-plan-resident]");
@@ -2159,12 +3323,21 @@
     root.addEventListener("dblclick", function (event) {
         var handle = event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]");
         var bed = handle && handle.closest("[data-bed]");
-        if (!bed || bed.dataset.occupied !== "true") return;
+        if (moveSource || !bed || !Number(bed.dataset.residentId) || bed.dataset.occupied !== "true") return;
+        clearTimeout(avatarClickTimer);
         event.preventDefault();
         event.stopPropagation();
-        openEmployeePanel(Number(bed.dataset.occupantId));
+        openResidentPanel(Number(bed.dataset.residentId));
     });
     panelClose.addEventListener("click", closePanel);
+    panelRoomLink.addEventListener("click", function () { openRoom(activeRoom, null); });
+    panelEmployeeLink.addEventListener("click", function () {
+        if (selectedBed) openResidentPanel(Number(selectedBed.dataset.residentId));
+    });
+    root.addEventListener("settlement:open-resident-card", function (event) {
+        openResidentPanel(Number(event.detail.residentId));
+    });
+    if (roomTransferToggle) roomTransferToggle.addEventListener("click", changeRoomTransfer);
     panelBackdrop.addEventListener("click", closePanel);
     if (employeePanelClose) employeePanelClose.addEventListener("click", closeEmployeePanel);
     if (employeePanelBackdrop) employeePanelBackdrop.addEventListener("click", closeEmployeePanel);
@@ -2194,8 +3367,15 @@
     if (autoPreviewModalBackdrop) autoPreviewModalBackdrop.addEventListener("click", function () {
         setAutoPreviewModal(false);
     });
-    if (relocateButton) relocateButton.addEventListener("click", startRelocation);
+    if (relocateButton) relocateButton.addEventListener("click", function () { startMovePicker(selectedBed); });
+    if (movePicker) movePicker.querySelector("[data-move-cancel]").addEventListener("click", cancelMovePicker);
+    if (moveReason) moveReason.addEventListener("input", updateSettleButton);
+    root.addEventListener("settlement:choose-move-bed", function (event) {
+        var id = Number(event.detail.occupancyId);
+        if (id > 0) startMovePicker(root.querySelector('[data-bed][data-occupancy-id="' + id + '"]'));
+    });
     if (releaseButton) releaseButton.addEventListener("click", confirmRelease);
+    root.addEventListener("settlement:refresh-control", refreshControlState);
     if (controlAcquireButton) controlAcquireButton.addEventListener("click", acquireControl);
     if (controlReleaseButton) controlReleaseButton.addEventListener("click", releaseControl);
     unsettledPanelToggles.forEach(function (toggle) {
@@ -2222,14 +3402,19 @@
     });
     document.addEventListener("keydown", function (event) {
         if (event.key !== "Escape") return;
+        clearTimeout(avatarClickTimer);
         if (unsettledPanel && !unsettledPanel.hidden) {
             closeUnsettledPanel(true);
         } else if (autoPreviewModal && !autoPreviewModal.hidden) {
             setAutoPreviewModal(false);
         } else if (relocationModal && !relocationModal.hidden) {
             closeRelocationModal();
+        } else if (employeePanel && !employeePanel.hidden) {
+            closeEmployeePanel();
         } else if (!panel.hidden) {
             closePanel();
+        } else if (moveSource) {
+            cancelMovePicker();
         }
     });
     employeeSearch.addEventListener("input", function () {
@@ -2243,6 +3428,13 @@
     if (assignmentEndInput) {
         assignmentEndInput.addEventListener("input", updateSettleButton);
     }
+    settlementForm.addEventListener("input", function (event) {
+        if (event.target === approveRosterException) {
+            settleButton.textContent = approveRosterException.checked ? "Заселить с нарушением" : "Заселить";
+            return;
+        }
+        setRosterCategoryException();
+    });
     settlementForm.addEventListener("submit", function (event) {
         event.preventDefault();
         if (relocationSourceBed) {
@@ -2254,7 +3446,15 @@
 
     restoreMapSelection();
     applyFilters();
-    setMapMode("current");
+    setMapMode(new URLSearchParams(window.location.search).get("mode"));
+    if (watchExtensionStateNode) {
+        acceptWatchExtensions(JSON.parse(watchExtensionStateNode.textContent), Date.now());
+        document.addEventListener("visibilitychange", resumeWatchExtensions);
+        document.addEventListener("resume", resumeWatchExtensions);
+        window.addEventListener("focus", resumeWatchExtensions);
+        window.addEventListener("pageshow", resumeWatchExtensions);
+        window.addEventListener("online", resumeWatchExtensions);
+    }
     initializeControlLifecycle();
     if (consumeAutoPreviewOpenOnce()) {
         setAutoPreviewModal(true);

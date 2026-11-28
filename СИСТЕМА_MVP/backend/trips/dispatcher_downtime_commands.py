@@ -6,6 +6,7 @@ from core.models import bump_operational_state, lock_production_state
 from downtimes.models import DowntimeEvent
 
 from .dispatcher_guards import dispatcher_access_from_request, dispatcher_json_payload
+from .dispatcher_duty import log_dispatcher_action
 from .tablet_control import get_control_shift
 
 
@@ -86,6 +87,10 @@ def execute_dispatcher_close_downtime(
 
     event.ended_at = command_time(request)
     event.save(update_fields=['ended_at'])
+    if access.role.code == 'dispatcher':
+        log_dispatcher_action(actor=access.employee, access=access, request=request, action_type='close_downtime',
+                              target_summary=f'Завершён простой техники «{event.equipment}»'[:255],
+                              duty_detail=str(event.reason))
     state = bump_operational_state(
         'Dispatcher:downtime_closed',
         event_type='downtime_changed',

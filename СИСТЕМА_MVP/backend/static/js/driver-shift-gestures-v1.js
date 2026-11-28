@@ -1,5 +1,34 @@
 /* Удержания и жесты экрана водителя: защита действий при смене роли,
    восстановление незавершённой разгрузки и сам жест разгрузки. Вынесено из driver-shift-v1.js без изменений. */
+/* Фиксируем попытку раньше обработчиков барабана и удержания. Точка
+   разгрузки остаётся видна, а состояние смены читается с живой оболочки. */
+(function () {
+    var workSurface = [
+        '[data-driver-tab-panel="work"]',
+        '[data-driver-point-sheet]',
+        '[data-driver-free-bucket-sheet]',
+        '[data-driver-manual-workspace]'
+    ].join(", ");
+
+    function guardClosedDriverWork(event) {
+        if (event.type === "keydown" && event.key !== "Enter" && event.key !== " ") return;
+        var target = event.target;
+        var surface = target && target.closest && target.closest(workSurface);
+        var shell = surface && surface.closest("[data-driver-shell]");
+        if (!shell || shell.dataset.driverShiftOpen === "true") return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (["pointerdown", "click", "keydown", "submit"].includes(event.type)
+            && typeof window.showDriverToast === "function") {
+            window.showDriverToast("Сначала начните смену", 4000);
+        }
+    }
+
+    ["pointerdown", "touchstart", "mousedown", "click", "keydown", "submit"].forEach(function (type) {
+        window.addEventListener(type, guardClosedDriverWork, {capture: true, passive: false});
+    });
+})();
+
 /* DRIVER_ROLE_HOLD_GUARD_START */
 window.createDriverRoleHoldGuard = function (options) {
     options = options || {};

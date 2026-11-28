@@ -16,6 +16,9 @@ class DispatcherActionType(models.TextChoices):
     CANCEL_TRIP = 'cancel_trip', 'Отмена рейса'
     COMPLETE_TRIP = 'complete_trip', 'Служебное завершение рейса'
     MANUAL_TRIP = 'manual_trip', 'Ручной рейс диспетчера'
+    CLOSE_DOWNTIME = 'close_downtime', 'Завершение простоя'
+    EQUIPMENT_SETTINGS = 'equipment_settings', 'Настройки экскаватора'
+    REPORT_SOURCE_CORRECTION = 'report_source_correction', 'Коррекция рейса'
 
 
 class FreeBucketAcceptanceStatus(models.TextChoices):
@@ -323,12 +326,48 @@ class DispatcherActionLog(models.Model):
     haul_assignment = models.ForeignKey('assignments.HaulAssignment', verbose_name='Назначение', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatcher_action_logs')
     target_summary = models.CharField('Краткое описание объекта', max_length=255)
     reason = models.CharField('Причина действия', max_length=255, blank=True)
+    actor_role_code = models.CharField('Роль исполнителя', max_length=64, blank=True)
+    duty_shift = models.ForeignKey(
+        'shifts.EmployeeShift', verbose_name='Собственная смена диспетчера',
+        on_delete=models.SET_NULL, null=True, blank=True, related_name='duty_operations',
+    )
+    duty_detail = models.TextField('Подробности для журнала руководства', blank=True)
     created_at = models.DateTimeField('Когда выполнено', auto_now_add=True)
 
     class Meta:
         verbose_name = 'Диспетчерское действие'
         verbose_name_plural = 'Диспетчерские действия'
         ordering = ['-created_at']
+        indexes = [models.Index(fields=['actor_role_code', 'created_at'], name='dispatch_log_role_time_idx')]
 
     def __str__(self):
         return f'{self.get_action_type_display()}: {self.target_summary}'
+
+
+class DispatcherDutyTracking(models.Model):
+    """Дата начала достоверного учёта поста, в том числе непринятых смен."""
+
+    started_at = models.DateTimeField('Начало учёта', default=timezone.now)
+    history_from = models.DateField('Показывать смены с', null=True, blank=True)
+
+
+class DispatcherDutyWindow(models.Model):
+    class State(models.TextChoices):
+        VISIBLE = 'visible', 'Пульт на экране'
+        HIDDEN = 'hidden', 'Пульт свёрнут'
+        CLOSED = 'closed', 'Окно закрыто'
+        SIGNED_OUT = 'signed_out', 'Выход из приложения'
+        ARCHIVE_VISIBLE = 'archive_visible', 'Архивная отметка открытого пульта'
+
+    shift = models.ForeignKey('shifts.EmployeeShift', on_delete=models.CASCADE, related_name='duty_windows')
+    session_digest = models.CharField('Отпечаток сессии', max_length=64)
+    window_id = models.UUIDField('Окно пульта')
+    state = models.CharField('Состояние', max_length=16, choices=State.choices)
+    started_at = models.DateTimeField('Начало интервала')
+    last_seen_at = models.DateTimeField('Последнее подтверждение')
+    last_sequence = models.PositiveBigIntegerField('Номер сигнала')
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['shift', 'session_digest', 'window_id', '-id'], name='dispatch_window_latest_idx'),
+        ]

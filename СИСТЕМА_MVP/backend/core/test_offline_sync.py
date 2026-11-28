@@ -2040,6 +2040,52 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(claim_conflict.json()['results'][0]['code'], 'event_id_reused')
         self.assertEqual(OfflineFieldEventConflict.objects.count(), 2)
 
+    def test_standard_load_reuses_known_trip_and_keeps_ambiguous_event_for_review(self):
+        initial = self.load_event('guarded-initial', 1)
+        initial['payload']['load_intent'] = 'standard'
+        accepted = self.sync([initial]).json()['results'][0]
+        self.assertEqual(accepted['status'], 'accepted', accepted)
+        trip_id = accepted['server_ids']['trip_id']
+
+        repeat = self.load_event('guarded-repeat', 2)
+        repeat['payload'].update(load_intent='standard', expected_open_trip_id=trip_id)
+        result = self.sync([repeat]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['load_already_recorded'])
+        self.assertEqual(result['server_ids']['trip_id'], trip_id)
+
+        unseen = self.load_event('guarded-unseen', 3)
+        unseen['payload']['load_intent'] = 'standard'
+        result = self.sync([unseen]).json()['results'][0]
+        self.assertEqual(result['code'], 'new_load_confirmation_required')
+        self.assertEqual(OfflineFieldEvent.objects.get(event_id=unseen['event_id']).status,
+                         OfflineFieldEventStatus.CONFLICT)
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertEqual(TripClientAction.objects.filter(action_type='truck_loaded').count(), 1)
+
+    def test_confirmed_offline_cycle_links_to_pending_load_and_keeps_device_time(self):
+        opened_at = timezone.now() - timedelta(minutes=12)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(opened_at=opened_at)
+        HaulAssignment.objects.filter(pk=self.assignment.pk).update(assigned_at=opened_at)
+        initial = self.load_event('guarded-offline-first', 1, occurred_at=opened_at + timedelta(minutes=1))
+        initial['payload']['load_intent'] = 'standard'
+        next_at = opened_at + timedelta(minutes=8)
+        second = self.load_event('guarded-offline-new', 2, occurred_at=next_at)
+        second['depends_on'] = [initial['event_id']]
+        second['payload'].update(load_intent='new_cycle', expected_open_trip_local_id=initial['local_trip_id'])
+        results = self.sync([initial, second]).json()['results']
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        old, new = Trip.objects.order_by('id')
+        self.assertEqual(old.superseded_by_id, new.pk)
+        self.assertEqual(new.loaded_at, next_at)
+        self.assertEqual(new.status, TripStatus.LOADED_WAITING_UNLOAD)
+
+        stale = self.load_event('guarded-offline-stale', 3)
+        stale['payload'].update(load_intent='new_cycle', expected_open_trip_id=old.pk)
+        result = self.sync([stale]).json()['results'][0]
+        self.assertEqual(result['code'], 'new_load_confirmation_outdated')
+        self.assertEqual(Trip.objects.count(), 2)
+
     def test_partial_batch_and_dependency_local_trip_mapping(self):
         first = self.load_event('load-chain-1', 10)
         second = self.load_event('load-chain-2', 11)
@@ -2277,6 +2323,87 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(opened.started_at, receipt.received_at)
         self.assertEqual(closed.ended_at, receipt.received_at)
         self.assertIsNone(opened.ended_at)
+
+    def test_excavator_load_without_open_driver_shift_is_recorded_once(self):
+        self._open_shift_two_hours_ago()
+        now = timezone.now()
+        self.truck_shift.closed_at = now - timedelta(minutes=2)
+        self.truck_shift.save(update_fields=['closed_at'])
+        event = self.load_event(occurred_at=now - timedelta(minutes=1))
+        event['payload']['manual_control'] = False
+
+        result = self.sync([event]).json()['results'][0]
+        replay = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(replay['status'], 'deduplicated', replay)
+        self.assertEqual(replay['server_ids']['trip_id'], result['server_ids']['trip_id'])
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loading_shift_id, self.shift.id)
+        self.assertEqual(trip.truck_id, self.truck.id)
+        self.assertTrue(trip.driver_participation_recorded)
+        self.assertIsNone(trip.driver_control_shift_id)
+        self.truck_shift.refresh_from_db()
+        self.assertIsNotNone(self.truck_shift.closed_at)
+
+        from shifts.services import open_driver_shift_from_device
+
+        loading_time = trip.loaded_at
+        driver_shift, created, _ = open_driver_shift_from_device(
+            employee=self.driver, equipment=self.truck, shift_type=self.truck_shift.shift_type,
+            readings={
+                'start_fuel': self.truck_shift.start_fuel,
+                'start_mileage': self.truck_shift.start_mileage,
+                'start_engine_hours': self.truck_shift.start_engine_hours,
+            },
+            client_action_id='driver-opens-after-excavator-load',
+            opened_at=timezone.now(),
+        )
+        self.assertTrue(created)
+        trip.refresh_from_db()
+        self.assertEqual(trip.driver_control_shift_id, driver_shift.pk)
+        self.assertEqual(trip.excavator_operator_id, self.operator.id)
+        self.assertEqual(trip.loaded_at, loading_time)
+        self.assertIsNone(trip.completed_at)
+        client = self.driver_client()
+        screen = client.get(reverse('driver_shift'))
+        self.assertContains(screen, f'data-driver-active-trip-id="{trip.pk}"')
+
+        unload = {
+            'event_id': 'driver-unloads-inherited-trip',
+            'event_type': 'driver.trip.unloaded',
+            'format_version': 1,
+            'occurred_at': (driver_shift.opened_at + timedelta(seconds=1)).isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': driver_shift.pk,
+            'equipment_id': self.truck.pk,
+            'trip_id': trip.pk,
+            'payload': {'trip_id': trip.pk},
+        }
+        result = self.sync([unload], client=client, role_code='driver').json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        trip.refresh_from_db()
+        self.assertEqual(trip.unloading_shift_id, driver_shift.pk)
+        self.assertEqual(trip.excavator_operator_id, self.operator.id)
+        self.assertEqual(trip.loaded_at, loading_time)
+
+    def test_queued_excavator_load_can_arrive_after_driver_shift_opens(self):
+        self._open_shift_two_hours_ago()
+        self.truck_shift.opened_at = timezone.now()
+        self.truck_shift.workplace_code = 'driver'
+        self.truck_shift.save(update_fields=['opened_at', 'workplace_code'])
+        loaded_at = self.truck_shift.opened_at - timedelta(minutes=1)
+        event = self.load_event(occurred_at=loaded_at)
+        event['payload']['manual_control'] = False
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.pk)
+        self.assertEqual(trip.loaded_at, loaded_at)
+        self.assertEqual(trip.loading_shift_id, self.shift.pk)
 
     def test_sent_live_event_is_applied_at_the_server_receipt(self):
         """Событие ушло сразу после нажатия — время сервера и есть настоящее.
@@ -3046,6 +3173,24 @@ class OfflineEventSyncTests(TestCase):
         self.assertTrue(
             HaulAssignment.objects.filter(truck=self.truck, excavator=self.excavator).exists()
         )
+
+    def test_incoming_assignment_load_does_not_fall_back_to_free_bucket(self):
+        from assignments.services import schedule_haul_assignment
+
+        self.assignment.excavator = self.other_excavator
+        self.assignment.save(update_fields=['excavator'])
+        incoming, created = schedule_haul_assignment(truck=self.truck, excavator=self.excavator)
+        self.assertTrue(created)
+        self.assertEqual(incoming.status, AssignmentStatus.PENDING)
+        event = self.load_event('load-during-incoming-transfer', 1)
+        event['payload']['assignment_id'] = incoming.id
+
+        result = self.sync([event]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        self.assertEqual(trip.truck_id, self.truck.id)
+        self.assertFalse(FreeBucketAcceptance.objects.filter(truck=self.truck).exists())
 
     def test_load_of_truck_openly_assigned_elsewhere_goes_through_free_bucket(self):
         """Самосвал открыто числится за ДРУГИМ экскаватором — грузим через свободный ковш.

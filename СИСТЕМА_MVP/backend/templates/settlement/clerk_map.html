@@ -2,14 +2,23 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v34">
+<link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-toolbar-v2-swap-picker-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-map-header.css' %}?v={{ static_asset_release }}-map-header-v1-next-excel">
+<link rel="stylesheet" href="{% static 'css/settlement-floor-heading.css' %}?v={{ static_asset_release }}-floor-heading-v1">
 {% endblock %}
 
-{% block clerk_shell_class %}settlement-shell{% endblock %}
 {% block clerk_shell_attributes %}data-settlement-root
+     data-control-role="{{ access.role.code }}"
      data-employee-search-url="{% url 'settlement_employee_search' %}"
-     data-employee-detail-url="{% url 'settlement_employee_detail' 0 %}"
+     data-resident-detail-url="{% url 'settlement_resident_detail' 0 %}"
      data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"
+     data-room-transfer-url="{% url 'settlement_room_transfer' %}"
+     data-assignments-url="{% url 'settlement_map_assignments' %}"
+     data-watch-extensions-url="{% url 'settlement_clerk_extensions' %}"
+     data-external-resident-search-url="{% url 'settlement_external_resident_search' %}"
+     data-external-resident-create-url="{% url 'settlement_external_resident_create' %}"
      data-control-acquire-url="{% url 'settlement_control_acquire' %}"
      data-control-heartbeat-url="{% url 'settlement_control_heartbeat' %}"
      data-control-release-url="{% url 'settlement_control_release' %}"
@@ -20,32 +29,96 @@
      data-auto-exclude-url="{% url 'settlement_auto_preview_exclude' %}"
      data-auto-restore-url="{% url 'settlement_auto_preview_restore' %}"
      data-auto-apply-night-url="{% url 'settlement_auto_preview_apply_night' %}"
-     data-auto-apply-day-url="{% url 'settlement_auto_preview_apply_day' %}"{% endblock %}
+     data-auto-apply-day-url="{% url 'settlement_auto_preview_apply_day' %}"
+     data-temporary-state-url="{% url 'settlement_temporary_state' %}"
+     data-resident-search-url="{% url 'settlement_resident_search' %}"
+     data-bed-preparation-prepare-url="{% url 'settlement_bed_preparation_prepare' %}"
+     data-bed-preparation-suggest-url="{% url 'settlement_bed_preparation_suggest' %}"
+     data-bed-preparation-confirm-url="{% url 'settlement_bed_preparation_confirm' 0 %}"
+     data-bed-preparation-cancel-url="{% url 'settlement_bed_preparation_cancel' 0 %}"
+     data-bed-preparation-extend-url="{% url 'settlement_bed_preparation_extend' 0 %}"
+     data-temporary-relocate-url="{% url 'settlement_temporary_relocate' %}"
+     data-temporary-release-url="{% url 'settlement_temporary_release' %}"
+     data-bed-reserve-url="{% url 'settlement_bed_reserve' %}"
+     data-control-takeover-url="{% url 'settlement_control_takeover' %}"
+     data-clerk-shift-state-url="{% url 'settlement_clerk_shift_state' %}"
+     data-clerk-shift-open-url="{% url 'settlement_clerk_shift_open' %}"
+     data-clerk-shift-close-url="{% url 'settlement_clerk_shift_close' %}"
+     data-clerk-shift-handover-url="{% url 'settlement_clerk_shift_handover' %}"
+     data-current-date="{{ current_date|date:'Y-m-d' }}"{% endblock %}
 
 {% block clerk_content %}
     <main class="admin-console-page settlement-page">
-        <nav class="settlement-map-modes" aria-label="Режим карты">
-            <button type="button" class="is-active" data-map-mode="current" aria-pressed="true">Текущая вахта</button>
-            <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
-        </nav>
-
-        <section class="settlement-control-panel"
-                 data-control-panel
-                 data-control-state="free"
-                 aria-label="Управление расселением">
-            <i class="settlement-control-indicator" aria-hidden="true"></i>
-            <div class="settlement-control-copy" role="status" aria-live="polite" aria-atomic="true">
-                <strong data-control-status>Управление не начато</strong>
-                <small data-control-message>Проверяем состояние текущей сессии…</small>
+        <div class="settlement-map-entry">
+            <nav class="settlement-map-modes" aria-label="Режим карты">
+                <button type="button" class="is-active" data-map-mode="current" aria-pressed="true">Текущая вахта</button>
+                <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
+            </nav>
+            <div class="settlement-map-entry__excel" data-current-excel role="group" aria-label="Обмен с Excel">
+                <a href="{% url 'settlement_current_housing_import' %}" title="Выбрать файл для проверки и загрузки расселения">
+                    <svg viewBox="0 0 30 26" aria-hidden="true" focusable="false">
+                        <path d="M3 2h11l5 5v17H3z M14 2v5h5 M6 11h10v8H6z M6 15h10 M11 11v8"/>
+                        <path d="M21 14h7m-4-4 4 4-4 4"/>
+                    </svg>
+                    <span>Загрузить из Excel</span>
+                </a>
+                <a href="{% url 'settlement_current_housing_export' %}" title="Скачать текущее расселение КИС-5 и КИС-6">
+                    <svg viewBox="0 0 30 26" aria-hidden="true" focusable="false">
+                        <path d="M3 2h11l5 5v17H3z M14 2v5h5 M6 11h10v8H6z M6 15h10 M11 11v8"/>
+                        <path d="M25 12v10m-4-4 4 4 4-4"/>
+                    </svg>
+                    <span>Скачать в Excel</span>
+                </a>
             </div>
-            <div class="settlement-control-actions">
-                <button type="button" data-control-acquire disabled>Начать работу</button>
-                <button type="button" data-control-release disabled>Завершить работу</button>
-            </div>
-        </section>
+            <button type="button" class="settlement-template-trigger" data-watch-template-open
+                    aria-haspopup="dialog" aria-controls="settlement-watch-template-dialog">
+                Сохранить как шаблон вахты
+            </button>
+            <section class="settlement-control-panel"
+                     data-control-panel
+                     data-control-state="free"
+                     aria-label="Управление расселением">
+                <i class="settlement-control-indicator" aria-hidden="true"></i>
+                <div class="settlement-control-copy" role="status" aria-live="polite" aria-atomic="true">
+                    <strong data-control-status>Управление не начато</strong>
+                    <small data-control-message>Проверяем состояние текущей сессии…</small>
+                    <small class="settlement-control-feedback" data-control-feedback hidden></small>
+                </div>
+                <div class="settlement-control-actions">
+                    <button type="button" data-control-acquire disabled>Начать работу</button>
+                    <button type="button" data-control-release disabled>Завершить работу</button>
+                    {% if access.role.code == 'admin' %}
+                        <button type="button" class="settlement-control-takeover" data-control-takeover>Забрать управление</button>
+                    {% endif %}
+                </div>
+                <div class="settlement-clerk-shift" data-clerk-shift aria-live="polite">
+                    <details class="settlement-shift-info">
+                        <summary data-clerk-shift-label>Смена</summary>
+                        <div class="settlement-clerk-shift-copy">
+                            <small data-clerk-shift-status>Смена делопроизводителя: проверяем…</small>
+                            <small data-clerk-shift-watch hidden></small>
+                        </div>
+                    </details>
+                    <div class="settlement-clerk-shift-actions">
+                        <button type="button" data-clerk-shift-open hidden disabled>Открыть смену</button>
+                        <button type="button" data-clerk-shift-close hidden disabled>Закрыть смену</button>
+                        <button type="button" data-clerk-shift-handover hidden disabled>Принять вахту</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+        <p class="settlement-swap-notice" data-swap-notice role="status" hidden></p>
+        {{ watch_extensions|json_script:"settlement-watch-extension-state" }}
 
         <section class="settlement-map-mode-panel" data-map-mode-panel="current">
         <section class="settlement-toolbar" aria-label="Фильтры физической карты">
+            <div class="settlement-move-picker" data-move-picker hidden>
+                <div role="status">
+                    <strong data-move-person></strong>
+                    <span data-move-hint>Выберите общежитие, этаж и нажмите свободную койку.</span>
+                </div>
+                <button type="button" data-move-cancel>Отмена</button>
+            </div>
             <time class="settlement-current-date" datetime="{{ current_date|date:'Y-m-d' }}">
                 <span>Дата проверки</span>
                 <strong>{{ current_date|date:"d.m.Y" }}</strong>
@@ -67,53 +140,61 @@
                 </div>
             </fieldset>
 
-            <label class="settlement-search-field" for="settlement-search">
-                <span>Поиск</span>
-                <input id="settlement-search"
-                       type="search"
-                       autocomplete="off"
-                       placeholder="Комната или ID койки"
-                       data-settlement-search>
-            </label>
+            <div class="settlement-map-searches">
+                <label class="settlement-search-field" for="settlement-search">
+                    <span>Номер комнаты или ID койки во всех общежитиях</span>
+                    <input id="settlement-search" type="search" autocomplete="off"
+                           placeholder="Номер комнаты" role="combobox" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="settlement-room-matches" data-settlement-search>
+                </label>
+                <div class="settlement-search-popup" data-room-popup hidden>
+                    <div id="settlement-room-matches" role="listbox" aria-label="Найденные комнаты"></div>
+                    <p role="status" hidden>Комнаты не найдены.</p>
+                </div>
+                <label class="settlement-search-field" for="settlement-resident-finder">
+                    <span>Фамилия жильца или табельный номер во всех общежитиях</span>
+                    <input id="settlement-resident-finder" type="search" autocomplete="off"
+                           placeholder="Фамилия жильца или таб. №" role="combobox" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="settlement-resident-matches">
+                </label>
+                <div class="settlement-search-popup" data-resident-popup hidden>
+                    <div id="settlement-resident-matches" role="listbox" aria-label="Найденные жильцы"></div>
+                    <p role="status" data-resident-search-empty hidden>На карте совпадений нет. Для заселения выберите свободную койку.</p>
+                </div>
+            </div>
 
-            <button type="button"
-                    class="settlement-work-badge"
-                    data-unsettled-panel-toggle
-                    aria-controls="settlement-unsettled-panel"
-                    aria-label="Открыть панель нерасселённых сотрудников"
-                    aria-expanded="false">
-                <i aria-hidden="true"></i>
-                <span>Нерасселённые</span>
-                <b data-unsettled-toggle-count>{{ unsettled_employee_count }}</b>
-            </button>
-        </section>
+            <div class="settlement-resident-lists" role="group" aria-label="Списки жильцов">
+                <button type="button"
+                        class="settlement-work-badge"
+                        data-unsettled-panel-toggle
+                        aria-controls="settlement-unsettled-panel"
+                        aria-label="Открыть панель нерасселённых сотрудников"
+                        aria-expanded="false">
+                    <i aria-hidden="true"></i>
+                    <span>Нерасселённые</span>
+                    <b data-unsettled-toggle-count>{{ unsettled_employee_count }}</b>
+                </button>
 
-        <section class="settlement-summary" aria-label="Статистика выбранного этажа" aria-live="polite">
-            <article>
-                <span>Комнаты</span>
-                <strong data-selected-room-count>—</strong>
-                <small>на выбранном этаже</small>
-            </article>
-            <article class="is-primary">
-                <span>Передано</span>
-                <strong data-selected-transferred-room-count>—</strong>
-                <small>комнат</small>
-            </article>
-            <article>
-                <span>Свободно</span>
-                <strong data-free-bed-count>—</strong>
-                <small>коек</small>
-            </article>
-            <article>
-                <span>Занято</span>
-                <strong data-occupied-bed-count>—</strong>
-                <small>коек</small>
-            </article>
-            <article class="is-unavailable">
-                <span>Недоступно</span>
-                <strong data-selected-unavailable-bed-count>—</strong>
-                <small>коек</small>
-            </article>
+                <button type="button"
+                        class="settlement-external-residents-trigger"
+                        data-external-residents-toggle
+                        aria-controls="settlement-external-residents-modal"
+                        aria-haspopup="dialog"
+                        aria-expanded="false">
+                    Внешние жильцы
+                </button>
+                <details class="settlement-watch-extensions" data-watch-extensions>
+                    <summary>На продлении <b data-watch-extension-count>{{ watch_extensions.entries|length }}</b></summary>
+                    <div class="settlement-watch-extensions__content">
+                        <ul data-watch-extension-list aria-label="Жильцы на продлении">
+                            {% for entry in watch_extensions.entries %}
+                                <li><strong>{{ entry.name }}</strong>{% include "settlement/_personnel_number.html" with number=entry.personnel_number only %}<small>{{ entry.location }} · по {{ entry.ends_on }}</small></li>
+                            {% endfor %}
+                        </ul>
+                        <p data-watch-extension-empty{% if watch_extensions.entries %} hidden{% endif %}>Сейчас жильцов на продлении нет.</p>
+                    </div>
+                </details>
+            </div>
         </section>
 
         {% if dormitories %}
@@ -123,36 +204,7 @@
                              data-dormitory-section="{{ dormitory.model.number }}"{% if dormitory.model.number != "5" %} hidden{% endif %}>
                         <div class="settlement-floors">
                             {% for floor in dormitory.floors %}
-                                <section class="settlement-floor"
-                                         data-dormitory="{{ dormitory.model.number }}"
-                                         data-floor-section="{{ floor.number }}"{% if dormitory.model.number != "5" or floor.number != 1 %} hidden{% endif %}>
-                                    <header>
-                                        <div>
-                                            <span>Выбранный план</span>
-                                            <h2>{{ dormitory.label }} · {{ floor.number }} этаж</h2>
-                                        </div>
-                                        <p>{{ floor.transferred_count }} из {{ floor.room_count }} комнат передано</p>
-                                    </header>
-                                    <div class="settlement-floor-scroll">
-                                        <div class="settlement-floor-plan"
-                                             data-side-slots="{{ floor.rows|length }}"
-                                             style="--settlement-side-slots: {{ floor.rows|length }};">
-                                            <div class="settlement-side settlement-side-left" aria-label="Верхний ряд комнат">
-                                                {% for row in floor.rows %}
-                                                    {% include "settlement/_room_card.html" with room=row.left side="left" only %}
-                                                {% endfor %}
-                                            </div>
-                                            <div class="settlement-corridor">
-                                                <span>Коридор</span>
-                                            </div>
-                                            <div class="settlement-side settlement-side-right" aria-label="Нижний ряд комнат">
-                                                {% for row in floor.rows %}
-                                                    {% include "settlement/_room_card.html" with room=row.right side="right" only %}
-                                                {% endfor %}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </section>
+                                {% include "settlement/_map_floor.html" with dormitory=dormitory floor=floor only %}
                             {% endfor %}
                         </div>
                     </article>
@@ -171,6 +223,8 @@
                 <div>
                     <span>План без изменения фактического проживания</span>
                     <h2>Следующий заезд</h2>
+                    <a class="settlement-auto-preview-trigger" href="{% url 'next_housing_import' %}">Прошлое расселение из Excel</a>
+                    <a class="settlement-auto-preview-trigger" href="{% url 'settlement_provisional_period' %}">Рассчитать по готовым</a>
                 </div>
                 <fieldset class="settlement-filter-group">
                     <legend>Общежитие</legend>
@@ -194,6 +248,41 @@
                     Подготовить план
                 </button>
             </header>
+            <section class="settlement-one-button"
+                     data-settlement-one-button
+                     aria-labelledby="settlement-one-button-title">
+                <header class="settlement-one-button-header">
+                    <div>
+                        <span>Расчёт → исключения → подтверждение → применение</span>
+                        <h2 id="settlement-one-button-title">Авторасселение вахты</h2>
+                    </div>
+                    <button type="button" class="settlement-one-button-refresh" data-one-button-refresh>Обновить</button>
+                </header>
+                <p class="settlement-one-button-context">Расчёт идёт по утверждённому составу заезда и не меняет карту до применения. Ручной разбор — только для строк из списка исключений.</p>
+                <p class="settlement-one-button-lease-hint" data-one-button-lease-hint hidden></p>
+                <p class="settlement-one-button-empty" data-one-button-empty hidden></p>
+                <div class="settlement-one-button-feedback" data-one-button-feedback role="status" aria-live="polite" hidden></div>
+                <div class="settlement-one-button-cohort" data-one-button-cohort-row hidden>
+                    <label class="settlement-one-button-cohort-field">
+                        <span>Утверждённый состав и период</span>
+                        <select data-one-button-cohort aria-label="Утверждённый состав заезда"></select>
+                    </label>
+                    <p class="settlement-one-button-cohort-copy" data-one-button-cohort-copy></p>
+                </div>
+                <div class="settlement-one-button-progress" data-one-button-progress role="status" aria-live="polite" hidden>
+                    <span class="settlement-one-button-spinner" aria-hidden="true"></span>
+                    <strong data-one-button-progress-label>Расчёт выполняется…</strong>
+                    <span data-one-button-progress-elapsed>0 с</span>
+                </div>
+                <div class="settlement-one-button-actions">
+                    <button type="button" class="settlement-one-button-primary" data-one-button-calculate>Рассчитать расселение</button>
+                    <button type="button" data-one-button-confirm hidden>Подтвердить</button>
+                    <button type="button" class="is-danger" data-one-button-apply hidden>Применить</button>
+                </div>
+                <section class="settlement-one-button-summary" data-one-button-summary aria-label="Сводка авторасселения" hidden></section>
+                <section class="settlement-one-button-exceptions" data-one-button-exceptions aria-label="Исключения авторасселения" hidden></section>
+                <section class="settlement-one-button-shifts" data-one-button-shifts aria-label="Применение по сменам" hidden></section>
+            </section>
             <div class="settlement-plan-status" data-plan-status role="status" aria-live="polite">
                 Выберите утверждённый состав и подготовьте план следующего заезда.
             </div>
@@ -286,6 +375,231 @@
         </footer>
     </section>
 
+    <div class="settlement-external-residents-backdrop" data-external-residents-backdrop hidden></div>
+    <section class="settlement-external-residents-modal"
+             id="settlement-external-residents-modal"
+             data-external-residents-modal
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="settlement-external-residents-title"
+             aria-describedby="settlement-external-residents-registry-hint"
+             aria-hidden="true"
+             hidden>
+        <header class="settlement-external-residents-header">
+            <div>
+                <span>Поиск и создание карточки</span>
+                <h2 id="settlement-external-residents-title">Внешние жильцы</h2>
+                <p>Подрядчики, командированные и другие внешние жильцы</p>
+            </div>
+            <button type="button"
+                    class="settlement-room-panel-close"
+                    data-external-residents-close
+                    aria-label="Закрыть окно внешних жильцов">×</button>
+        </header>
+
+        <div class="settlement-external-residents-body">
+            <p class="settlement-external-residents-registry-hint"
+               id="settlement-external-residents-registry-hint">
+                Чтобы оформить проживание, нажмите свободную койку на карте. Для будущего приезда выберите «Подготовить место».
+            </p>
+
+            <label class="settlement-external-residents-search" for="settlement-external-residents-search">
+                <span>Поиск</span>
+                <input id="settlement-external-residents-search"
+                       type="search"
+                       autocomplete="off"
+                       placeholder="ФИО, организация, телефон или должность"
+                       aria-describedby="settlement-external-residents-count"
+                       data-external-residents-search-input>
+            </label>
+
+            <p class="settlement-external-residents-count"
+               id="settlement-external-residents-count"
+               role="status"
+               aria-live="polite"
+               tabindex="-1"
+               data-external-residents-count>Начните вводить ФИО, организацию или телефон</p>
+
+            <div class="settlement-external-residents-results"
+                 data-external-residents-results
+                 tabindex="-1"
+                 aria-label="Найденные внешние жильцы"
+                 hidden></div>
+
+            <p class="settlement-external-residents-empty" data-external-residents-empty hidden>
+                Внешние жильцы не найдены. Проверьте ФИО, организацию или телефон.
+            </p>
+
+            <p class="settlement-external-residents-lease-hint" data-external-residents-lease-hint hidden>
+                Создание доступно при активном управлении. Нажмите «Начать работу» на карте.
+            </p>
+
+            <p class="settlement-external-residents-feedback"
+               data-external-residents-feedback
+               role="status"
+               aria-live="polite"
+               hidden></p>
+
+            <div class="settlement-external-residents-actions">
+                <button type="button"
+                        class="settlement-external-residents-open-form"
+                        data-external-residents-create-toggle
+                        aria-controls="settlement-external-residents-create-form"
+                        aria-expanded="false">
+                    Создать карточку
+                </button>
+            </div>
+
+            <form class="settlement-external-residents-form"
+                  id="settlement-external-residents-create-form"
+                  data-external-residents-create-form
+                  novalidate
+                  hidden>
+                {% csrf_token %}
+                <h3>Новая карточка внешнего жильца</h3>
+                <p class="settlement-external-residents-form-note">Все поля обязательны.</p>
+
+                <label class="settlement-external-residents-field" for="settlement-external-resident-type">
+                    <span>Тип жильца</span>
+                    <select id="settlement-external-resident-type"
+                            name="resident_type"
+                            required
+                            aria-describedby="settlement-external-resident-type-error"
+                            data-external-resident-field="resident_type">
+                        <option value="">Выберите тип</option>
+                        <option value="CONTRACTOR">Сотрудник подрядчика</option>
+                        <option value="BUSINESS_TRIP">Командированный</option>
+                        <option value="EXTERNAL_OTHER">Другой внешний жилец</option>
+                    </select>
+                    <small class="settlement-external-residents-field-error"
+                           id="settlement-external-resident-type-error"
+                           data-external-resident-error="resident_type"
+                           hidden></small>
+                </label>
+
+                <label class="settlement-external-residents-field" for="settlement-external-resident-full-name">
+                    <span>ФИО</span>
+                    <input id="settlement-external-resident-full-name"
+                           type="text"
+                           name="full_name"
+                           autocomplete="off"
+                           required
+                           aria-describedby="settlement-external-resident-full-name-error"
+                           data-external-resident-field="full_name">
+                    <small class="settlement-external-residents-field-error"
+                           id="settlement-external-resident-full-name-error"
+                           data-external-resident-error="full_name"
+                           hidden></small>
+                </label>
+
+                <label class="settlement-external-residents-field" for="settlement-external-resident-organization">
+                    <span>Организация</span>
+                    <input id="settlement-external-resident-organization"
+                           type="text"
+                           name="organization"
+                           autocomplete="off"
+                           required
+                           aria-describedby="settlement-external-resident-organization-error"
+                           data-external-resident-field="organization">
+                    <small class="settlement-external-residents-field-error"
+                           id="settlement-external-resident-organization-error"
+                           data-external-resident-error="organization"
+                           hidden></small>
+                </label>
+
+                <label class="settlement-external-residents-field" for="settlement-external-resident-position">
+                    <span>Должность или профессия</span>
+                    <input id="settlement-external-resident-position"
+                           type="text"
+                           name="position_title"
+                           autocomplete="off"
+                           required
+                           aria-describedby="settlement-external-resident-position-error"
+                           data-external-resident-field="position_title">
+                    <small class="settlement-external-residents-field-error"
+                           id="settlement-external-resident-position-error"
+                           data-external-resident-error="position_title"
+                           hidden></small>
+                </label>
+
+                <label class="settlement-external-residents-field" for="settlement-external-resident-phone">
+                    <span>Телефон</span>
+                    <input id="settlement-external-resident-phone"
+                           type="tel"
+                           name="phone"
+                           autocomplete="off"
+                           required
+                           aria-describedby="settlement-external-resident-phone-error"
+                           data-external-resident-field="phone">
+                    <small class="settlement-external-residents-field-error"
+                           id="settlement-external-resident-phone-error"
+                           data-external-resident-error="phone"
+                           hidden></small>
+                </label>
+
+                <fieldset class="settlement-external-residents-field"
+                          aria-describedby="settlement-external-resident-sex-error"
+                          data-external-resident-field="sex">
+                    <legend>Пол <small>нужно для подбора комнаты</small></legend>
+                    <div class="settlement-external-residents-sex-options">
+                        <label for="settlement-external-resident-sex-male">
+                            <input id="settlement-external-resident-sex-male"
+                                   type="radio"
+                                   name="external_resident_sex"
+                                   value="male"
+                                   data-external-resident-sex>
+                            Мужской
+                        </label>
+                        <label for="settlement-external-resident-sex-female">
+                            <input id="settlement-external-resident-sex-female"
+                                   type="radio"
+                                   name="external_resident_sex"
+                                   value="female"
+                                   data-external-resident-sex>
+                            Женский
+                        </label>
+                    </div>
+                    <small class="settlement-external-residents-field-error"
+                           id="settlement-external-resident-sex-error"
+                           data-external-resident-error="sex"
+                           hidden></small>
+                </fieldset>
+
+                <section class="settlement-external-residents-duplicates"
+                         data-external-residents-duplicates
+                         aria-live="polite"
+                         hidden>
+                    <strong>Похожая карточка уже есть</strong>
+                    <p>Проверьте совпадение перед созданием: возможно, жилец уже заведён.</p>
+                    <ul data-external-residents-duplicate-list></ul>
+                    <div class="settlement-external-residents-duplicates-actions">
+                        <button type="button" data-external-residents-confirm-duplicate>Всё равно создать</button>
+                        <button type="button"
+                                class="settlement-external-residents-secondary"
+                                data-external-residents-dismiss-duplicate>Отмена</button>
+                    </div>
+                </section>
+
+                <div class="settlement-external-residents-form-actions">
+                    <button type="submit" data-external-residents-submit>Создать карточку</button>
+                    <button type="button"
+                            class="settlement-external-residents-secondary"
+                            data-external-residents-create-cancel>Отмена</button>
+                </div>
+            </form>
+        </div>
+
+        <footer class="settlement-external-residents-footer">
+            <button type="button"
+                    class="settlement-external-residents-secondary"
+                    data-external-residents-start-work
+                    hidden>Закрыть и начать работу</button>
+            <button type="button"
+                    class="settlement-relocation-cancel"
+                    data-external-residents-close>Закрыть</button>
+        </footer>
+    </section>
+
     <aside class="settlement-unsettled-panel"
            id="settlement-unsettled-panel"
            data-unsettled-panel
@@ -306,29 +620,37 @@
         </header>
 
         <div class="settlement-unsettled-panel-tools">
-            <div class="settlement-unsettled-panel-count" aria-live="polite">
-                Найдено: <strong data-unsettled-visible-count>{{ unsettled_employee_count }}</strong>
-            </div>
-            <label class="settlement-unsettled-search" for="settlement-unsettled-search">
-                <span>Поиск по ФИО или табельному номеру</span>
-                <input id="settlement-unsettled-search"
-                       type="search"
-                       autocomplete="off"
-                       placeholder="Начните вводить ФИО или табельный номер"
-                       data-unsettled-search>
-            </label>
-            <fieldset class="settlement-unsettled-shift-filter">
-                <legend>Смена</legend>
-                <div class="settlement-filter-buttons">
-                    <button type="button" class="is-active" data-unsettled-shift-filter="all" aria-pressed="true">Все</button>
-                    <button type="button" data-unsettled-shift-filter="day" aria-pressed="false">День</button>
-                    <button type="button" data-unsettled-shift-filter="night" aria-pressed="false">Ночь</button>
-                    <button type="button" data-unsettled-shift-filter="early" aria-pressed="false">Ранняя</button>
+            <div class="settlement-temporary-scope">
+                <div class="settlement-filter-buttons" role="group" aria-label="Раздел панели">
+                    <button type="button" class="is-active" data-temporary-scope="unsettled" aria-pressed="true">Нерасселённые</button>
+                    <button type="button" data-temporary-scope="temporary" aria-pressed="false">Временные <b data-temporary-scope-count hidden>0</b></button>
                 </div>
-            </fieldset>
+            </div>
+            <div class="settlement-unsettled-tools-fields" data-unsettled-fields>
+                <div class="settlement-unsettled-panel-count" aria-live="polite">
+                    Найдено: <strong data-unsettled-visible-count>{{ unsettled_employee_count }}</strong>
+                </div>
+                <label class="settlement-unsettled-search" for="settlement-unsettled-search">
+                    <span>Поиск по ФИО или табельному номеру</span>
+                    <input id="settlement-unsettled-search"
+                           type="search"
+                           autocomplete="off"
+                           placeholder="Начните вводить ФИО или табельный номер"
+                           data-unsettled-search>
+                </label>
+                <fieldset class="settlement-unsettled-shift-filter">
+                    <legend>Смена</legend>
+                    <div class="settlement-filter-buttons">
+                        <button type="button" class="is-active" data-unsettled-shift-filter="all" aria-pressed="true">Все</button>
+                        <button type="button" data-unsettled-shift-filter="day" aria-pressed="false">День</button>
+                        <button type="button" data-unsettled-shift-filter="night" aria-pressed="false">Ночь</button>
+                        <button type="button" data-unsettled-shift-filter="early" aria-pressed="false">Ранняя</button>
+                    </div>
+                </fieldset>
+            </div>
         </div>
 
-        <div class="settlement-unsettled-panel-body">
+        <div class="settlement-unsettled-panel-body" data-unsettled-body>
             {% if unsettled_roster_ambiguous and unsettled_employees %}
                 <div class="settlement-unsettled-roster-warning" data-unsettled-roster-warning>
                     <strong>Часть текущего состава не определена однозначно</strong>
@@ -358,9 +680,7 @@
                                 <strong title="{{ employee.full_name }}">{{ employee.full_name }}</strong>
                                 <span>{{ employee.position_label }}</span>
                                 <div class="settlement-unsettled-employee-meta">
-                                    {% if employee.personnel_number %}
-                                        <small>Таб. № {{ employee.personnel_number }}</small>
-                                    {% endif %}
+                                    {% include "settlement/_personnel_number.html" with number=employee.personnel_number only %}
                                     {% if employee.has_shift %}
                                         <small class="is-shift">{{ employee.shift_label }}</small>
                                     {% endif %}
@@ -390,38 +710,57 @@
                 </div>
             {% endif %}
         </div>
+
+        <div class="settlement-unsettled-panel-body settlement-temporary-body" data-temporary-body hidden>
+            <p class="settlement-temporary-feedback" data-temporary-feedback role="status" aria-live="polite" hidden></p>
+            <p class="settlement-temporary-summary" data-temporary-summary></p>
+            <div class="settlement-temporary-list" data-temporary-list></div>
+            <div class="settlement-unsettled-empty settlement-temporary-empty" data-temporary-empty hidden>
+                <strong>Временных размещений нет</strong>
+                <p>Подготовок, временных размещений и резерва сейчас нет.</p>
+            </div>
+        </div>
     </aside>
 
     <div class="settlement-room-panel-backdrop" data-room-panel-backdrop hidden></div>
     <aside class="settlement-room-panel"
-           data-room-panel
+           data-room-panel data-panel-view="room" role="dialog"
            aria-labelledby="settlement-room-panel-title"
            aria-hidden="true"
            hidden>
         <header class="settlement-room-panel-header">
             <div>
-                <span>Комната</span>
-                <h2 id="settlement-room-panel-title" data-room-panel-title>Не выбрана</h2>
-                <p data-room-panel-location>Выберите комнату или койко-место на карте</p>
+                <span data-panel-kind>Комната</span>
+                <h2 id="settlement-room-panel-title" data-room-panel-title tabindex="-1">Не выбрана</h2>
+                <div class="settlement-panel-location">
+                    <p data-room-panel-location></p>
+                    <button type="button" class="settlement-room-link" data-panel-room-link hidden></button>
+                </div>
             </div>
             <button type="button" class="settlement-room-panel-close" data-room-panel-close aria-label="Закрыть панель">×</button>
         </header>
 
         <div class="settlement-room-panel-summary">
-            <span data-room-panel-status>Статус не указан</span>
-            <strong><b data-room-occupied-count>0</b> занято · <b data-room-free-count>0</b> свободно</strong>
+            <button type="button" class="settlement-room-transfer" role="switch" aria-checked="false"
+                    aria-label="Комната передана для заселения" data-room-transfer-toggle>
+                <span data-room-panel-status>Не передана</span>
+            </button>
+            <strong><b data-room-occupied-count>0</b> занято · <b data-room-free-count>0</b> <span data-room-free-label>свободно</span></strong>
+            <p class="settlement-room-transfer-message" data-room-transfer-message role="status" hidden></p>
         </div>
 
         <div class="settlement-room-panel-body">
+            {% include "settlement/_bed_checkin.html" %}
             <section class="settlement-room-bed-section" aria-labelledby="settlement-room-beds-title">
                 <div class="settlement-room-panel-section-title">
                     <div>
                         <span>Физический фонд</span>
                         <h3 id="settlement-room-beds-title">Койко-места комнаты</h3>
                     </div>
-                    <small>Выберите свободное место</small>
+                    <small>Выберите место</small>
                 </div>
                 <div class="settlement-room-bed-list" data-room-panel-beds></div>
+                <button type="button" class="settlement-bed-prep-secondary" data-panel-employee-link hidden>Карточка жильца</button>
             </section>
 
             <section class="settlement-placement-panel" data-placement-panel aria-live="polite">
@@ -434,6 +773,9 @@
                 <p class="settlement-placement-hint" data-placement-hint>
                     Выберите свободное койко-место в переданной комнате.
                 </p>
+                <button type="button" class="settlement-bed-prep-secondary" data-checkin-start hidden>Начать работу</button>
+                <details class="settlement-roster-placement" data-roster-placement>
+                <summary>Заселить из утверждённого списка заезда</summary>
                 <form data-settlement-form hidden>
                     {% csrf_token %}
                     <label class="settlement-employee-search" for="settlement-employee-search">
@@ -467,18 +809,122 @@
                                type="datetime-local"
                                data-assignment-end-input>
                     </label>
+                    <label class="settlement-assignment-type" data-relocation-reason hidden>
+                        <span>Причина переселения</span>
+                        <input type="text" data-relocation-reason-input>
+                    </label>
+                    {% include "settlement/_category_exception_confirmation.html" %}
                     <button type="submit" class="settlement-place-button" data-settle-button disabled>
                         Заселить
                     </button>
                 </form>
+                </details>
                 <div class="settlement-occupied-actions" data-occupied-actions hidden>
                     <button type="button" class="settlement-place-button" data-relocate-button disabled>
-                        Переселить сотрудника
+                        Переселить на другую койку
                     </button>
+                    <button type="button" class="settlement-place-button" data-swap-start>Поменять местами</button>
                     <button type="button" class="settlement-release-button" data-release-button disabled>
                         Освободить койко-место
                     </button>
+                    <small class="settlement-move-help">Можно перетащить бейдж на свободную койку. Чтобы открыть другой этаж или КИС, задержите бейдж над его кнопкой.</small>
                 </div>
+                <div class="settlement-bed-prep" data-bed-preparation hidden>
+                    <div class="settlement-bed-prep-status">
+                        <strong>Подготовленное место</strong>
+                        <span data-bed-preparation-resident></span>
+                        <small data-bed-preparation-hold></small>
+                        <small data-bed-preparation-basis></small>
+                        <small class="is-expired" data-bed-preparation-expired hidden>Срок истёк — койка освободится при следующем действии.</small>
+                    </div>
+                    <div class="settlement-bed-prep-actions">
+                        <button type="button" class="settlement-place-button" data-bed-preparation-confirm>
+                            Подтвердить приезд
+                        </button>
+                        <button type="button"
+                                class="settlement-bed-prep-secondary"
+                                data-bed-preparation-extend-open
+                                aria-expanded="false">
+                            Продлить
+                        </button>
+                        <button type="button" class="settlement-bed-prep-danger" data-bed-preparation-cancel>
+                            Отменить
+                        </button>
+                    </div>
+                    <div class="settlement-bed-prep-extend" data-bed-preparation-extend hidden>
+                        <label class="settlement-employee-search" for="settlement-preparation-hold">
+                            <span>Новый срок</span>
+                            <input id="settlement-preparation-hold" type="date" data-bed-preparation-hold-input>
+                        </label>
+                        <label class="settlement-employee-search" for="settlement-preparation-reason">
+                            <span>Причина продления</span>
+                            <input id="settlement-preparation-reason"
+                                   type="text"
+                                   autocomplete="off"
+                                   data-bed-preparation-reason>
+                        </label>
+                        <button type="button" class="settlement-place-button" data-bed-preparation-extend-submit>
+                            Продлить
+                        </button>
+                    </div>
+                </div>
+                <div class="settlement-bed-prep-actions" data-bed-preparation-actions hidden>
+                    <button type="button" class="settlement-bed-prep-open" data-bed-preparation-open>
+                        Подготовить место
+                    </button>
+                </div>
+                <div class="settlement-bed-prep-actions" data-bed-reserve-actions hidden>
+                    <button type="button" class="settlement-bed-reserve" data-bed-reserve-toggle>
+                        В резерв
+                    </button>
+                </div>
+                <form class="settlement-bed-prep-form" data-bed-preparation-form novalidate hidden>
+                    {% csrf_token %}
+                    <div class="settlement-employee-search settlement-bed-prep-kind" data-bed-preparation-kind>
+                        <span>Тип жильца</span>
+                        <div class="settlement-filter-buttons compact" role="group" aria-label="Тип жильца для подготовки места">
+                            <button type="button" class="is-active" data-preparation-kind="employee" aria-pressed="true">Сотрудник</button>
+                            <button type="button" data-preparation-kind="guest" aria-pressed="false">Гость</button>
+                        </div>
+                    </div>
+                    <label class="settlement-employee-search" for="settlement-resident-search">
+                        <span data-bed-preparation-resident-label>Жилец по пропуску</span>
+                        <input id="settlement-resident-search"
+                               type="search"
+                               autocomplete="off"
+                               placeholder="ФИО, табельный номер или организация"
+                               data-bed-preparation-resident-search>
+                    </label>
+                    <div class="settlement-employee-results" data-bed-preparation-resident-results hidden></div>
+                    <div class="settlement-selected-employee" data-bed-preparation-selected hidden>
+                        <span>Выбран жилец</span>
+                        <strong data-bed-preparation-selected-name></strong>
+                        <small data-bed-preparation-selected-meta></small>
+                    </div>
+                    <label class="settlement-employee-search" for="settlement-preparation-arrival">
+                        <span>Дата приезда</span>
+                        <input id="settlement-preparation-arrival" type="date" data-bed-preparation-arrival>
+                    </label>
+                    <label class="settlement-employee-search" for="settlement-preparation-basis">
+                        <span>Основание (пропуск/заявка)</span>
+                        <input id="settlement-preparation-basis"
+                               type="text"
+                               autocomplete="off"
+                               data-bed-preparation-basis-input>
+                    </label>
+                    <button type="button" class="settlement-bed-prep-suggest" data-bed-preparation-suggest>
+                        Подобрать койку
+                    </button>
+                    <div class="settlement-employee-results" data-bed-preparation-suggestions hidden></div>
+                    <div class="settlement-bed-prep-form-actions">
+                        <button type="button" class="settlement-place-button" data-bed-preparation-submit>
+                            Подготовить
+                        </button>
+                        <button type="button" class="settlement-bed-prep-secondary" data-bed-preparation-form-cancel>
+                            Отмена
+                        </button>
+                    </div>
+                </form>
                 <p class="settlement-placement-feedback" data-placement-feedback hidden></p>
             </section>
         </div>
@@ -492,14 +938,106 @@
            hidden>
         <header class="settlement-room-panel-header">
             <div>
-                <span>Сотрудник</span>
-                <h2 id="settlement-employee-panel-title" data-employee-panel-title>Карточка сотрудника</h2>
+                <span>Жилец</span>
+                <h2 id="settlement-employee-panel-title" data-employee-panel-title>Карточка жильца</h2>
                 <p>Фактическое место проживания</p>
             </div>
-            <button type="button" class="settlement-room-panel-close" data-employee-panel-close aria-label="Закрыть карточку сотрудника">×</button>
+            <button type="button" class="settlement-room-panel-close" data-employee-panel-close aria-label="Закрыть карточку жильца">×</button>
         </header>
-        <div class="settlement-employee-panel-body" data-employee-panel-body aria-live="polite"></div>
+        <div class="settlement-employee-panel-body">
+            <p class="settlement-resident-card-feedback" data-resident-card-feedback role="status" hidden></p>
+            <form class="settlement-resident-card-form" data-resident-card-form>
+                <div data-employee-panel-body></div>
+                <button type="button" class="settlement-bed-prep-secondary" data-resident-card-edit hidden>Редактировать данные</button>
+                <div class="settlement-resident-card-actions" data-resident-card-actions hidden>
+                    <button type="submit" class="settlement-place-button">Сохранить</button>
+                    <button type="button" class="settlement-place-button" data-resident-card-start hidden>Начать работу</button>
+                    <button type="button" class="settlement-bed-prep-secondary" data-resident-card-cancel>Отмена</button>
+                </div>
+            </form>
+        </div>
     </aside>
+
+    <dialog class="settlement-swap-dialog settlement-watch-template-dialog" id="settlement-watch-template-dialog"
+            data-watch-template-dialog aria-labelledby="settlement-watch-template-title">
+        <header class="settlement-swap-heading">
+            <h2 id="settlement-watch-template-title" tabindex="-1">Сохранить как шаблон вахты</h2>
+            <button type="button" class="settlement-swap-close" data-watch-template-close aria-label="Закрыть">×</button>
+        </header>
+        <form class="settlement-watch-template-form" action="{% url 'settlement_watch_templates' %}" method="post">
+            {% csrf_token %}
+            <p>В шаблон попадут фактические койки КИС-5 и КИС-6 и отметки на карте.</p>
+            <label data-watch-template-period hidden>
+                Вахта по календарю
+                <select name="period_id"></select>
+            </label>
+            <label>
+                Название шаблона
+                <input name="name" maxlength="128" required autocomplete="off" autofocus>
+            </label>
+            <button type="submit" class="settlement-place-button" disabled>Сохранить шаблон</button>
+        </form>
+        <p role="status" data-watch-template-result></p>
+        <section class="settlement-template-receipt" data-watch-template-receipt hidden>
+            <strong data-template-name></strong>
+            <p data-template-stats></p>
+            <div class="settlement-template-actions">
+                <a class="settlement-place-button" data-template-link>Открыть шаблон</a>
+                <button type="button" class="settlement-template-trigger" data-template-done>Вернуться на карту</button>
+            </div>
+        </section>
+        <section data-watch-template-history aria-label="Последние шаблоны" hidden>
+            <h3>Последние шаблоны</h3>
+            <ul></ul>
+        </section>
+    </dialog>
+
+    <dialog class="settlement-swap-dialog" data-swap-dialog aria-labelledby="settlement-swap-title">
+        <header class="settlement-swap-heading">
+            <h2 id="settlement-swap-title">Поменять жильцов местами?</h2>
+            <button type="button" class="settlement-swap-close" data-swap-close aria-label="Закрыть">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+            </button>
+        </header>
+        <div data-swap-picker hidden>
+            <div class="settlement-swap-picked">
+                <div data-swap-picked-badge></div>
+                <div>
+                    <span class="settlement-swap-caption">Первый жилец</span>
+                    <strong class="settlement-person-identity" data-swap-picked-name></strong>
+                    <span data-swap-picked-address></span>
+                </div>
+            </div>
+            <label class="settlement-swap-search" for="settlement-swap-search">Найти второго жильца</label>
+            <input id="settlement-swap-search" type="search" placeholder="Фамилия или табельный номер" autocomplete="off" aria-describedby="settlement-swap-search-hint">
+            <p id="settlement-swap-search-hint" class="settlement-swap-caption">Все этажи КИС-5 и КИС-6</p>
+            <p class="settlement-swap-caption" data-swap-empty role="status" hidden></p>
+            <ul class="settlement-swap-results" data-swap-results aria-label="Найденные жильцы" hidden></ul>
+        </div>
+        <div class="settlement-swap-plan" data-swap-plan hidden>
+            <div class="settlement-swap-pair" data-swap-addresses></div>
+            <svg class="settlement-swap-arrows" viewBox="0 0 60 48" aria-hidden="true">
+                <path d="M5 20C15 4 43 4 53 20m-1-10 2 11-11-2"/>
+                <path d="M55 28C45 44 17 44 7 28m1 10-2-11 11 2"/>
+            </svg>
+        </div>
+        <template data-swap-person-template>
+            <section class="settlement-swap-person">
+                <span class="settlement-bed is-occupied settlement-swap-badge" data-swap-badge data-occupied="true" aria-hidden="true" inert></span>
+                <h3 class="settlement-person-identity" data-swap-name></h3>
+                <dl class="settlement-swap-route">
+                    <div><dt>Сейчас</dt><dd data-swap-current></dd></div>
+                    <div><dt>После обмена</dt><dd data-swap-next></dd></div>
+                </dl>
+            </section>
+        </template>
+        <p data-swap-error role="alert" hidden></p>
+        <footer class="settlement-swap-actions" data-swap-actions hidden>
+            <button type="button" class="settlement-relocation-cancel settlement-swap-back" data-swap-back hidden>Выбрать другого</button>
+            <button type="button" class="settlement-relocation-cancel" data-swap-cancel autofocus>Нет</button>
+            <button type="button" class="settlement-place-button" data-swap-confirm>Да, поменять</button>
+        </footer>
+    </dialog>
 
     <div class="settlement-relocation-modal-backdrop" data-relocation-modal-backdrop hidden></div>
     <section class="settlement-relocation-modal"
@@ -524,5 +1062,11 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v34"></script>
+<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v6-room-preview"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-next-excel-v1"></script>
+<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
+<script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
+<script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
+<script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1-personnel"></script>
+<script src="{% static 'js/settlement-special-fund-v1.js' %}?v={{ static_asset_release }}-settlement-special-fund-v1"></script>
 {% endblock %}

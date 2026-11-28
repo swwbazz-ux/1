@@ -486,7 +486,9 @@ final class AppUpdateManager {
         int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
             ? PackageManager.GET_SIGNING_CERTIFICATES
             : PackageManager.GET_SIGNATURES;
-        PackageInfo archive = packageManager.getPackageArchiveInfo(apk.getAbsolutePath(), flags);
+        // Android 10 only collects certificates for an APK archive when GET_SIGNATURES is set.
+        int archiveFlags = flags | PackageManager.GET_SIGNATURES;
+        PackageInfo archive = packageManager.getPackageArchiveInfo(apk.getAbsolutePath(), archiveFlags);
         PackageInfo installed = packageManager.getPackageInfo(activity.getPackageName(), flags);
         if (archive == null || !activity.getPackageName().equals(archive.packageName)) {
             throw new SecurityException("Update package mismatch");

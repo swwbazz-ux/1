@@ -280,10 +280,17 @@ test("an older successful fragment cannot erase a newer requested server version
  r.window.AppRealtime.requestReconcile("post_ack",9);
  resolvers[0]({applied:true,version:8});await settle();
  assert.equal(r.window.AppRealtime.getDebugState().appliedVersion,8);
- assert.equal(r.window.AppRealtime.getDebugState().pendingReconcileVersion,9);
- r.runTimers(0);await settle();resolvers[1]({applied:true,version:9});await settle();
+ assert.equal(r.window.AppRealtime.getDebugState().pendingReconcileVersion,8);
+ assert.equal(r.window.AppRealtime.getDebugState().wakeHintVersion,9);
+ r.runTimers(0);await settle();
+ r.success(1,{version:9,relevant:true});await settle();
+ resolvers[1]({applied:true,version:9});await settle();
  assert.equal(r.window.AppRealtime.getDebugState().appliedVersion,9);
- assert.equal(r.window.AppRealtime.getDebugState().pendingReconcileVersion,null);
+ assert.equal(
+  r.window.AppRealtime.getDebugState().pendingReconcileVersion,
+  null,
+  JSON.stringify(r.window.AppRealtime.getDebugState())
+ );
 });
 test("failed role refresh gets exponential backoff while a busy input is only deferred",async()=>{
  let calls=0;const r=runtime({refresh:()=>{calls++;return Promise.resolve({deferred:true,reason:"driver_refresh_failed"});}});

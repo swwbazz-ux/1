@@ -1,9 +1,12 @@
 <header class="admin-console-header clerk-workplace-header" aria-label="Рабочая шапка делопроизводителя">
     <section class="admin-console-identity">
-        <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Д"|first }}</span>
+        {% include "users/includes/system_admin_avatar.html" %}
         <span>
             <strong>{{ access.employee.full_name|default:"Делопроизводитель" }}</strong>
-            <em>Делопроизводитель</em>
+            <em>{% if access.role.code == "admin" %}Администратор{% else %}Делопроизводитель{% endif %}</em>
+            {% if clerk_admin_login_available %}
+                <a class="clerk-admin-login-link" href="{% url 'clerk_login' %}?role=admin">Войти как администратор</a>
+            {% endif %}
         </span>
     </section>
 
@@ -14,14 +17,20 @@
             <p>Работа с фактическим размещением сотрудников.</p>
         </div>
         <nav class="admin-console-nav" aria-label="Разделы делопроизводителя">
-            <button type="button"
-                    class="{% if clerk_active_section == "settlement" %}is-active{% endif %}"
-                    data-clerk-section="settlement"
-                    data-unsettled-panel-toggle
-                    aria-controls="settlement-unsettled-panel"
-                    aria-expanded="false">Расселение</button>
+            {% if clerk_active_section == "settlement" %}
+                <button type="button"
+                        class="is-active"
+                        data-clerk-section="settlement"
+                        data-unsettled-panel-toggle
+                        aria-controls="settlement-unsettled-panel"
+                        aria-expanded="false">Расселение</button>
+            {% else %}
+                <a href="{% url 'clerk_home' %}" data-clerk-section="settlement">Расселение</a>
+            {% endif %}
             <a href="{% url 'settlement_arrival_roster_routing' %}"
-               class="{% if clerk_active_section == 'routing' %}is-active{% endif %}">Готово к расселению</a>
+               {% if clerk_active_section == 'routing' %}class="is-active" aria-current="page"{% endif %}>Готово к расселению</a>
+            <a href="{% url 'settlement_fund' %}"
+               {% if clerk_active_section == 'fund' %}class="is-active" aria-current="page"{% endif %}>Жилфонд</a>
         </nav>
     </section>
 

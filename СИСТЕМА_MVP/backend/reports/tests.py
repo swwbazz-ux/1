@@ -10,6 +10,7 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from openpyxl import load_workbook
 
+from core.models import bump_operational_state
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift, EquipmentPlanGroup, ShiftPlan
@@ -1211,3 +1212,33 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertContains(response, 'Погрузка')
         self.assertContains(response, 'Выгрузка')
         self.assertContains(response, 'Поток смены')
+
+    def test_management_date_defaults_to_workday_and_prefers_explicit_filter(self):
+        workday = self.date + timedelta(days=14)
+        for route in ('management_dashboard', 'customer_daily_report'):
+            with self.subTest(route=route), patch('reports.views.production_work_date', return_value=workday):
+                response = self.client.get(reverse(route))
+                self.assertEqual(response.context['selected_date'], workday)
+                response = self.client.get(reverse(route), {
+                    'date': self.date.isoformat(), 'overview_date': workday.isoformat(),
+                })
+                self.assertEqual(response.context['selected_date'], self.date)
+                self.assertContains(response, f'data-management-overview-date>{self.date:%d.%m.%Y}</strong>')
+
+    def test_management_dashboard_refresh_serves_only_the_versioned_overview(self):
+        state = bump_operational_state('overview refresh test')
+        response = self.client.get(reverse('management_dashboard'), {
+            'date': self.date.isoformat(),
+            '_operational_fragment': 'management-overview',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+        fragment = response.json()
+        self.assertEqual(fragment['contract'], 'operational-fragment-v1')
+        self.assertEqual(fragment['screen'], 'management-overview')
+        self.assertEqual(fragment['version'], state.version)
+        self.assertIn('data-management-overview-live', fragment['html'])
+        self.assertIn('Поток смены', fragment['html'])
+        self.assertNotIn('data-management-workplace-header', fragment['html'])
+        self.assertNotIn('management-dashboard-filters', fragment['html'])

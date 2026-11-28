@@ -1,5 +1,7 @@
 from django.urls import path
 
+from core.snapshot import operational_snapshot_view
+
 from .achievement_views import (
     achievement_current_view,
     achievement_prize_download_view,
@@ -7,11 +9,14 @@ from .achievement_views import (
     achievement_shown_view,
 )
 from .dispatcher_pwa import dispatcher_manifest_view, dispatcher_service_worker_view
+from .dispatcher_duty import background_presence_view
+from .dispatcher_duty_offline import observations_view
 from .views import (
     dispatcher_cancel_assignment_view,
     dispatcher_cancel_trip_view,
     dispatcher_assign_truck_view,
     dispatcher_complete_trip_view,
+    deputy_dispatcher_control_view,
     dispatcher_control_view,
     dispatcher_close_downtime_view,
     dispatcher_equipment_detail_view,
@@ -37,7 +42,16 @@ urlpatterns = [
     path('dispatcher-sw.js', dispatcher_service_worker_view, name='dispatcher_service_worker'),
     path('excavator.webmanifest', excavator_manifest_view, name='excavator_manifest'),
     path('excavator-sw.js', excavator_service_worker_view, name='excavator_service_worker'),
+    path('deputy-mining-manager/dispatcher/', deputy_dispatcher_control_view, name='deputy_dispatcher_control'),
+    path(
+        'deputy-mining-manager/dispatcher/card/<str:category>/<int:equipment_id>/',
+        dispatcher_equipment_detail_view,
+        {'deputy_viewer': True},
+        name='deputy_dispatcher_equipment_detail',
+    ),
     path('dispatcher/control/', dispatcher_control_view, name='dispatcher_control'),
+    path('dispatcher/duty-presence/', background_presence_view, name='dispatcher_duty_presence'),
+    path('dispatcher/duty-observations/', observations_view, name='dispatcher_duty_observations'),
     path(
         'dispatcher/control/downtime/<int:event_id>/close/',
         dispatcher_close_downtime_view,
@@ -56,7 +70,11 @@ urlpatterns = [
     path('dispatcher/trips/<int:trip_id>/complete/', dispatcher_complete_trip_view, name='dispatcher_complete_trip'),
     path('dispatcher/trucks/<int:equipment_id>/manual-trip/', dispatcher_manual_trip_view, name='dispatcher_manual_trip'),
     path('dispatcher/shifts/<int:shift_id>/service-close/', dispatcher_service_close_shift_view, name='dispatcher_service_close_shift'),
-    path('excavator/work/', excavator_work_view, name='excavator_work'),
+    path(
+        'excavator/work/',
+        operational_snapshot_view(excavator_work_view),
+        name='excavator_work',
+    ),
     path('excavator/work/hourly-report/', excavator_hourly_report_view, name='excavator_hourly_report'),
     path('excavator/shift/', excavator_shift_action_view, name='excavator_shift_action'),
     path('excavator/work/settings/', excavator_work_settings_view, name='excavator_work_settings'),

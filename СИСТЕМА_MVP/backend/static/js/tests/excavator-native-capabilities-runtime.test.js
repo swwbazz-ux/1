@@ -1,5 +1,6 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -8,7 +9,7 @@ const vm = require("node:vm");
 
 const PUSH_SOURCE = fs.readFileSync(path.resolve(__dirname, "../excavator-native-push-v1.js"), "utf8");
 const HAPTICS_SOURCE = fs.readFileSync(path.resolve(__dirname, "../excavator-haptics-v1.js"), "utf8");
-const TEMPLATE = fs.readFileSync(path.resolve(__dirname, "../../../templates/trips/excavator_work.html"), "utf8");
+const TEMPLATE = excavatorScreenSource();
 
 function bootPush(options = {}) {
     const events = new Map();
@@ -95,9 +96,11 @@ test("Excavator haptics prefer the native media bridge and preserve gesture timi
 });
 
 test("Excavator shell wires native capabilities and routes existing feedback through them", () => {
-    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v264/);
-    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v264/);
+    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v282/);
+    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v282/);
     assert.match(TEMPLATE, /window\.excavatorHaptic\(\[180, 90, 180\], 255\)/);
-    assert.match(TEMPLATE, /window\.excavatorHaptic\(70, 220\)/);
+    assert.match(TEMPLATE, /haptic: window\.excavatorHaptic/);
+    const drag = fs.readFileSync(path.resolve(__dirname, "../excavator-dashboard-drag-v1.js"), "utf8");
+    assert.match(drag, /haptic\(70, 220\)/);
     assert.doesNotMatch(TEMPLATE, /navigator\.vibrate/);
 });

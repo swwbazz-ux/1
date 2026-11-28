@@ -16,6 +16,8 @@ from core.models import lock_production_state
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
 from shifts.services import (
+    can_work_parallel_roles,
+    employee_shift_scope,
     find_other_role_open_shift,
     lock_active_employee_for_shift,
     other_role_shift_flag,
@@ -93,7 +95,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v165";
+const CACHE_NAME = "mining-master-mobile-shell-v167";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -110,6 +112,8 @@ const CORE_ASSETS = [
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
   "/static/js/role-app-install-v1.js",
+  "/static/js/dispatcher-free-bucket-v1.js?v=1",
+  "/static/css/dispatcher-free-bucket-v1.css?v=2",
   "/static/css/app.css",
   "/static/favicon.ico",
   "/static/img/pwa/mining-master-180.png",
@@ -121,6 +125,7 @@ const CORE_ASSETS = [
 ];
 
 self.addEventListener("install", event => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
@@ -510,24 +515,26 @@ def handle_shift_action(request, action, access, current_shift, blocking_shift, 
                 lock_production_state()
                 current_shift, blocking_shift = get_shift_state(employee)
                 if not current_shift and not blocking_shift:
-                    # get_shift_state видит только смены мастера, а база
-                    # запрещает две открытые смены у одного сотрудника в любых
-                    # контурах (unique_open_shift_per_employee). Открытая смена
-                    # диспетчера или водителя того же человека раньше кончалась
-                    # IntegrityError и белым экраном 500 — теперь, как у всех
-                    # ролей, предлагается завершить её и начать эту.
                     resolve_other_role_shift(
                         employee,
                         workplace_code='mining_master',
                         close_other=other_role_shift_flag(request.POST),
                         closed_by=employee,
                     )
+                    parallel_roles = can_work_parallel_roles(employee)
+                    if EmployeeShift.objects.filter(
+                        employee_shift_scope('mining_master', parallel_roles=parallel_roles),
+                        employee=employee,
+                        closed_at__isnull=True,
+                    ).exists():
+                        raise ValidationError('У вас уже есть открытая смена. Обновите экран и попробуйте снова.')
                     try:
                         with transaction.atomic():
                             EmployeeShift.objects.create(
                                 employee=employee,
                                 shift_type=get_shift_type_for_now(now),
                                 workplace_code='mining_master',
+                                parallel_role_slot=parallel_roles,
                                 opened_at=now,
                                 opened_by=employee,
                             )

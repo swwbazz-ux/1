@@ -277,6 +277,50 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     grid-template-rows: repeat(4, minmax(0, 1fr)) !important;
 }
 
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-empty {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-empty {
+    place-self: center;
+    box-sizing: border-box;
+    max-width: 100%;
+    padding-inline: 12px;
+    gap: clamp(4px, 1.1dvh, 8px);
+    border: 0;
+    background: none;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+body.excavator-operator-screen .eo-dashboard-empty img {
+    display: block;
+    height: clamp(26px, 8dvh, 56px);
+}
+
+body.excavator-operator-screen .eo-dashboard-empty strong {
+    font-size: clamp(16px, min(5vw, 5dvh), 26px);
+    line-height: 1.14;
+}
+
+body.excavator-operator-screen .eo-dashboard-empty span {
+    font-size: clamp(12px, min(3.7vw, 3.8dvh), 16px);
+    line-height: 1.24;
+}
+
+body.excavator-operator-screen .eo-dashboard-shift-closed {
+    display: none;
+}
+
+body.excavator-operator-screen [data-eo-work-available="false"] .eo-dashboard-shift-closed {
+    display: flex;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] [data-eo-work-available="false"] .eo-dashboard-truck-grid {
+    display: none !important;
+}
+
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
     --eo-plan-color: rgba(163, 230, 53, 1);
     --eo-plan-color-glow: rgba(163, 230, 53, .72);
@@ -1804,18 +1848,26 @@ body.excavator-operator-screen .eo-shell {
 }
 
 @media (max-width: 370px) {
+    body.excavator-operator-screen {
+        --eo-fixed-header-h: clamp(46px, 6.35dvh, 56px);
+        --app-header-h: var(--eo-fixed-header-h);
+        /* The indicator is 20px wide and needs a further 5px for clearance. */
+        --app-connection-dot-reserve: calc(max(10px, env(safe-area-inset-right, 0px)) + 25px);
+    }
+
     body.excavator-operator-screen .eo-topbar,
     body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar {
-        grid-template-columns: minmax(92px, .72fr) 64px minmax(0, 2.4fr) !important;
+        grid-template-columns: 24% 18% minmax(0, 1fr) !important;
     }
 
     body.excavator-operator-screen .eo-topbar .eo-shift-kind-cell {
-        min-width: 62px !important;
+        min-width: 0 !important;
         padding-inline: 3px !important;
     }
 
-    body.excavator-operator-screen .eo-topbar .eo-shift-status-text {
-        font-size: 10px !important;
+    body.excavator-operator-screen .eo-topbar .eo-topbar-cell img {
+        width: clamp(16px, 5.3vw, 25px) !important;
+        height: clamp(16px, 5.3vw, 25px) !important;
     }
 
 }
@@ -2416,16 +2468,19 @@ body.excavator-operator-screen .eo-shift-metrics .eo-field-card.is-disabled em {
 
 /* v107: readable work location and an always-visible current app version. */
 body.excavator-operator-screen .eo-topbar .eo-face-cell-full {
-    display: grid !important;
-    grid-template-columns: auto minmax(0, 1fr) !important;
+    display: flex !important;
     align-items: center !important;
-    gap: 10px !important;
     min-width: 0 !important;
-    padding-inline: 10px 14px !important;
+    padding-inline-start: 10px !important;
+    padding-inline-end: var(--app-connection-dot-reserve, 44px) !important;
 }
 
 body.excavator-operator-screen .eo-topbar .eo-face-summary {
-    display: contents !important;
+    display: flex !important;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 10px;
+    white-space: normal !important;
 }
 
 body.excavator-operator-screen .eo-topbar .eo-face-coordinates {
@@ -2448,13 +2503,12 @@ body.excavator-operator-screen .eo-topbar .eo-face-coordinates > span + span {
 body.excavator-operator-screen .eo-topbar .eo-face-rock {
     display: block !important;
     min-width: 0 !important;
-    overflow: hidden !important;
     color: #dce7ea !important;
     font-size: clamp(13px, .98vw, 16px) !important;
     font-weight: 650 !important;
     line-height: 1.1 !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
+    overflow-wrap: anywhere;
+    white-space: normal !important;
 }
 
 body.excavator-operator-screen .eo-shift-update-group {
@@ -2590,9 +2644,11 @@ body.excavator-operator-screen .eo-shift-occupied {
 
 @media (max-width: 767px) {
     body.excavator-operator-screen .eo-topbar .eo-face-cell-full {
-        grid-template-columns: auto minmax(0, 1fr) !important;
-        gap: clamp(5px, 1.35vw, 8px) !important;
-        padding-inline: clamp(5px, 1.4vw, 8px) !important;
+        padding-inline-start: clamp(5px, 1.4vw, 8px) !important;
+    }
+
+    body.excavator-operator-screen .eo-topbar .eo-face-summary {
+        column-gap: clamp(5px, 1.35vw, 8px);
     }
 
     body.excavator-operator-screen .eo-topbar .eo-face-coordinates {
@@ -3358,6 +3414,64 @@ body.excavator-operator-screen .app-contract-banner [data-app-contract-retry] {
     }
 }
 
+/* «Чёрный рояль»: общий фон четырёх рабочих вкладок. */
+body.excavator-operator-screen main.eo-shell[data-eo-shell] {
+    --eo-shell-finish:
+        linear-gradient(146deg, transparent 34%, rgba(191, 199, 201, .038) 42%, rgba(201, 207, 211, .10) 48%, rgba(213, 215, 216, .055) 50%, rgba(60, 68, 74, .035) 51%, transparent 55%),
+        radial-gradient(ellipse 103% 39% at -22% 19%, #383c41 0%, #1e2227 34%, transparent 73%),
+        radial-gradient(ellipse 93% 36% at 116% 87%, #292c30 0%, transparent 73%),
+        linear-gradient(147deg, #17191d 0%, #0a0c0e 36%, #121519 59%, #090a0c 77%, #16181b);
+    background: var(--eo-shell-finish);
+}
+
+.eo-downtime-edge { display: none; }
+
+@media (any-pointer: coarse) {
+    body:not(.modal-open) .eo-shell[data-eo-active-tab="trucks"]:not([data-eo-downtime-preview]) > .eo-downtime-edge {
+        display: grid;
+        place-items: center end;
+        position: absolute;
+        z-index: 12;
+        top: 50%;
+        right: 0;
+        width: 12px;
+        height: min(144px, 34%);
+        transform: translateY(-50%);
+        pointer-events: none;
+        user-select: none;
+    }
+    .eo-downtime-edge::after {
+        content: "";
+        width: 7px;
+        height: 7px;
+        margin-right: 2px;
+        border-left: 2px solid #edb84b;
+        border-bottom: 2px solid #edb84b;
+        transform: rotate(45deg);
+    }
+}
+
+.eo-shell [data-eo-screen="trucks"],
+.eo-shell [data-eo-screen="events"],
+.eo-shell .mobile-downtime__reasons,
+.eo-shell .eo-dashboard-main-zone,
+.eo-shell .eo-dashboard-truck-grid,
+.eo-shell .eo-dashboard-dump-zone {
+    touch-action: pan-y pinch-zoom;
+}
+
+body.excavator-operator-screen main.eo-shell[data-eo-downtime-preview] .eo-screen.mobile-work-screen[data-eo-screen="events"] {
+    display: grid !important;
+    z-index: 11 !important;
+    pointer-events: none;
+    background: var(--eo-shell-finish) !important;
+    transform: translateX(var(--eo-downtime-offset, 100%));
+}
+
+body.excavator-operator-screen [data-eo-shell] > form > .mobile-work-screen {
+    background: transparent !important;
+}
+
 /* v130: one container-driven Shift layout for every viewport and shift state. */
 body.excavator-operator-screen {
     -webkit-text-size-adjust: 100%;
@@ -3792,23 +3906,12 @@ body.excavator-operator-screen .eo-reading-confirmation__actions button:disabled
     }
 }
 
-/* Название точки разгрузки: не режется нижним краем и не рвётся посреди слова.
-   Пользователь показал это на шести точках: «Склад негабарита» и «Склад
-   окисленной руды» теряли вторую строку. Причин было три, и все три здесь.
-
-   Первая — перенос разрешался в любом месте, поэтому слово рвалось пополам.
-   Вторая — размер не зависел от длины: ступень считается по самому длинному
-   СЛОВУ, а не по длине всей строки, потому что перенос по пробелу мы
-   разрешаем, а внутри слова нет, и в ширину плитки обязано поместиться именно
-   самое длинное неразрывное слово. Ступени приходят с сервера общим для обеих
-   ролей правилом (core/dump_point_names.py), чтобы у машиниста и водителя
-   одна и та же точка выглядела одинаково.
-   Счётчик остаётся в строке названия и ширину у него забирает, но со ступенью
-   размера этого запаса хватает с избытком: самое длинное слово «окисленной»
-   на минимальном размере занимает меньше половины оставшейся ширины. Трогать
-   ради этого раскладку плитки не потребовалось. */
+/* Переносим слово только если оно шире плитки. Размер названия задаёт
+   общая для обеих ролей классификация в core/dump_point_names.py. */
 body.excavator-operator-screen .eo-dashboard-unload-top strong {
-    overflow-wrap: normal !important;
+    display: block;
+    width: 100%;
+    overflow-wrap: anywhere !important;
     word-break: keep-all !important;
     hyphens: none !important;
 }
@@ -3822,63 +3925,37 @@ body.excavator-operator-screen .eo-dashboard-unload-card.is-name-long .eo-dashbo
     font-size: clamp(14px, 3.6vw, 17px) !important;
 }
 
-/* На длинных названиях счётчик занимает столько, что «Склад окисленной» уже не
-   помещается в первую строку и название расползается на три. Кружок там
-   компактнее: цифра рейсов короткая, читаемости это не стоит ничего, а
-   названию возвращает ту ширину, из-за которой оно и рвалось. */
-/* Счётчик выходит из строки названия. Во flex-строке он сужал КАЖДУЮ строку
-   названия, а не только первую: «Склад окисленной руды» расползалось на три
-   строки и теряло последнюю. Теперь кружок стоит в своём углу, название
-   занимает всю ширину плитки, а место под кружок резервируется ровно на одну
-   первую строку — пустым обтекаемым блоком той же высоты. */
+/* Счётчик привязан к плитке, поэтому название и очередь машин его не сдвигают. */
+body.excavator-operator-screen .eo-dashboard-unload-card {
+    --eo-dump-count-inset: 8px;
+    --eo-dump-count-height: 24px;
+}
+
 body.excavator-operator-screen .eo-dashboard-unload-top {
-    position: relative !important;
+    position: static !important;
     display: block !important;
+    box-sizing: border-box;
+    padding-inline-end: 32px;
 }
 
-body.excavator-operator-screen .eo-dashboard-unload-top strong {
-    display: block;
-    width: 100%;
-}
-
-body.excavator-operator-screen .eo-dashboard-unload-top strong::before {
-    content: "";
-    float: right;
-    /* Запас ровно под кружок счётчика и небольшой отступ. Шире делать нельзя:
-       в узкой плитке (три точки в ряд) лишние пиксели сталкивают название на
-       вторую строку, и первая остаётся пустой — счётчик висит один. */
-    width: clamp(26px, 6vw, 30px);
-    height: 24px;
-}
-
-/* Кружок счётчика компактнее во всех плитках: в нём одна-две цифры, а ширину
-   он отнимал у названия. Вместе с уменьшенным запасом это те самые семь
-   пикселей, из-за которых «Подсыпка» уезжала под счётчик в узкой плитке. */
-body.excavator-operator-screen .eo-dashboard-unload-top small {
-    min-width: 26px;
-    height: 24px;
-    padding: 0 5px;
-    font-size: 15px;
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-single .eo-dashboard-unload-top {
+    padding-inline-start: 32px;
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-top small {
     position: absolute !important;
-    top: 0;
-    right: 0;
+    inset-block-start: var(--eo-dump-count-inset);
+    inset-inline-end: var(--eo-dump-count-inset);
+    box-sizing: border-box;
+    min-width: 26px !important;
+    height: var(--eo-dump-count-height) !important;
+    padding-inline: 4px;
+    font-size: 14px !important;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
-body.excavator-operator-screen .eo-dashboard-unload-card.is-name-long .eo-dashboard-unload-top small {
-    min-width: 24px;
-    height: 22px;
-    padding: 0 5px;
-    font-size: 14px;
-}
-
-/* «Склад окисленной руды» на минимальном размере требует трёх строк: «Склад
-   окисленной» занимает 155 пикселей при 156 доступных, вместе они не встают
-   ни при каком разумном переносе. Опускать шрифт ниже пола нельзя — в кабине
-   не прочитать. Не хватало пяти пикселей, и берём их у служебной подписи и
-   межстрочного интервала, а не у названия. */
+/* Компактный межстрочный интервал для длинных названий. */
 body.excavator-operator-screen .eo-dashboard-unload-card.is-name-long .eo-dashboard-unload-top strong {
     line-height: .95 !important;
 }
@@ -4012,35 +4089,63 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-da
    номера скрыты правилом выше, и такой плитке центрирование нужно ровно так
    же. */
 body.excavator-operator-screen .eo-dashboard-unload-card:not(:has(.eo-dashboard-unload-badges b)),
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-3) .eo-dashboard-unload-card,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-4) .eo-dashboard-unload-card,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-many) .eo-dashboard-unload-card {
+body.excavator-operator-screen .eo-shell[data-driver-manual-eo-shell][data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid:is(.is-rows-3, .is-rows-4, .is-many)) .eo-dashboard-unload-card {
     grid-template-rows: auto !important;
     align-content: center !important;
 }
 
-/* Ряд из трёх точек: счётчик под названием, а не в его строке. Замер на
-   телефоне при трёх точках: плитка 120 px, полей 22, запас под кружок 26 —
-   названию остаётся 72 px в первой строке, а «Подсыпка» на минимальном
-   размере занимает 85. Название целиком уезжало на вторую строку, и кружок
-   оставался висеть один над пустой первой. Уменьшать шрифт некуда: 14 px —
-   пол читаемости. Значит, в узкой плитке кружку не место в строке названия:
-   вертикального запаса там с избытком (плитка выше 200 px), а горизонтального
-   нет совсем. Три точки — единственная раскладка в три колонки, поэтому
-   правило и привязано к is-count-3, а не к ширине. */
+/* Для трёх точек название занимает всю ширину под счётчиком в ручном режиме водителя. */
+body.excavator-operator-screen .eo-shell[data-driver-manual-eo-shell][data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-card {
+    padding-block-start: calc(var(--eo-dump-count-inset) + var(--eo-dump-count-height) + 3px) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-card {
+    padding-inline: 4px !important;
+}
+
 body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    gap: 4px !important;
+    padding-inline-end: 0;
 }
 
-body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top strong::before {
-    display: none !important;
+
+/* У многорядной сетки счётчик компактнее, чтобы оставить место названию. */
+body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-grid:not(.is-count-1, .is-count-2, .is-count-3) .eo-dashboard-unload-card {
+    --eo-dump-count-height: 16px;
+    --eo-dump-count-inset: 2px;
+    --eo-dump-dense-clearance: 16px;
+    padding-inline: 4px !important;
 }
 
-body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top small {
-    position: static !important;
+body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-grid:not(.is-count-1, .is-count-2, .is-count-3) .eo-dashboard-unload-top strong {
+    font-size: clamp(14px, 3.6vw, 16px) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-grid:not(.is-count-1, .is-count-2, .is-count-3) .eo-dashboard-unload-top small {
+    min-width: 22px !important;
+    font-size: 12px !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-dump-zone:has(.eo-dashboard-unload-grid:not(.is-count-0, .is-count-1, .is-count-2, .is-count-3)) {
+    --eo-mobile-dump-zone-h: max(224px, 20dvh);
+}
+
+/* Равные ряды сверху и снизу держат название в центре независимо от очереди. */
+body.excavator-operator-screen .eo-shell[data-eo-shell][data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
+    --eo-dump-label-clearance: var(--eo-dump-dense-clearance, calc(var(--eo-dump-count-height) + var(--eo-dump-count-inset)));
+    grid-template-rows: minmax(var(--eo-dump-label-clearance), 1fr) auto minmax(var(--eo-dump-label-clearance), 1fr) !important;
+    align-content: safe center !important;
+    row-gap: 0 !important;
+    padding-block: 2px !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-top {
+    grid-row: 2;
+    padding-inline: 0;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-badges {
+    grid-row: 3;
+    align-self: center !important;
 }
 
 /* Карточка самосвала вытянута по вертикали. Пользователь посмотрел на бой и
@@ -4146,28 +4251,68 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     font-size: 31px !important;
 }
 
-/* Плашка состояния очереди («Нужна сверка», «Ожидает отправки», «Нет сети»)
-   висит поверх шапки и режет подпись роли пополам — видно на любом снимке за
-   сегодня. Появляется она тогда, когда экран отстал от сервера или накопились
-   неотправленные действия, то есть в самый нервный момент смены, и читать в
-   этот момент приходится обе надписи сразу.
+/* На «Работе» у роли и состояния очереди одна строка над ФИО. */
+.eo-operator-caption {
+    position: relative;
+    inline-size: 100%;
+    min-inline-size: 0;
+}
 
-   Место под неё резервируется ТОЛЬКО пока она видна: шапка опускается на её
-   высоту. Саму плашку не двигаем и её логику не трогаем — она остаётся там,
-   где её ищет глаз, и показывается тем же кодом, что и раньше. */
-body.excavator-operator-screen:has(.eo-offline-sync:not([hidden])) .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-head {
-    /* Сдвигаем шапку целиком, а не добавляем ей внутренний отступ: высота у
-       шапки своя, и отступ внутрь просто срезал бы кнопки снизу — проверено на
-       телефоне, обе кнопки обрезало по нижнему краю.
+.eo-operator-role { display: block; }
 
-       Размер резерва берётся из ТОЙ ЖЕ величины, которой задана высота самой
-       плашки: min-height 1.65rem при box-sizing: border-box, перенос запрещён
-       (white-space: nowrap), поэтому строка у неё всегда одна, какой бы
-       длинной ни была надпись. Плюс просвет.
+.eo-operator-caption > .eo-offline-sync {
+    inset: 0;
+    max-width: 100% !important;
+    min-height: 0;
+    padding: 0;
+    gap: 4px;
+    justify-content: flex-start;
+    border: 0;
+    background: none;
+    transform: none;
+}
 
-       В rem, а не в пикселях, намеренно: если базовый шрифт вырастет, плашка
-       и резерв вырастут вместе. Постоянное число здесь означало бы, что при
-       крупном шрифте подпись снова окажется перерезанной — и увидели бы это
-       только те, кто шрифт увеличил, то есть самые старшие машинисты. */
-    margin-top: calc(1.65rem + 10px) !important;
+.eo-operator-caption > .eo-offline-sync:not([hidden]):not(.is-synced) + .eo-operator-role {
+    visibility: hidden;
+}
+
+.eo-operator-caption .eo-offline-sync::before { content: none; }
+.eo-operator-caption .eo-offline-sync__count {
+    min-width: 0;
+    padding: 0;
+    background: none;
+}
+
+body.excavator-operator-screen .eo-operator-caption .eo-offline-sync > span {
+    min-width: 0;
+    overflow: hidden;
+    color: inherit !important;
+    font-size: clamp(11px, 3vw, 13px) !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    text-overflow: ellipsis;
+}
+
+.eo-operator-caption .is-offline { color: #ffd45b; }
+.eo-operator-caption .is-syncing { color: #69c9ff; }
+.eo-operator-caption :is(.is-attention, .is-storage-error) { color: #ffaaa3; }
+
+.mobile-shift[data-eo-screen="shift"] .eo-offline-sync {
+    position: static !important;
+    min-width: 0;
+    min-height: 0;
+    padding: 1px 5px;
+    gap: 4px;
+    font-size: clamp(10px, 2.75vw, 12px);
+    transform: none;
+}
+
+.mobile-shift[data-eo-screen="shift"] [data-eo-offline-sync-label] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.eo-operator-caption .eo-offline-sync.is-synced,
+.mobile-shift[data-eo-screen="shift"] .eo-offline-sync.is-synced {
+    display: none;
 }

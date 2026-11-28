@@ -1,0 +1,65 @@
+{% extends "clerk/base.html" %}
+
+{% block clerk_content %}
+<main class="admin-console-page settlement-page settlement-routing-page">
+    <section class="admin-console-section" aria-labelledby="watch-template-title">
+        <header class="admin-console-section-header">
+            <div>
+                {% for message in messages %}<p role="status"><strong>{{ message }}</strong></p>{% endfor %}
+                <span>{% if watch_template.snapshot.source_kind == 'next_excel' %}Шаблон следующего заезда из Excel{% else %}Шаблон вахты{% endif %}</span>
+                <h2 id="watch-template-title">{{ watch_template.name }}</h2>
+                <p>Сохранён {{ captured_at|date:"d.m.Y H:i" }} по Владивостоку
+                    {% if watch_template.watch_period %} · {{ watch_template.watch_period.name }}{% endif %}
+                </p>
+                {% if watch_template.snapshot.source_kind == 'next_excel' %}
+                <p>{{ watch_template.snapshot.filename }} · Расселение на {{ watch_template.work_date|date:"d.m.Y" }}</p>
+                {% else %}<p>Занятых коек {{ watch_template.snapshot.occupied_beds }} ·
+                    Коек с отметками {{ watch_template.snapshot.marked_beds }}
+                </p>{% endif %}
+            </div>
+            {% if watch_template.snapshot.source_kind == 'next_excel' %}<a href="{% url 'settlement_map' %}?mode=next">К следующему заезду</a>
+            {% else %}<a href="{% url 'settlement_map' %}">На карту расселения</a>{% endif %}
+        </header>
+        {% if watch_template.snapshot.source_kind == 'next_excel' %}{% include "settlement/next_housing_rows.html" with snapshot=watch_template.snapshot %}
+        {% else %}<div class="admin-console-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th scope="col">Койка</th>
+                        <th scope="col">Жилец</th>
+                        <th scope="col">Смена</th>
+                        <th scope="col">Техника или должность</th>
+                        <th scope="col">Отметки</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for room in watch_template.snapshot.rooms %}
+                        {% for bed in room.beds %}
+                        <tr>
+                            <td>КИС-{{ room.dormitory }} · {{ room.floor }} этаж · комната {{ room.number }} · {{ bed.block }}-{{ bed.position }}</td>
+                            <td>
+                                {% if bed.resident %}
+                                    {{ bed.resident.full_name }}
+                                    {% if bed.resident.personnel_number %}<small>Таб. № {{ bed.resident.personnel_number }}</small>{% endif %}
+                                    {% if bed.status == 'На продлении' %}<br><strong>{{ bed.status }}</strong>{% endif %}
+                                {% else %}
+                                    {{ bed.status }}
+                                {% endif %}
+                            </td>
+                            <td>{{ bed.resident.shift_description|default:"—" }}</td>
+                            <td>{{ bed.resident.work|default:"—" }}</td>
+                            <td>
+                                {% for reason in bed.flags.values %}<strong>{{ reason }}</strong>{% if not forloop.last %}<br>{% endif %}
+                                {% empty %}—{% endfor %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% empty %}
+                        <tr><td colspan="5">В шаблоне нет коек.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>{% endif %}
+    </section>
+</main>
+{% endblock %}

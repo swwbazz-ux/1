@@ -1,0 +1,164 @@
+{% extends "clerk/base.html" %}
+{% load static %}
+
+{% block title %}Загрузка текущего расселения{% endblock %}
+
+{% block clerk_extra_head %}
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v11">
+{% endblock %}
+
+{% block clerk_content %}
+<main class="housing-import">
+    <a class="housing-import__back" href="{% url 'settlement_map' %}">К карте расселения</a>
+    <h1>Загрузка текущего расселения</h1>
+    <form id="housing-import-form" class="housing-import__form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div id="housing-import-source-state">
+            {% if draft %}
+                <div class="housing-import__saved">
+                    <strong>Сохранённый Excel</strong>
+                    <span>{{ draft.filename }} · расселение на {{ draft.as_of|date:"d.m.Y" }}</span>
+                </div>
+                <details class="housing-import__replace">
+                    <summary>Заменить Excel или изменить дату</summary>
+            {% endif %}
+            <div class="housing-import__inputs">
+                <div>
+                    {{ form.workbook.label_tag }}
+                    {{ form.workbook }}
+                </div>
+                <div>
+                    {{ form.as_of.label_tag }}
+                    {{ form.as_of }}
+                </div>
+                <button type="submit" name="action" value="preview">Проверить Excel</button>
+            </div>
+            {% if draft %}</details>{% endif %}
+        </div>
+    </form>
+    <p id="housing-import-feedback" role="status"></p>
+
+    <div id="housing-import-response" tabindex="-1">
+    {% if draft %}<input type="hidden" name="draft_revision" value="{{ draft.revision }}" form="housing-import-form">{% endif %}
+    <div id="housing-import-report-content">
+    {% if draft_error %}<p role="alert">{{ draft_error }}</p>{% endif %}
+    {% if form.errors %}
+        <div class="housing-import__errors" role="alert">
+            {{ form.workbook.errors }}
+            {{ form.as_of.errors }}
+            {{ form.non_field_errors }}
+        </div>
+    {% endif %}
+    {% if review_error %}
+        <p class="housing-import__errors" role="alert">{{ review_error }}</p>
+    {% endif %}
+    {% if report_groups %}
+        <section class="housing-import__report" aria-label="Предпросмотр расселения">
+            {% if review_saved %}
+                <div class="housing-import__saved-choice">
+                    <p role="status">{% if review_undone %}Решение отменено.{% elif review_marked_interwatch %}Отметка сохранена в разделе «Межвахта».{% else %}Решение сохранено в черновике.{% if last_review_name %} {{ last_review_name }}.{% endif %}{% endif %}</p>
+                    {% if last_review_source %}
+                        <button type="submit" name="review_action" value="undo:{{ last_review_source }}" form="housing-import-form">Отменить решение</button>
+                    {% endif %}
+                </div>
+            {% endif %}
+            {% if application %}
+                <h2>Результат загрузки</h2>
+                <p role="status">Перенесено на карту — {{ application.placed }}. Создано карточек жильцов — {{ application.residents }}. Освобождено коек — {{ released_count }}.</p>
+            {% else %}
+            <h2>Предпросмотр на {{ as_of|date:"d.m.Y" }}</h2>
+            <p>Голубые строки учтены как межвахта. Карта расселения не менялась.</p>
+            {% if receipt %}
+                <input type="hidden" name="receipt" value="{{ receipt }}" form="housing-import-form">
+                <div class="housing-import__apply">
+                    <button type="submit" name="action" value="apply" form="housing-import-form">Применить</button>
+                    <span>{% if applicable_count %}Проверенных строк — {{ applicable_count }}. Недостающие карточки жильцов будут созданы.{% endif %}{% if release_count %} Коек к освобождению — {{ release_count }}.{% endif %}</span>
+                </div>
+            {% endif %}
+            {% endif %}
+            {% for group in report_groups %}
+                <details class="housing-import__group housing-import__group--{{ group.code }}"{% if group.code == 'conflict' and group.rows %} open{% endif %}>
+                    <summary>
+                        {{ group.label }} <strong>{% if group.code == 'conflict' %}{{ review_cases|length }}{% else %}{{ group.rows|length }}{% endif %}</strong>
+                        {% if group.code == 'conflict' and group.rows %}<span class="housing-review__row-count">· строк в Excel: {{ group.rows|length }}</span>{% endif %}
+                    </summary>
+                    {% if group.code == 'conflict' %}
+                        {% include 'settlement/_clerk_housing_conflicts.html' %}
+                    {% elif group.rows %}
+                        <ul class="housing-import__rows">
+                            {% for row in group.rows %}
+                                <li id="housing-row-{{ row.source|slugify }}">
+                                    <div class="housing-import__person">
+                                        <strong>{{ row.name }}</strong>
+                                        {% include "settlement/_personnel_number.html" with number=row.personnel_number only %}
+                                        {% if row.marked_interwatch %}
+                                            <small>На межвахте · отмечено при сверке</small>
+                                        {% endif %}
+                                        {% if row.interwatch_occupancy and not application %}
+                                            <small>Освободится после «Применить» · {{ row.interwatch_release_place }}</small>
+                                        {% endif %}
+                                        <small>{% if row.external_label %}{{ row.external_label }}{% else %}{{ row.category_label }}{% endif %}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
+                                    </div>
+                                    <div>
+                                        {% if row.reviewed_place %}
+                                            {{ row.reviewed_place }}
+                                            <small>Выбрано вручную · {{ row.source }}</small>
+                                        {% else %}
+                                            КИС-{{ row.building }}{% if row.floor %} · {{ row.floor }} этаж{% endif %}{% if row.room_number %} · комната {{ row.room_number }}{% endif %}
+                                            <small>{{ row.bed_label|default:"Койка не указана" }} · {{ row.source }}</small>
+                                        {% endif %}
+                                    </div>
+                                    <div>
+                                        {% if row.starts and row.ends %}
+                                        <span>{{ row.starts|date:"d.m.Y" }} — {{ row.ends|date:"d.m.Y" }}</span>
+                                        {% endif %}
+                                    </div>
+                                    {% if row.reviewed and draft %}
+                                        <div class="housing-import__review">
+                                            <button type="submit" name="review_action" value="undo:{{ row.source }}" form="housing-import-form">Отменить решение</button>
+                                        </div>
+                                    {% endif %}
+                                    {% if group.code == 'existing' and draft %}
+                                        <div class="housing-import__review">
+                                            <button type="submit" name="review_action" value="interwatch:{{ row.source }}" form="housing-import-form">На межвахте</button>
+                                        </div>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </details>
+            {% endfor %}
+        </section>
+    {% endif %}
+    </div>
+    </div>
+    <dialog class="housing-map-picker" aria-labelledby="housing-map-title" data-housing-map>
+        <header class="housing-map-picker__header">
+            <div>
+                <h2 id="housing-map-title">Выбор койки для сверки Excel</h2>
+                <p data-map-resident></p>
+            </div>
+            <button type="button" data-map-close autofocus>Закрыть карту</button>
+        </header>
+        <div class="housing-map-picker__filters" data-map-filters hidden>
+            <label>Общежитие <select data-map-building></select></label>
+            <label>Этаж <select data-map-floor></select></label>
+            <label>Комната <select data-map-room></select></label>
+        </div>
+        <div class="housing-map-picker__body">
+            <div data-map-summary hidden>{% include "settlement/_map_floor_summary.html" %}</div>
+            <p data-map-status role="status" tabindex="-1"></p>
+            <div class="housing-map-picker__plan" data-map-plan tabindex="0" aria-label="План этажа"></div>
+        </div>
+        <footer class="housing-map-picker__footer">
+            <div data-map-selection aria-live="polite"></div>
+            <button type="button" data-map-save disabled>Сохранить в черновик</button>
+        </footer>
+    </dialog>
+</main>
+{% endblock %}
+
+{% block clerk_scripts %}
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v12-personnel" defer></script>
+{% endblock %}

@@ -83,6 +83,7 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
             floor=1,
             number=1,
             transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
             capacity=4,
             corridor_side=PhysicalRoom.CorridorSide.LEFT,
             side_position=1,
@@ -134,6 +135,37 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
     _force_legacy_watch_profile_drift_for_test = (
         cohort_fixtures.ArrivalRosterCohortCreationTests._force_legacy_watch_profile_drift_for_test
     )
+
+    def _employee(self, full_name, **overrides):
+        # C-4 / SET-R042: койка в комнате с известным полом требует известного
+        # пола жильца. Синтетические сотрудники этого файла — мужчины.
+        overrides.setdefault('sex', Employee.Sex.MALE)
+        # Решение владельца 22.11.2026: для авторасселения нужна категория
+        # кадровой должности (рабочий/ИТР). Должность без категории в фикстуре
+        # заменяем на рабочую; явно заданную ИТР-должность не трогаем.
+        position = overrides.get('personnel_position')
+        if position is None or not position.settlement_category:
+            overrides['personnel_position'] = self._worker_position()
+        return cohort_fixtures.ArrivalRosterCohortCreationTests._employee(
+            self,
+            full_name,
+            **overrides,
+        )
+
+    def _worker_position(self):
+        if not hasattr(self, '_cached_worker_position'):
+            self._cached_worker_position, _created = (
+                PersonnelPosition.objects.get_or_create(
+                    code='ri-worker',
+                    defaults={
+                        'name': 'RI рабочий',
+                        'settlement_category': (
+                            PersonnelPosition.SettlementCategory.WORKER
+                        ),
+                    },
+                )
+            )
+        return self._cached_worker_position
 
     def _anchor(self, *, bed, equipment=None, position=None, suffix='anchor'):
         anchor = AccommodationAnchor.objects.create(
@@ -193,6 +225,7 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
         position = PersonnelPosition.objects.create(
             code=f'RI-POS-{self._testMethodName}',
             name=f'Должность {self._testMethodName}',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
         )
         employee = employee or self._internal_employee(f'Прямой {self._testMethodName}')
         Employee.objects.filter(pk=employee.pk).update(personnel_position=position)
@@ -203,6 +236,41 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
         if with_anchor:
             self._anchor(bed=self.beds[0], position=position, suffix='position')
         return cohort, member, row
+
+    def test_provisional_plan_recalculates_after_assignment_and_roster_replacement(self):
+        from django.urls import reverse
+
+        self._confirm_calendar()
+        worker = self._internal_employee('Готовый жилец')
+        self._direct_row(employee=worker)
+        self._anchor(bed=self.beds[0], position=worker.personnel_position)
+        pending = self._internal_employee('Ожидающий водитель', production=True)
+        row = self._routing_row(employee=pending)
+        url = reverse('settlement_provisional_plan', args=[self.period.pk])
+        self.assertEqual(self.client.get(url).status_code, 302)
+        session = self.client.session
+        session['employee_access_id'] = self.clerk_access.pk
+        session.save()
+        response = self.client.get(url)
+        self.assertEqual(response.context['proposed'], [(worker.full_name, str(self.beds[0]))])
+        self.assertEqual([name for name, reason in response.context['waiting']], [pending.full_name])
+        self.assertTrue(response.context['waiting'][0][1])
+        event = self._publish_event(row)
+        self._anchor(bed=self.beds[1], equipment=event.equipment_assignment.equipment, suffix='truck')
+        refreshed = self.client.get(url)
+        self.assertCountEqual(refreshed.context['proposed'], [
+            (worker.full_name, str(self.beds[0])), (pending.full_name, str(self.beds[1])),
+        ])
+        self.assertFalse(refreshed.context['waiting'])
+        self.version, self.batch = cohort_fixtures.ArrivalRosterCohortCreationTests._supersede_source_and_create_batch(self)
+        replacement = self._internal_employee('Новый участник')
+        self._direct_row(employee=replacement)
+        latest = self.client.get(url)
+        self.assertNotContains(latest, worker.full_name)
+        self.assertNotContains(latest, pending.full_name)
+        self.assertContains(latest, replacement.full_name)
+        for model in (SettlementCohort, SettlementPreviewRun, SettlementPreviewApplication, EmployeeBedOccupancy):
+            self.assertFalse(model.objects.exists())
 
     def test_production_uses_exact_assignment_through_preview_confirm_and_apply(self):
         cohort, member, _row = self._production_cohort()

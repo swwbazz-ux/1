@@ -1,0 +1,68 @@
+{% extends "reports/management_linked_base.html" %}
+{% load static management_workplace %}
+{% block title %}Смены диспетчеров{% endblock %}
+{% block body_class %}dispatcher-control-screen dispatcher-duty-screen{% endblock %}
+{% block extra_head %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=9">
+<script src="{% static 'js/dispatcher-duty-report.js' %}?v=6" defer></script>
+{% endblock %}
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme data-duty-report>
+  <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board">
+    {% management_workplace_header 'dispatcher_duty' %}
+    <section class="duty-report">
+      <div class="duty-heading">
+        <h2>Смены диспетчеров</h2>
+        <div class="duty-heading-tools"><span class="duty-as-of">По Владивостоку · Обновлено <time data-duty-as-of>{{ report.as_of|date:"d.m.Y H:i" }}</time></span>
+          <a class="duty-period-link" href="{% url 'management_dispatcher_period' %}">Отчёт за период</a></div>
+      </div>
+      <details class="duty-history">
+        <summary>Настроить историю</summary>
+        <form method="post" action="{% url 'management_dispatcher_history' %}">
+          {% csrf_token %}
+          <p>Настройка действует для всех руководителей. Смены до выбранной даты скрываются в журнале и отчёте. Их можно вернуть в любой момент.</p>
+          <div class="duty-history-controls">
+            <div>{{ history_form.history_from.label_tag }}{{ history_form.history_from }}</div>
+            <button type="submit" name="action" value="save">Применить</button>
+            <button type="submit" name="action" value="restore" formnovalidate>Показать всю историю</button>
+          </div>
+        </form>
+      </details>
+      <div class="duty-legend" aria-label="Обозначения шкалы">
+        <span><i class="duty-shift-open"></i>Смена открыта</span><span><i class="duty-shift-vacant"></i>Вне смены</span>
+        <span><i class="duty-on"></i>Пульт на экране</span><span><i class="duty-background"></i>Пульт в фоне</span>
+        <span><i class="duty-out"></i>Пульт закрыт</span>
+        <span><i class="duty-unknown"></i>Нет данных</span><span><i class="duty-future"></i>Предстоит</span>
+        <span><i class="duty-diamond"></i>Операция</span>
+        <span><i class="duty-window-hidden"></i>Свернули пульт</span><span><i class="duty-window-visible"></i>Вернули на экран</span>
+      </div>
+      {% if report.tracking_began %}<p class="duty-archive-note">Подробный учёт связи ведётся с {{ report.tracking_began|date:"d.m.Y H:i" }}.</p>{% endif %}
+      {% if archive_page %}<a class="duty-return" href="{% url 'management_dispatcher_duty' %}">К последним сменам</a>{% endif %}
+      {% include "reports/includes/dispatcher_duty_slots.html" %}
+      <span class="duty-refresh-status" role="status"></span>
+    </section>
+  </section>
+  <dialog class="duty-dialog" aria-labelledby="duty-journal-title">
+    <div class="duty-dialog-head">
+      <div><small data-duty-period></small><h2 id="duty-journal-title">Журнал смены</h2></div>
+      <button type="button" data-duty-close autofocus>Закрыть</button>
+    </div>
+    <div class="duty-dialog-content">
+      <div data-duty-overview></div>
+      <div class="duty-journal-summary"><p data-duty-staff></p></div>
+      <div class="duty-log-heading">
+        <h3>Лента событий</h3>
+        <label class="duty-filter"><span class="duty-visually-hidden">Показать</span>
+          <select data-duty-filter><option value="all">Все события</option><option value="operation">Только операции</option><option value="duty">Смена и связь</option></select>
+        </label>
+      </div>
+      <div class="duty-selection" data-duty-selection hidden><p data-duty-selection-text></p><button type="button" data-duty-jump hidden>К записи</button></div>
+      <div class="duty-band-selection" data-duty-band-selection hidden><span data-duty-band-label></span><button type="button" data-duty-clear-band>Сбросить период</button></div>
+      <p data-duty-none hidden>За этот период событий нет.</p>
+      <div data-duty-log></div>
+    </div>
+  </dialog>
+</main>
+{% include 'reports/includes/management_report_theme.html' %}
+{% endblock %}

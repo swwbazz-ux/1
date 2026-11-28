@@ -111,6 +111,22 @@
         );
     }
 
+    /* 409 inactive_role от ActiveRoleSessionMiddleware (users/middleware.py:197-251):
+       роль переведена в просмотр, и POST /offline-events/sync/ отклонён до view —
+       в теле только {ok:false, code, error}, без results. Это не сеть: повтор
+       каждые 2-8 с ничего не изменит, а события при этом навсегда оставались
+       «Ожидает отправки» и никогда не попадали в «Нужна сверка».
+       Отправитель экрана отдаёт только текст отказа, поэтому распознаём и текст
+       middleware; структурированный код (code/role_active) имеет приоритет. */
+    var INACTIVE_ROLE_MARKER = /inactive_role|роль\s+неактивна/i;
+    var INACTIVE_ROLE_MESSAGE = "Роль неактивна — доступен только просмотр";
+    function inactiveRoleRefusal(error) {
+        if (!error) return false;
+        if (String(error.code || "") === "inactive_role") return true;
+        if (error.role_active === false || error.roleActive === false) return true;
+        return INACTIVE_ROLE_MARKER.test(String(error.message || error || ""));
+    }
+
     function createLocalStorageAdapter(storage, queueKey) {
         var key = LEGACY_PREFIX + queueKey;
         var sequenceKey = key + ":sequence";
@@ -472,6 +488,36 @@
             });
         }
 
+        /* Неактивная роль — состояние допуска, а не отказ события: записи не
+           удаляем и не повторяем по таймеру. auth_required — существующий
+           терминальный статус очереди: он уходит из «Ожидает отправки» в
+           «Нужна сверка» и возобновляется при загрузке экрана с рабочей ролью
+           (restore({resumeAuthRequired: true})), то есть после восстановления
+           роли работа уходит сама. */
+        function parkInactiveRole(events) {
+            var chain = Promise.resolve();
+            events.forEach(function (event) {
+                chain = chain.then(function () {
+                    return updateEvent(event.event_id, {
+                        sync_state: "auth_required",
+                        last_error_code: "inactive_role",
+                        last_error: INACTIVE_ROLE_MESSAGE,
+                        next_retry_at: 0
+                    }).then(function () {
+                        if (typeof options.onAttention === "function") {
+                            options.onAttention(clone(event), {
+                                event_id: event.event_id,
+                                status: "auth_required",
+                                code: "inactive_role",
+                                message: INACTIVE_ROLE_MESSAGE
+                            });
+                        }
+                    });
+                });
+            });
+            return chain;
+        }
+
         function eligible(events) {
             var now = Date.now();
             var blocked = Object.create(null);
@@ -602,6 +648,7 @@
                             return Promise.resolve(request).then(function (payload) {
                                 return applyResults(batch, payload);
                             }, function (error) {
+                                if (inactiveRoleRefusal(error)) return parkInactiveRole(batch);
                                 var chain = Promise.resolve();
                                 batch.forEach(function (event) {
                                     chain = chain.then(function () { return markRetry(event, error.message || error); });

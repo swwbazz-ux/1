@@ -38,6 +38,7 @@ from shifts.services import (
     shift_plan_totals_for_dates,
 )
 from trips.dispatcher_header import build_dispatcher_header_context
+from trips.dispatcher_duty import log_dispatcher_action
 from trips.tablet_control import get_control_shift, is_tablet_master_request
 from trips.models import (
     DispatcherActionLog,
@@ -3569,7 +3570,10 @@ def update_shift_report_trip(request, access, selected_date, shift_type, report_
             return barrier_response
         trip = (
             Trip.objects
-            .select_for_update()
+            # `actual_dump_point` необязательная связь: PostgreSQL не даёт взять
+            # FOR UPDATE на nullable стороне outer join, поэтому блокируем только
+            # строку рейса (of=('self',)), а связанные таблицы читаем как обычно.
+            .select_for_update(of=('self',))
             .select_related('rock_type', 'actual_dump_point', 'dump_point', 'truck', 'excavator')
             .get(pk=trip_id, status=TripStatus.COMPLETED)
         )
@@ -3584,6 +3588,7 @@ def update_shift_report_trip(request, access, selected_date, shift_type, report_
             'downtime_text': trip.downtime_text,
             'note': trip.note,
         }
+        before_names = {'rock_type_id': trip.rock_type, 'actual_dump_point_id': trip.actual_dump_point}
         try:
             trip.volume_m3 = parse_report_decimal(
                 request.POST.get('volume_m3'), 'Объём', Decimal('99999999.99'),
@@ -3635,12 +3640,24 @@ def update_shift_report_trip(request, access, selected_date, shift_type, report_
         }
         changed = [field for field in before if before[field] != after[field]]
         if changed:
-            DispatcherActionLog.objects.create(
-                actor=access.employee,
+            labels = {'volume_m3': 'Объём, м³', 'tonnage': 'Масса, т', 'transport_distance_km': 'Плечо, км',
+                      'loading_horizon': 'Горизонт', 'loading_block': 'Блок', 'rock_type_id': 'Порода',
+                      'actual_dump_point_id': 'Точка разгрузки', 'downtime_text': 'Простой', 'note': 'Примечание'}
+            after_names = {'rock_type_id': trip.rock_type, 'actual_dump_point_id': trip.actual_dump_point}
+            def display(value):
+                return '—' if value is None or value == '' else str(value)
+
+            changes = [
+                f'{labels[key]}: {display(before_names.get(key, before[key]))} → {display(after_names.get(key, after[key]))}'
+                for key in changed
+            ]
+            log_dispatcher_action(
+                actor=access.employee, access=access, request=request,
                 action_type='report_source_correction',
                 trip=trip,
                 shift=trip.loading_shift or trip.unloading_shift,
                 target_summary=f'Коррекция рейса №{trip.id}: {", ".join(changed)}'[:255],
+                duty_detail=' · '.join(changes),
                 reason=reason[:255],
             )
         messages.success(request, f'Данные рейса №{trip.id} обновлены. Отчёт пересчитан.')
@@ -4338,8 +4355,8 @@ def volume_report_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')
-    access = get_report_access(request)
-    if not access or (access.role.code not in {'dispatcher', 'admin', 'manager'} and not is_tablet_master_request(request, access)):
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
+    if not access:
         return redirect('role_home')
 
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
@@ -4391,8 +4408,8 @@ def volume_report_export_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')
-    access = get_report_access(request)
-    if not access or (access.role.code not in {'dispatcher', 'admin', 'manager'} and not is_tablet_master_request(request, access)):
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
+    if not access:
         return redirect('role_home')
 
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
@@ -4446,7 +4463,7 @@ def shift_analytics_report_context(request):
 
 
 def shift_analytics_report_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(
@@ -4511,10 +4528,11 @@ def management_dynamics_report_context(request):
 
 
 MANAGEMENT_REPORT_ROLE_CODES = frozenset({'admin', 'manager'})
+MANAGEMENT_OVERVIEW_ROLE_CODES = MANAGEMENT_REPORT_ROLE_CODES | {'site_manager'}
 
 
 def management_dynamics_view(request):
-    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
+    access = get_reports_access(request, MANAGEMENT_OVERVIEW_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(
@@ -4543,7 +4561,7 @@ def append_shift_analytics_rows(sheet, title, rows, headers, getters):
 
 
 def shift_analytics_report_export_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     context = shift_analytics_report_context(request)
@@ -4682,7 +4700,7 @@ def downtime_report_context(request):
 
 
 def downtime_report_view(request):
-    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic'})
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(
@@ -4702,7 +4720,7 @@ def downtime_report_view(request):
 
 
 def downtime_report_export_view(request):
-    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic'})
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     context = downtime_report_context(request)
@@ -4851,6 +4869,10 @@ def get_reports_access(request, allowed_roles):
         'dispatcher' in allowed_roles and is_tablet_master_request(request, access)
     ):
         return None
+    if access.role.code == 'site_manager':
+        from users.views import get_current_access
+
+        return get_current_access(request)
     return access
 
 
@@ -5820,8 +5842,19 @@ def build_customer_daily_report(selected_date):
     }
 
 
-def customer_daily_report_context(request):
-    selected_date = parse_customer_report_date(request)
+def management_report_date(request):
+    return (
+        parse_filter_date(request.GET.get('date'))
+        or parse_filter_date(request.GET.get('overview_date'))
+        or production_work_date()
+    )
+
+
+def customer_daily_report_context(request, access):
+    if access.role.code in MANAGEMENT_OVERVIEW_ROLE_CODES and not getattr(request, 'mining_master_tablet_control', False):
+        selected_date = management_report_date(request)
+    else:
+        selected_date = parse_customer_report_date(request)
     report = build_customer_daily_report(selected_date)
     return {
         **report,
@@ -5832,11 +5865,11 @@ def customer_daily_report_context(request):
 
 
 def customer_daily_report_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
-    report_context = customer_daily_report_context(request)
+    report_context = customer_daily_report_context(request, access)
     return render(
         request,
         'reports/customer_daily_report.html',
@@ -5926,11 +5959,11 @@ def append_customer_reconciliation_sheet(workbook, reconciliation_rows):
 
 
 def customer_daily_report_export_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
-    context = customer_daily_report_context(request)
+    context = customer_daily_report_context(request, access)
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Суточный отчет'
@@ -6031,7 +6064,7 @@ def management_dashboard_context(request, access):
         .select_related('equipment', 'equipment__equipment_type', 'reason', 'employee')
         .order_by('started_at')
     )
-    selected_date = parse_customer_report_date(request)
+    selected_date = management_report_date(request)
     shift_analytics_source = load_shift_analytics_data(selected_date)
     shift_analytics = build_shift_analytics(
         selected_date,
@@ -6311,10 +6344,23 @@ def management_dashboard_context(request, access):
 
 
 def management_dashboard_view(request):
-    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
+    access = get_reports_access(request, MANAGEMENT_OVERVIEW_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
-    return render(request, 'reports/management_dashboard.html', management_dashboard_context(request, access))
+    version = (
+        OperationalStateVersion.objects.filter(key='production').values_list('version', flat=True).first()
+        or 0
+    )
+    context = management_dashboard_context(request, access)
+    if request.GET.get('_operational_fragment') == 'management-overview':
+        return operational_fragment_response(
+            render(request, 'reports/management_overview_content.html', context),
+            screen='management-overview',
+            selector='[data-management-overview-live]',
+            version=version,
+        )
+    context['operational_state_version'] = version
+    return render(request, 'reports/management_dashboard.html', context)
 
 
 @require_GET
@@ -6357,7 +6403,7 @@ def style_management_export_sheet(sheet):
 
 
 def management_dashboard_export_view(request):
-    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
+    access = get_reports_access(request, MANAGEMENT_OVERVIEW_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 

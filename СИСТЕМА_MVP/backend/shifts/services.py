@@ -58,6 +58,23 @@ class DriverShiftCloseIdempotencyConflict(ValidationError):
     pass
 
 
+def driver_open_shift_queryset(employee):
+    """Open driver shifts accepted by both the work screen and recovery truth.
+
+    ``workplace_code`` was added after the first driver shifts existed. Keep
+    the explicit driver code and the legacy empty-code truck shape in one
+    domain helper so the screen and background voice recovery cannot drift.
+    """
+    return (
+        EmployeeShift.objects
+        .filter(employee=employee, closed_at__isnull=True)
+        .filter(
+            Q(workplace_code='driver')
+            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
+        )
+    )
+
+
 def _canonical_driver_close_reading(value):
     try:
         number = Decimal(str(value))
@@ -177,10 +194,7 @@ def open_shift_conflict_message(shift, *, equipment=None):
     return f'Смена на технике {equipment} уже открыта другим сотрудником.'
 
 
-# Одна открытая смена на сотрудника во всех контурах (unique_open_shift_per_employee).
-# Когда один человек с несколькими ролями открывает смену в новой роли, а в
-# старой она ещё открыта, все экраны предлагают одно и то же: «завершить её и
-# начать» — вместо отказа (или, как у мастера до 10.09.2026, белого экрана 500).
+# Общая пересменка для сотрудников без разрешения на параллельные смены.
 WORKPLACE_ROLE_LABELS = {
     'driver': 'Водитель',
     'excavator_operator': 'Машинист экскаватора',
@@ -197,6 +211,29 @@ WORKPLACE_ROLE_LABELS_GENITIVE = {
 }
 OTHER_ROLE_SHIFT_OPEN_CODE = 'other_role_shift_open'
 OTHER_ROLE_SHIFT_FIELD = 'close_other_role_shift'
+
+
+def can_work_parallel_roles(employee):
+    from users.models import Employee, EmployeeAccess
+
+    return (
+        employee.allow_parallel_role_shifts
+        and employee.is_protected
+        and employee.is_active
+        and employee.status == Employee.Status.ACTIVE
+        and EmployeeAccess.objects.filter(
+            employee=employee,
+            role__code='admin',
+            role__is_active=True,
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        ).exists()
+    )
+
+
+def employee_shift_scope(workplace_code, *, parallel_roles):
+    """Keep old unclassified shifts in scope until their role is known."""
+    return Q(workplace_code__in=(workplace_code, '')) if parallel_roles else Q()
 
 
 def workplace_role_label(workplace_code):
@@ -239,6 +276,8 @@ class OtherRoleShiftOpen(ValidationError):
 def find_other_role_open_shift(employee, *, workplace_code, for_update=True):
     """Открытая смена сотрудника в другой роли (пустой workplace_code — старые
     записи, их роль неизвестна, поэтому они не считаются «другой ролью»)."""
+    if can_work_parallel_roles(employee):
+        return None
     queryset = EmployeeShift.objects.select_related('employee', 'equipment', 'equipment__equipment_type')
     if for_update:
         queryset = queryset.select_for_update(of=('self',))
@@ -629,6 +668,7 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
     if existing_shift:
         return existing_shift, False
     from references.models import Equipment
+    from trips.manual_loading import attach_pending_excavator_trip_to_driver_shift
     try:
         with transaction.atomic():
             lock_idempotency_key('driver_shift_opened', client_action_id)
@@ -669,9 +709,11 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
                 close_other=close_other_role_shift,
                 closed_by=employee,
             )
+            parallel_roles = can_work_parallel_roles(employee)
             employee_open_shift = (
                 EmployeeShift.objects
                 .select_related('employee', 'equipment', 'equipment__equipment_type')
+                .filter(employee_shift_scope('driver', parallel_roles=parallel_roles))
                 .filter(employee=employee, closed_at__isnull=True)
                 .order_by('id')
                 .first()
@@ -711,12 +753,14 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
                 opened_by=employee,
                 shift_type=locked_assignment.shift_type,
                 workplace_code='driver',
+                parallel_role_slot=parallel_roles,
                 watch_period=watch_period,
                 equipment=equipment,
                 opened_at=opened_at,
                 **readings,
             )
             assign_shift_plan_snapshot(shift)
+            attach_pending_excavator_trip_to_driver_shift(shift)
             corrections = []
             if previous_shift:
                 for start_field, end_field, metric in DRIVER_SHIFT_READING_FIELDS:
@@ -777,10 +821,9 @@ def open_driver_shift_from_device(
 ):
     """Открыть смену водителя по факту действия на телефоне (очередь без связи).
 
-    Телефон — источник истины: смена уже идёт на телефоне, сервер её только
-    записывает. Поэтому здесь нет отказов по бизнес-причинам:
+    Телефон — источник времени открытия. При сверке события:
     * время открытия — время телефона (``opened_at``);
-    * открытая смена того же сотрудника в любой роли и на любом устройстве, а
+    * открытая смена того же сотрудника, с учётом разрешения на параллельные роли, а
       также чужая открытая смена на этом самосвале закрываются служебно
       моментом открытия новой (решение Б «завершить и начать»);
     * показания пишутся как введены, проверка топлива по баку — только в журнал.
@@ -793,6 +836,7 @@ def open_driver_shift_from_device(
     if existing_shift:
         return existing_shift, False, []
     from references.models import Equipment
+    from trips.manual_loading import attach_pending_excavator_trip_to_driver_shift
     from users.models import Employee
 
     notes = []
@@ -802,6 +846,11 @@ def open_driver_shift_from_device(
         if existing_shift:
             return existing_shift, False, []
         employee = Employee.objects.select_for_update().get(pk=employee.pk)
+        parallel_roles = can_work_parallel_roles(employee)
+        if parallel_roles and EmployeeShift.objects.filter(
+            employee=employee, workplace_code='', closed_at__isnull=True,
+        ).exists():
+            raise ValidationError('У открытой смены не определена роль. Нужна сверка.')
         equipment = (
             Equipment.objects
             .select_for_update(of=('self',))
@@ -813,7 +862,10 @@ def open_driver_shift_from_device(
             .select_for_update(of=('self',))
             .select_related('equipment', 'equipment__equipment_type')
             .filter(closed_at__isnull=True)
-            .filter(Q(employee=employee) | Q(equipment=equipment))
+            .filter(
+                (Q(employee=employee) & employee_shift_scope('driver', parallel_roles=parallel_roles))
+                | Q(equipment=equipment)
+            )
             .order_by('opened_at', 'id')
         )
         for previous in displaced:
@@ -849,12 +901,14 @@ def open_driver_shift_from_device(
             opened_by=employee,
             shift_type=shift_type,
             workplace_code='driver',
+            parallel_role_slot=parallel_roles,
             watch_period=watch_period,
             equipment=equipment,
             opened_at=opened_at,
             **readings,
         )
         assign_shift_plan_snapshot(shift)
+        attach_pending_excavator_trip_to_driver_shift(shift)
         corrections = []
         if previous_shift:
             for start_field, end_field, metric in DRIVER_SHIFT_READING_FIELDS:
@@ -1223,21 +1277,25 @@ def shift_plan_totals(date):
     return shift_plan_totals_for_dates([date])[date]
 
 
-def get_equipment_shift_plan(equipment, date, shift_type):
-    if not equipment or not date or not shift_type:
-        return None
+def active_equipment_shift_plans(date, shift_type):
     return (
         EquipmentShiftPlan.objects
         .select_related('shift_plan', 'equipment', 'employee')
         .filter(
-            equipment=equipment,
             is_active=True,
             shift_plan__date=date,
             shift_plan__shift_type=shift_type,
             shift_plan__is_active=True,
         )
-        .first()
+        # Several named plans can exist for the same equipment and period.
+        .order_by('shift_plan__date', 'shift_plan__shift_type', 'equipment__garage_number', 'pk')
     )
+
+
+def get_equipment_shift_plan(equipment, date, shift_type):
+    if not equipment or not date or not shift_type:
+        return None
+    return active_equipment_shift_plans(date, shift_type).filter(equipment=equipment).first()
 
 
 def get_equipment_plan_group(equipment):
@@ -1488,6 +1546,11 @@ def calculate_progress_from_snapshot(shift, trips):
 def calculate_progress_from_trip_queryset(equipment, date, shift_type, trips):
     plan = get_equipment_shift_plan(equipment, date, shift_type)
     facts = aggregate_trip_facts(trips)
+    return calculate_legacy_equipment_progress(equipment, date, shift_type, plan, facts)
+
+
+def calculate_legacy_equipment_progress(equipment, date, shift_type, plan, facts):
+    facts = normalize_trip_facts(facts)
     trip_count = facts['trip_count']
     volume_m3 = facts['volume_m3']
     tonnage = facts['tonnage']
@@ -1584,6 +1647,59 @@ def calculate_truck_shift_progress(truck, reference_shift=None):
         )
         return calculate_equipment_shift_progress(truck, date, reference_shift.shift_type)
     return empty_progress(truck, status=PlanAssignmentStatus.NO_PLAN_GROUP)
+
+
+def calculate_truck_shift_progress_batch(trucks, open_shifts_by_truck_id, reference_shift):
+    """Calculate Excavator cards using the open shifts already loaded for the screen."""
+    trucks_by_id = {truck.pk: truck for truck in trucks}
+    open_shifts = {
+        truck_id: shift for truck_id, shift in open_shifts_by_truck_id.items()
+        if truck_id in trucks_by_id
+    }
+    trips = Trip.objects.filter(status=TripStatus.COMPLETED)
+    open_shift_facts = {
+        (row['truck_id'], row['unloading_shift_id']): row
+        for row in trips.filter(
+            truck_id__in=open_shifts,
+            unloading_shift_id__in=[shift.pk for shift in open_shifts.values()],
+        ).order_by().values('truck_id', 'unloading_shift_id').annotate(
+            trip_count=Count('id'), volume_m3=Sum('volume_m3'), tonnage=Sum('tonnage'),
+        )
+    }
+    result = {
+        truck_id: calculate_progress_from_snapshot_facts(shift, open_shift_facts.get((truck_id, shift.pk)))
+        for truck_id, shift in open_shifts.items()
+    }
+    remaining = trucks_by_id.keys() - open_shifts.keys()
+    if not remaining:
+        return result
+    if not reference_shift.opened_at or not reference_shift.shift_type:
+        result.update((truck_id, empty_progress(trucks_by_id[truck_id], status=PlanAssignmentStatus.NO_PLAN_GROUP))
+                      for truck_id in remaining)
+        return result
+
+    shift_type = reference_shift.shift_type
+    date = production_work_date_for_shift(reference_shift.opened_at, shift_type)
+    period_start, period_end = assigned_shift_open_bounds(date, shift_type)
+    plans = {}
+    for plan in active_equipment_shift_plans(date, shift_type).filter(equipment_id__in=remaining):
+        plans.setdefault(plan.equipment_id, plan)
+    period_facts = {
+        row['unloading_shift__equipment_id']: row
+        for row in trips.filter(
+            unloading_shift__equipment_id__in=remaining,
+            unloading_shift__shift_type=shift_type,
+            unloading_shift__opened_at__gte=period_start,
+            unloading_shift__opened_at__lt=period_end,
+        ).order_by().values('unloading_shift__equipment_id').annotate(
+            trip_count=Count('id'), volume_m3=Sum('volume_m3'), tonnage=Sum('tonnage'),
+        )
+    }
+    for truck_id in remaining:
+        result[truck_id] = calculate_legacy_equipment_progress(
+            trucks_by_id[truck_id], date, shift_type, plans.get(truck_id), period_facts.get(truck_id),
+        )
+    return result
 
 
 def calculate_open_shift_progress(open_shift):
@@ -1992,9 +2108,11 @@ def _open_excavator_shift_atomic(
             code=OTHER_ROLE_SHIFT_OPEN_CODE,
             extra={'other_role_shift': error.prompt},
         ) from error
+    parallel_roles = can_work_parallel_roles(employee)
     employee_open_shift = (
         EmployeeShift.objects
         .select_related('employee', 'equipment', 'equipment__equipment_type')
+        .filter(employee_shift_scope('excavator_operator', parallel_roles=parallel_roles))
         .filter(employee=employee, closed_at__isnull=True)
         .order_by('id')
         .first()
@@ -2036,6 +2154,7 @@ def _open_excavator_shift_atomic(
         equipment=equipment,
         shift_type=shift_type,
         workplace_code='excavator_operator',
+        parallel_role_slot=parallel_roles,
         start_fuel=fuel,
         start_mileage=None,
         start_engine_hours=engine_hours,
@@ -2156,6 +2275,7 @@ def open_excavator_shift(
         employee_open_shift = (
             EmployeeShift.objects
             .select_related('employee', 'equipment', 'equipment__equipment_type')
+            .filter(employee_shift_scope('excavator_operator', parallel_roles=can_work_parallel_roles(employee)))
             .filter(employee=employee, closed_at__isnull=True)
             .order_by('id')
             .first()

@@ -24,6 +24,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # T-029 D3 (QA-4): fail-closed. Если номер собственного фонда уже занят
+        # общежитием другого типа, команда ничего не пишет и не «переподписывает»
+        # kind молча — ни в режиме --check, ни в режиме загрузки.
+        self._ensure_own_numbers_are_own()
         if options['check']:
             self._check_current_fund()
             self.stdout.write(self.style.SUCCESS('Физический фонд подтверждён.'))
@@ -43,12 +47,35 @@ class Command(BaseCommand):
             )
         )
 
+    def _ensure_own_numbers_are_own(self):
+        conflicting = list(
+            Dormitory.objects
+            .filter(number__in=('5', '6'))
+            .exclude(kind=Dormitory.Kind.OWN)
+            .order_by('number')
+            .values_list('number', 'kind')
+        )
+        if not conflicting:
+            return
+        details = ', '.join(
+            f'КИС-{number} (kind={kind})' for number, kind in conflicting
+        )
+        raise CommandError(
+            'Номер 5 и 6 закреплён за собственным фондом. '
+            f'Обнаружен другой тип: {details}. '
+            'Команда ничего не изменила: исправьте тип общежития вручную '
+            'и повторите запуск.'
+        )
+
     def _load_fund(self):
         dormitories = {}
         for number in ('5', '6'):
             dormitory, _created = Dormitory.objects.update_or_create(
                 number=number,
-                defaults={'is_active': True},
+                defaults={
+                    'is_active': True,
+                    'kind': Dormitory.Kind.OWN,
+                },
             )
             dormitories[number] = dormitory
 
@@ -94,11 +121,14 @@ class Command(BaseCommand):
                 PhysicalRoom.objects
                 .select_related('dormitory')
                 .prefetch_related('beds')
-                .filter(dormitory__number__in=['5', '6'])
+                .filter(
+                    dormitory__number__in=['5', '6'],
+                    dormitory__kind=Dormitory.Kind.OWN,
+                )
             )
         }
 
-        if set(current_rooms) != set(expected_rooms):
+        if not expected_rooms.keys() <= current_rooms.keys():
             raise CommandError(
                 'Набор физических комнат КИС-5/КИС-6 не совпадает '
                 'с подтверждённой структурой.'

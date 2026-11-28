@@ -1,5 +1,6 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -7,10 +8,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const backendRoot = path.resolve(__dirname, "..", "..", "..");
-const templateSource = fs.readFileSync(
-    path.join(backendRoot, "templates", "trips", "excavator_work.html"),
-    "utf8"
-).replace(/\r\n?/g, "\n");
+const templateSource = excavatorScreenSource().replace(/\r\n?/g, "\n");
 const shiftCss = fs.readFileSync(
     path.join(backendRoot, "static", "css", "excavator-work-v55-shift.css"),
     "utf8"

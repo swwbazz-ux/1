@@ -1,14 +1,20 @@
 import json
 import re
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.staticfiles import finders
-from django.test import Client, TestCase
+from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from PIL import Image
 
 from references.models import (
@@ -19,7 +25,10 @@ from references.models import (
     EquipmentModel,
     EquipmentType,
 )
+from rotations.models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
 from shifts.models import EmployeeShift, WatchPeriod
+from users.active_role import ACTIVE_ROLE_GENERATION_SESSION_KEY
+from users.live_monitor import create_observer_token
 from users.models import (
     DriverPrimaryRegistration,
     Employee,
@@ -30,12 +39,162 @@ from users.models import (
     TemporaryWorkTransfer,
     WorkSchedule,
 )
+from users.work_profiles import employee_has_effective_access_role
 
-from .models import AssignmentStatus, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
-from .services import get_active_equipment_assignment, get_or_create_crew_draft, set_active_equipment_assignment
+from .models import (
+    AssignmentStatus, CrewOffEquipment, CrewPlan, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment,
+    OffEquipmentStatus, WorkShiftType,
+)
+from .off_equipment import off_equipment_on
+from .services import (
+    get_active_equipment_assignment,
+    get_or_create_crew_draft,
+    production_work_date,
+    set_active_equipment_assignment,
+)
 
 
 class DeputyPlanningViewTests(TestCase):
+    def test_employee_card_transfer_publishes_only_the_removal_and_preserves_other_draft_edits(self):
+        original = self.create_draft()
+        self.publish(original)
+        other = Employee.objects.create(
+            full_name='Резервов Проверочный Водитель', status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        draft = self.create_draft()
+        edited = self.client.post(reverse('deputy_mining_manager_slot'), {
+            'plan_id': draft.pk, 'expected_version': draft.version, 'equipment_id': self.truck_2.pk,
+            'shift_type': WorkShiftType.SHIFT_2, 'employee_id': other.pk,
+        }, content_type='application/json')
+        self.assertEqual(edited.status_code, 200, edited.content)
+        draft.refresh_from_db()
+        response = self.client.post(reverse('deputy_off_equipment_transfer'), {
+            'plan_id': draft.pk, 'expected_plan_version': draft.version, 'work_date': draft.work_date.isoformat(),
+            'employee_id': self.driver.pk, 'status': OffEquipmentStatus.SUSPENDED,
+            'shift_type': WorkShiftType.SHIFT_1, 'location': 'Площадка сборки',
+        }, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        original.refresh_from_db()
+        self.assertEqual(original.status, CrewPlanStatus.SUPERSEDED)
+        self.assertTrue(original.slots.filter(employee=self.driver).exists())
+        live = CrewPlan.objects.get(role=self.driver_role, work_date=draft.work_date, status=CrewPlanStatus.PUBLISHED)
+        self.assertFalse(live.slots.filter(employee_id__in=[self.driver.pk, other.pk]).exists())
+        next_draft = CrewPlan.objects.get(pk=response.json()['payload']['plan']['id'])
+        self.assertTrue(next_draft.slots.filter(equipment=self.truck_2, employee=other, baseline_employee=None).exists())
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=self.driver, ended_at__isnull=True).exists())
+        duty = CrewOffEquipment.objects.get(employee=self.driver, work_date=draft.work_date)
+        self.assertEqual((duty.status, duty.location), (OffEquipmentStatus.SUSPENDED, 'Площадка сборки'))
+        self.assertContains(self.client.get(reverse('deputy_off_equipment')), self.driver.full_name)
+
+    def test_employee_card_transfer_checks_draft_version_and_open_shift(self):
+        plan = self.create_draft()
+        body = {
+            'plan_id': plan.pk, 'expected_plan_version': plan.version, 'work_date': plan.work_date.isoformat(),
+            'employee_id': self.driver.pk, 'status': OffEquipmentStatus.RESERVE, 'shift_type': WorkShiftType.SHIFT_1,
+        }
+        url = reverse('deputy_off_equipment_transfer')
+        stale = self.client.post(url, {**body, 'expected_plan_version': plan.version + 1}, content_type='application/json')
+        self.assertEqual(stale.status_code, 409, stale.content)
+        EmployeeShift.objects.create(
+            employee=self.driver, equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_1,
+            opened_at=timezone.now(), opened_by=self.driver,
+        )
+        opened = self.client.post(url, body, content_type='application/json')
+        self.assertEqual(opened.status_code, 400)
+        self.assertIn('открыта смена', opened.json()['error'])
+        self.assertTrue(plan.slots.filter(equipment=self.truck_1, employee=self.driver).exists())
+        self.assertFalse(CrewOffEquipment.objects.filter(employee=self.driver).exists())
+
+    def test_employee_card_can_move_a_free_legacy_driver_into_reserve(self):
+        worker, _access = self.create_employee_with_access(
+            'Проверкин Свободный Водитель', self.driver_role, phone='+79000000972', access_code='219972',
+        )
+        plan = self.create_draft()
+        response = self.client.post(reverse('deputy_off_equipment_transfer'), {
+            'plan_id': plan.pk, 'expected_plan_version': plan.version, 'work_date': plan.work_date.isoformat(),
+            'employee_id': worker.pk, 'status': OffEquipmentStatus.RESERVE, 'shift_type': WorkShiftType.SHIFT_2,
+        }, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['payload']['plan']['id'], plan.pk)
+        self.assertEqual(CrewOffEquipment.objects.get(employee=worker).status, OffEquipmentStatus.RESERVE)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+
+    def test_off_equipment_publication_is_read_by_settlement_and_blocks_equipment_until_return(self):
+        from types import SimpleNamespace
+
+        from settlement.views import _employee_profiles, _resident_work_display
+
+        day = production_work_date()
+        person = Employee.objects.create(
+            full_name='Проверкин Тестовый Водитель', status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        url = reverse('deputy_off_equipment')
+        search_url = url + '?q=Проверкин'
+        self.assertContains(self.client.get(search_url), 'Требует уточнения')
+        body = {
+            'employee_id': person.pk, 'work_date': day.isoformat(), 'status': OffEquipmentStatus.SUSPENDED,
+            'shift_type': WorkShiftType.SHIFT_1, 'location': 'Площадка сборки · помощь слесарям',
+        }
+        self.assertRedirects(self.client.post(search_url, body), search_url, fetch_redirect_response=False)
+        entry = CrewOffEquipment.objects.get(employee=person, work_date=day)
+        self.assertEqual(entry.status, OffEquipmentStatus.SUSPENDED)
+        self.assertTrue(off_equipment_on(day + timedelta(days=1), employee_ids=[person.pk]).exists())
+
+        resident = SimpleNamespace(organization='')
+        profile = _employee_profiles([person], settlement_date=day)[person.pk]
+        display = _resident_work_display(resident, None, profile, from_excel=True)
+        self.assertIn('Площадка сборки', display['work_label'])
+        self.assertEqual(display['assignment_warning'], '')
+
+        response = self.upload_crew_excel(
+            [['Самосвал БЕЛАЗ', self.truck_2.garage_number, person.full_name, None]],
+            selections={'factual': '1'},
+        )
+        self.assertContains(response, OffEquipmentStatus.SUSPENDED.label, status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+
+        plan = self.create_draft()
+        slot_body = {
+            'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+            'shift_type': WorkShiftType.SHIFT_1, 'employee_id': person.pk, 'factual': True,
+        }
+        response = self.client.post(reverse('deputy_mining_manager_slot'), slot_body, content_type='application/json')
+        self.assertEqual(response.json()['code'], 'crew_off_equipment')
+        body['expected_version'] = entry.updated_at.isoformat()
+        response = self.client.post(search_url, {**body, 'status': OffEquipmentStatus.RESERVE})
+        self.assertContains(response, 'Сначала подтвердите возврат', status_code=400)
+        response = self.client.post(search_url, {**body, 'status': OffEquipmentStatus.CLEARED})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(off_equipment_on(day + timedelta(days=1), employee_ids=[person.pk]).exists())
+        self.assertEqual(self.client.post(
+            reverse('deputy_mining_manager_slot'), slot_body, content_type='application/json',
+        ).status_code, 200)
+
+    def test_reserve_is_cleared_only_when_the_crew_is_published(self):
+        person = Employee.objects.create(
+            full_name='Резервов Тестовый Водитель', status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        day = production_work_date()
+        url = reverse('deputy_off_equipment')
+        data = {'work_date': day.isoformat(), 'status': OffEquipmentStatus.RESERVE, 'shift_type': WorkShiftType.SHIFT_1}
+        self.assertEqual(self.client.post(url, {**data, 'employee_id': self.driver.pk}).status_code, 400)
+        self.assertEqual(self.client.post(url, {**data, 'employee_id': person.pk}).status_code, 302)
+        plan = self.create_draft()
+        response = self.client.post(reverse('deputy_mining_manager_slot'), {
+            'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+            'shift_type': WorkShiftType.SHIFT_1, 'employee_id': person.pk,
+        }, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(off_equipment_on(day, employee_ids=[person.pk]).exists())
+        published = self.client.post(reverse('deputy_mining_manager_publish'), {
+            'plan_id': plan.pk, 'expected_version': response.json()['payload']['plan']['version'],
+        }, content_type='application/json')
+        self.assertEqual(published.status_code, 200, published.content)
+        self.assertFalse(off_equipment_on(day, employee_ids=[person.pk]).exists())
+
     def setUp(self):
         self.deputy_role, _created = Role.objects.update_or_create(
             code='deputy_mining_manager',
@@ -136,7 +295,590 @@ class DeputyPlanningViewTests(TestCase):
         )
         return plan
 
-    def autosave_slot(self, plan, *, equipment, shift_type, employee):
+    def crew_excel_bytes(self, rows):
+        workbook = Workbook()
+        workbook.active.title = 'Старая версия'
+        sheet = workbook.create_sheet('Лист1')
+        sheet.append([None, None, 'смена 1', 'смена 2'])
+        for row in rows:
+            sheet.append(row)
+        data = BytesIO()
+        workbook.save(data)
+        return data.getvalue()
+
+    def upload_crew_excel(self, rows, *, work_date=None, confirmation='', selections=None):
+        payload = rows if isinstance(rows, bytes) else self.crew_excel_bytes(rows)
+        return self.client.post(
+            reverse('deputy_mining_manager_import'),
+            {
+                'work_date': (work_date or production_work_date()).isoformat(),
+                'workbook': SimpleUploadedFile('Расстановка.xlsx', payload),
+                'draft_confirmation': confirmation,
+                **(selections or {}),
+            },
+        )
+
+    def test_excel_import_publishes_a_swap_and_repeat_is_a_no_op(self):
+        second, _ = self.create_employee_with_access(
+            'Петров Николай Иванович',
+            self.driver_role,
+            phone='+79000000011',
+            access_code='210011',
+            position='Водитель самосвала',
+        )
+        set_active_equipment_assignment(
+            employee=second, role=self.driver_role, equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_2, assigned_by=self.deputy,
+        )
+        rows = [
+            ['Самосвал БЕЛАЗ', self.truck_1.garage_number, 'Петров Н. И.', self.driver.full_name],
+            ['Автокран', '103', None, 'Машинист крана'],
+        ]
+        response = self.upload_crew_excel(rows)
+        self.assertContains(response, 'Расстановка опубликована')
+        self.assertContains(response, 'Автокран')
+        plan = CrewPlan.objects.get(role=self.driver_role, status=CrewPlanStatus.PUBLISHED)
+        self.assertEqual(plan.published_by, self.deputy)
+        self.assertEqual(get_active_equipment_assignment(second, 'driver').shift_type, WorkShiftType.SHIFT_1)
+        self.assertEqual(get_active_equipment_assignment(self.driver, 'driver').shift_type, WorkShiftType.SHIFT_2)
+        self.assertContains(self.upload_crew_excel(rows), 'Назначения уже совпадают')
+        self.assertEqual(CrewPlan.objects.filter(role=self.driver_role, published_at__isnull=False).count(), 1)
+
+    def test_auxiliary_fleet_tabs_and_publication(self):
+        from .crew_categories import AUXILIARY_CATEGORIES
+
+        call_command('prepare_deputy_fleet')
+        call_command('prepare_deputy_fleet')
+        for code, category in AUXILIARY_CATEGORIES.items():
+            with self.subTest(category=code):
+                response = self.client.get(reverse('deputy_mining_manager_placement'), {'role': code})
+                payload = response.context['planning_payload']
+                self.assertEqual(len(payload['categories']), 10)
+                self.assertEqual(len(payload['rows']), len(category.numbers))
+                self.assertTrue(all(len(row['slots']) == 2 for row in payload['rows']))
+                self.assertFalse(payload['role']['supports_secondary'])
+                self.assertNotIn(self.driver.id, {e['id'] for e in payload['employees']})
+        self.driver.base_specialization = ProductionSpecialization.objects.get(code='bulldozer_operator')
+        self.driver.save(update_fields=['base_specialization'])
+        self.original_assignment.ended_at = timezone.now()
+        self.original_assignment.save(update_fields=['ended_at'])
+        rows = [['Колесник', 1, None, self.driver.full_name], ['Бульдозер', 1, 'Снять', None]]
+        self.assertContains(self.upload_crew_excel(rows), 'Расстановка опубликована')
+        plan = CrewPlan.objects.get(role__code='crew_wheel_dozer', status=CrewPlanStatus.PUBLISHED)
+        slot = plan.slots.get(employee=self.driver)
+        self.assertEqual(slot.shift_type, WorkShiftType.SHIFT_2)
+        self.assertEqual(slot.equipment.equipment_type.name, 'Колёсный бульдозер')
+        report = self.client.get(reverse('deputy_mining_manager_placement'), {'role': plan.role.code, 'plan': plan.id})
+        self.assertFalse(report.context['planning_payload']['plan']['editable'])
+        trucks = self.client.get(reverse('deputy_mining_manager_placement')).context['planning_payload']
+        robots = [row['equipment'] for row in trucks['rows'] if row['equipment']['is_robot']]
+        self.assertEqual([item['label'] for item in robots], ['53 · Робот'])
+
+    def test_people_search_before_visiting_category_and_after_draft_change(self):
+        url = reverse('deputy_placement_people')
+        self.assertEqual(Client().get(url).status_code, 403)
+        self.authenticate(self.client, self.driver_access)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.authenticate(self.client, self.deputy_access)
+        second, _ = self.create_employee_with_access(
+            self.driver.full_name, self.driver_role, phone='+79000000401', access_code='210401',
+            personnel_number='Т-402',
+        )
+        def people():
+            response = self.client.get(url)
+            self.assertIn('no-store', response['Cache-Control'])
+            return {p['id']: p for p in response.json()['people']}
+
+        entries = people()
+        self.assertFalse(CrewPlan.objects.exists())
+        self.assertEqual(entries[self.driver.pk]['places'], [
+            dict(role='driver', equipment=self.truck_1.pk, number='Т-01', shift='day', position='primary'),
+        ])
+        self.assertEqual(entries[second.pk]['places'], [])
+        self.assertEqual(entries[second.pk]['roles'], ['driver'])
+        self.assertNotIn(self.deputy.pk, entries)
+        plan = self.create_draft()
+        plan.slots.filter(employee=self.driver).update(employee=None)
+        plan.slots.filter(equipment=self.truck_2, shift_type='night').update(
+            reported_employee=second, secondary_employee=self.driver,
+        )
+        entries = people()
+        for person, position in [(second, 'primary'), (self.driver, 'secondary')]:
+            self.assertEqual(entries[person.pk]['places'], [
+                dict(role='driver', equipment=self.truck_2.pk, number='Т-02', shift='night', position=position),
+            ])
+
+    def test_reported_primary_visible_in_publication_without_operational_assignment(self):
+        call_command('prepare_deputy_fleet')
+        # The worker must be released from the current truck before joining a roller crew.
+        self.original_assignment.ended_at = timezone.now()
+        self.original_assignment.save(update_fields=['ended_at'])
+        before = list(EmployeeAccess.objects.values_list('id', 'role_id', 'is_active'))
+        book = self.crew_excel_bytes([['Каток', '', self.driver.full_name, None]])
+        self.assertContains(self.upload_crew_excel(book), 'специализация', status_code=400)
+        request = {
+            'work_date': production_work_date().isoformat(), 'factual': '1',
+            'workbook': SimpleUploadedFile('Расстановка.xlsx', book),
+        }
+        self.assertContains(self.client.post(reverse('deputy_mining_manager_import'), request), 'Расстановка опубликована')
+        plan = CrewPlan.objects.get(role__code='crew_roller', status=CrewPlanStatus.PUBLISHED)
+        slot = plan.slots.get(shift_type=WorkShiftType.SHIFT_1)
+        self.assertEqual(slot.reported_employee, self.driver)
+        self.assertIsNone(slot.employee_id)
+        self.assertFalse(EquipmentAssignment.objects.filter(role=plan.role).exists())
+        self.assertEqual(before, list(EmployeeAccess.objects.values_list('id', 'role_id', 'is_active')))
+        for params in [{'role': plan.role.code, 'plan': plan.pk}, {'role': plan.role.code}]:
+            page = self.client.get(reverse('deputy_mining_manager_placement'), params)
+            payload = page.context['planning_payload']
+            self.assertEqual(payload['rows'][0]['slots'][0]['reported_name'], self.driver.full_name)
+            review = payload['rows'][0]['slots'][0]['specialization_review']
+            self.assertEqual(review['employee_id'], self.driver.pk)
+            self.assertEqual(review['position'], self.driver.position)
+            self.assertEqual(review['required'], ProductionSpecialization.objects.get(code='roller_operator').name)
+            self.assertEqual(review['issue'], 'Не соответствует производственной специализации')
+            self.assertFalse(review['can_assign'])
+            self.assertTrue(review['warning'])
+            self.assertEqual(payload['summary']['assigned_count'], 1)
+        clear = self.upload_crew_excel([['Каток', '', 'Снять', None]])
+        self.assertContains(clear, 'Расстановка опубликована')
+        self.assertFalse(CrewPlan.objects.filter(role=plan.role, status=CrewPlanStatus.PUBLISHED, slots__reported_employee=self.driver).exists())
+
+    def test_other_category_reserves_all_seats_in_draft_and_current_publication(self):
+        call_command('prepare_deputy_fleet')
+        spare, _ = self.create_employee_with_access('Тестовый Свободный Водитель', self.driver_role,
+                                                     phone='+79000000087', access_code='219987')
+        truck_plan = self.create_draft()
+        roller, _ = get_or_create_crew_draft(role='crew_roller')
+        slot = roller.slots.filter(shift_type=WorkShiftType.SHIFT_2).get()
+        url = reverse('deputy_mining_manager_slot')
+        body = dict(plan_id=truck_plan.pk, expected_version=truck_plan.version, equipment_id=self.truck_2.pk,
+                    shift_type=WorkShiftType.SHIFT_1, employee_id=spare.pk)
+        for status in (CrewPlanStatus.DRAFT, CrewPlanStatus.PUBLISHED):
+            roller.status = status
+            roller.save(update_fields=['status'])
+            for field in ('employee', 'secondary_employee', 'reported_employee'):
+                with self.subTest(field=field, status=status):
+                    setattr(slot, field, spare)
+                    slot.save(update_fields=[field])
+                    response = self.client.post(url, body, content_type='application/json')
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(response.json()['code'], 'duplicate_employee')
+                    for detail in ('Каток', 'вторая смена', spare.full_name):
+                        self.assertIn(detail, response.json()['error'])
+                    plan = self.client.get(reverse('deputy_mining_manager_placement')).context['planning_payload']
+                    self.assertNotIn(spare.pk, [p['id'] for p in plan['employees']])
+                    setattr(slot, field, None)
+                    slot.save(update_fields=[field])
+        slot.reported_employee = spare
+        slot.save(update_fields=['reported_employee'])
+        roller.status = CrewPlanStatus.SUPERSEDED
+        roller.save(update_fields=['status'])
+        self.assertEqual(self.client.post(url, body, content_type='application/json').status_code, 200)
+
+    def test_factual_excel_duplicates_between_tabs_roll_back_the_whole_workbook(self):
+        call_command('prepare_deputy_fleet')
+        person = Employee.objects.create(full_name='Проверочный Рабочий Участка', status=Employee.Status.ACTIVE)
+        rows = [['Вахтовый автобус', '103', person.full_name, None], ['Каток', '', person.full_name, None]]
+        response = self.client.post(reverse('deputy_mining_manager_import'), {
+            'work_date': production_work_date().isoformat(), 'factual': '1',
+            'workbook': SimpleUploadedFile('Расстановка.xlsx', self.crew_excel_bytes(rows)),
+        })
+        self.assertContains(response, person.full_name, status_code=400)
+        self.assertContains(response, 'уже в экипаже', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+        self.assertFalse(CrewPlanSlot.objects.filter(reported_employee=person).exists())
+
+    def test_excel_can_release_previous_factual_place_later_in_same_workbook(self):
+        call_command('prepare_deputy_fleet')
+        person = Employee.objects.create(full_name='Переводимый Рабочий Участка', status=Employee.Status.ACTIVE)
+
+        def publish(rows):
+            response = self.client.post(reverse('deputy_mining_manager_import'), {
+                'work_date': production_work_date().isoformat(), 'factual': '1',
+                'workbook': SimpleUploadedFile('Перенос.xlsx', self.crew_excel_bytes(rows)),
+            })
+            self.assertContains(response, 'Расстановка опубликована')
+
+        publish([['Каток', '', person.full_name, None]])
+        publish([['Вахтовый автобус', '103', person.full_name, None], ['Каток', '', 'Снять', None]])
+        current = CrewPlanSlot.objects.filter(plan__status=CrewPlanStatus.PUBLISHED, reported_employee=person)
+        self.assertEqual(list(current.values_list('plan__role__code', flat=True)), ['crew_bus'])
+
+    def test_existing_double_booking_visible_and_single_plan_publication_rejected(self):
+        call_command('prepare_deputy_fleet')
+        plan, _ = get_or_create_crew_draft(role='crew_roller')
+        slot = plan.slots.get(shift_type=WorkShiftType.SHIFT_1)
+        slot.reported_employee = self.driver
+        slot.save(update_fields=['reported_employee'])
+        payload = self.client.get(reverse('deputy_mining_manager_placement'), {'role': 'crew_roller'}).context['planning_payload']
+        self.assertEqual(payload['summary']['conflict_count'], 1)
+        self.assertIn(self.truck_1.garage_number, payload['rows'][0]['slots'][0]['issue'])
+        response = self.client.post(reverse('deputy_mining_manager_publish'),
+                                    {'plan_id':plan.pk, 'expected_version':plan.version}, content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(self.truck_1.garage_number, response.json()['error'])
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, CrewPlanStatus.DRAFT)
+
+    def test_manual_factual_placement_publishes_with_nonblocking_specialization_warning(self):
+        person, _ = self.create_employee_with_access(
+            'Машинист из фактической смены', self.excavator_role,
+            phone='+79000000091', access_code='219991', rotation='Бригада 1',
+        )
+        placement_url = reverse('deputy_mining_manager_placement')
+        response = self.client.get(placement_url)
+        data = response.context['planning_payload']
+        self.assertIn(person.pk, {item['id'] for item in data['factual_candidates']})
+        self.assertNotIn(person.pk, {item['id'] for item in data['employees']})
+        slot_url = reverse('deputy_mining_manager_slot')
+        body = {
+            'plan_id': data['plan']['id'], 'expected_version': data['plan']['version'],
+            'equipment_id': self.truck_2.pk, 'shift_type': WorkShiftType.SHIFT_2,
+            'employee_id': person.pk,
+        }
+        response = self.client.post(slot_url, body, content_type='application/json')
+        self.assertEqual(response.json()['code'], 'invalid_work_category')
+
+        response = self.client.post(slot_url, {**body, 'factual': True}, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()['payload']
+        slots = [slot for row in data['rows'] for slot in row['slots']]
+        flagged = next(slot for slot in slots if slot.get('reported_name') == person.full_name)
+        self.assertTrue(flagged['specialization_review']['warning'])
+        self.assertEqual(data['summary']['conflict_count'], 0)
+
+        response = self.client.post(
+            reverse('deputy_mining_manager_publish'),
+            {'plan_id': body['plan_id'], 'expected_version': data['plan']['version']},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(CrewPlanSlot.objects.filter(
+            plan__status=CrewPlanStatus.PUBLISHED, reported_employee=person, equipment=self.truck_2,
+        ).exists())
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=person, role=self.driver_role).exists())
+
+    def test_deputy_uses_unique_specialization_without_a_saved_value(self):
+        specialization = ProductionSpecialization.objects.get(code='haul_truck_driver')
+        specialization.access_role = self.driver_role
+        specialization.save(update_fields=['access_role'])
+        position = PersonnelPosition.objects.get(default_specialization=specialization)
+        person = Employee.objects.create(
+            full_name='Водитель из фактической смены', personnel_position=position, status=Employee.Status.ACTIVE,
+        )
+        plan = self.create_draft()
+        url = reverse('deputy_mining_manager_placement')
+        payload = self.client.get(url).context['planning_payload']
+        self.assertIn(person.pk, {item['id'] for item in payload['employees']})
+        self.assertNotIn(person.pk, {item['id'] for item in payload['factual_candidates']})
+        self.assertFalse(employee_has_effective_access_role(person, self.driver_role.code))
+
+        slot = plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1)
+        plan.slots.filter(pk=slot.pk).update(reported_employee=person)
+        payload = self.client.get(url).context['planning_payload']
+        review = next(slot['specialization_review'] for row in payload['rows'] for slot in row['slots']
+                      if slot['reported_name'] == person.full_name)
+        self.assertEqual(review['base'], '')
+        self.assertEqual(review['current'], specialization.name)
+        self.assertFalse(review['warning'])
+        self.assertTrue(review['can_assign'])
+        person.refresh_from_db()
+        self.assertIsNone(person.base_specialization_id)
+
+        response = self.client.post(reverse('deputy_mining_manager_slot'), {
+            'plan_id': plan.pk, 'expected_version': payload['plan']['version'],
+            'equipment_id': self.truck_2.pk, 'shift_type': WorkShiftType.SHIFT_1, 'employee_id': person.pk,
+        }, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        slot.refresh_from_db()
+        self.assertEqual(slot.employee_id, person.pk)
+        self.assertIsNone(slot.reported_employee_id)
+        person.refresh_from_db()
+        self.assertIsNone(person.base_specialization_id)
+        published = self.client.post(reverse('deputy_mining_manager_publish'), {
+            'plan_id': plan.pk, 'expected_version': response.json()['payload']['plan']['version'],
+        }, content_type='application/json')
+        self.assertEqual(published.status_code, 200, published.content)
+        self.assertTrue(EquipmentAssignment.objects.filter(employee=person, equipment=self.truck_2).exists())
+        self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
+
+    def test_deputy_can_save_a_matching_specialization_with_the_assignment(self):
+        role, _ = Role.objects.get_or_create(code='crew_kdm', defaults={'name': 'КДМ'})
+        equipment_type, _ = EquipmentType.objects.get_or_create(name='КДМ')
+        equipment = Equipment.objects.create(equipment_type=equipment_type, garage_number='055')
+        position = PersonnelPosition.objects.get(name='Водитель автомобиля грузового')
+        person = Employee.objects.create(
+            full_name='Тестовый водитель грузового автомобиля', personnel_position=position, status=Employee.Status.ACTIVE,
+        )
+        correct = ProductionSpecialization.objects.get(code='cargo_kdm_driver')
+        wrong = ProductionSpecialization.objects.get(code='cargo_prm_driver')
+        page = self.client.get(reverse('deputy_mining_manager_placement'), {'role': role.code})
+        payload = page.context['planning_payload']
+        candidate = next(item for item in payload['factual_candidates'] if item['id'] == person.pk)
+        self.assertEqual(candidate['specialization_choices'], [{
+            'id': correct.pk, 'name': correct.name, 'positions': ['primary'],
+        }])
+        slot_url = reverse('deputy_mining_manager_slot')
+        body = {
+            'plan_id': payload['plan']['id'], 'expected_version': payload['plan']['version'],
+            'equipment_id': equipment.pk, 'shift_type': WorkShiftType.SHIFT_1, 'employee_id': person.pk,
+        }
+        response = self.client.post(slot_url, {**body, 'specialization_id': wrong.pk}, content_type='application/json')
+        self.assertEqual(response.json()['code'], 'specialization_choice_changed')
+        person.refresh_from_db()
+        self.assertIsNone(person.base_specialization_id)
+        slot = CrewPlanSlot.objects.get(plan_id=body['plan_id'], equipment=equipment, shift_type=WorkShiftType.SHIFT_1)
+        self.assertIsNone(slot.employee_id)
+
+        response = self.client.post(slot_url, {**body, 'factual': True}, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        slot.refresh_from_db()
+        self.assertEqual(slot.reported_employee_id, person.pk)
+        person.refresh_from_db()
+        self.assertIsNone(person.base_specialization_id)
+
+        body['expected_version'] = response.json()['payload']['plan']['version']
+        response = self.client.post(slot_url, {**body, 'specialization_id': correct.pk}, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        person.refresh_from_db()
+        slot.refresh_from_db()
+        self.assertEqual(person.base_specialization_id, correct.pk)
+        self.assertEqual(slot.employee_id, person.pk)
+        self.assertIsNone(slot.reported_employee_id)
+        self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=person).exists())
+
+    def test_reported_truck_driver_has_no_operational_grant(self):
+        person = Employee.objects.create(full_name='Тестовый водитель без специализации', status=Employee.Status.ACTIVE)
+        response = self.client.post(reverse('deputy_mining_manager_import'), {
+            'work_date': production_work_date().isoformat(), 'factual': '1',
+            'workbook': SimpleUploadedFile('Расстановка.xlsx', self.crew_excel_bytes([
+                ['Самосвал', self.truck_2.garage_number, person.full_name, None],
+            ])),
+        })
+        self.assertContains(response, 'Расстановка опубликована')
+        slot = CrewPlanSlot.objects.get(plan__status=CrewPlanStatus.PUBLISHED, reported_employee=person)
+        self.assertEqual(slot.equipment, self.truck_2)
+        self.assertIsNone(slot.employee_id)
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=person).exists())
+        self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
+
+    def test_excel_shows_sheet_and_directory_spellings_without_assigning_a_similar_name(self):
+        for misspelled in (
+            'Иванов Сергей Павлович', 'Иванов Серегй Петрович', 'Ивнаов Сергей Петрович',
+            'Иванов Серегй',
+        ):
+            with self.subTest(name=misspelled):
+                response = self.upload_crew_excel([
+                    ['Самосвал', self.truck_2.garage_number, misspelled, None],
+                ])
+                self.assertContains(response, f'В Excel — «{misspelled}»', status_code=422)
+                self.assertContains(response, 'name="employee_C2_1"', status_code=422)
+                self.assertContains(response, f'{self.driver.full_name} · таб. Т-001', status_code=422)
+        self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
+        self.original_assignment.refresh_from_db()
+        self.assertIsNone(self.original_assignment.ended_at)
+
+    def test_excel_employee_choice_is_explicit_and_carried_into_draft_confirmation(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        namesake, _ = self.create_employee_with_access(
+            self.driver.full_name, self.driver_role, personnel_number='Т-009',
+            phone='+79000000009', access_code='210009', position='Водитель самосвала',
+        )
+        workbook = self.crew_excel_bytes([
+            ['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name],
+        ])
+        invalid = self.upload_crew_excel(workbook, selections={'employee_D2_1': str(self.deputy.pk)})
+        self.assertContains(invalid, 'name="employee_D2_1"', status_code=422)
+        self.assertContains(invalid, 'таб. Т-009', status_code=422)
+        selection = {'employee_D2_1': str(self.driver.pk)}
+        review = self.upload_crew_excel(workbook, selections=selection)
+        self.assertEqual(review.status_code, 409)
+        self.assertContains(
+            review, f'type="hidden" name="employee_D2_1" value="{self.driver.pk}"', status_code=409,
+        )
+        token = review.context['draft_confirmation']
+        changed = self.upload_crew_excel(
+            workbook, confirmation=token, selections={'employee_D2_1': str(namesake.pk)},
+        )
+        self.assertEqual(changed.status_code, 409)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+        final = self.upload_crew_excel(workbook, confirmation=token, selections=selection)
+        self.assertContains(final, 'Расстановка опубликована')
+        self.assertEqual(
+            plan.slots.get(equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_2).employee, self.driver,
+        )
+
+    def test_excel_import_rolls_back_all_categories_on_an_invalid_row(self):
+        response = self.upload_crew_excel([
+            ['Самосвал', self.truck_1.garage_number, 'Снять', None],
+            ['Экскаватор 3000', '999', self.driver.full_name, None],
+        ])
+        self.assertContains(response, 'C3. Номер техники', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
+        self.original_assignment.refresh_from_db()
+        self.assertIsNone(self.original_assignment.ended_at)
+
+    def test_excel_import_publishes_excavator_and_truck_plans_together(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator_model = EquipmentModel.objects.create(
+            equipment_type=excavator_type, name='Экскаватор 3000',
+        )
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type, model=excavator_model, garage_number='3',
+        )
+        operator, _ = self.create_employee_with_access(
+            'Машинист Александр Викторович',
+            self.excavator_role,
+            phone='+79000000012',
+            access_code='210012',
+            position='Машинист экскаватора',
+        )
+        trainee, _ = self.create_employee_with_access(
+            'Машинист Иван Викторович',
+            self.excavator_role,
+            phone='+79000000014',
+            access_code='210014',
+            position='Машинист экскаватора',
+        )
+        response = self.upload_crew_excel([
+            ['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name],
+            ['Экскаватор 3000', '003', None, f'{operator.full_name}\n{trainee.full_name}'],
+        ])
+        self.assertContains(response, 'Расстановка опубликована')
+        self.assertEqual(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).count(), 2)
+        assignment = get_active_equipment_assignment(operator, 'excavator_operator')
+        self.assertEqual(assignment.equipment, excavator)
+        self.assertEqual(assignment.shift_type, WorkShiftType.SHIFT_2)
+        slot = CrewPlanSlot.objects.get(
+            plan__status=CrewPlanStatus.PUBLISHED,
+            equipment=excavator,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        self.assertEqual(slot.secondary_employee, trainee)
+        self.assertIsNone(get_active_equipment_assignment(trainee, 'excavator_operator'))
+
+    def test_excavator_second_place_distinguishes_assistant_and_trainee(self):
+        excavator = Equipment.objects.create(
+            equipment_type=EquipmentType.objects.create(name='Экскаватор'),
+            garage_number='3',
+        )
+        operator, _ = self.create_employee_with_access(
+            'Машинист Иван Викторович',
+            self.excavator_role,
+            phone='+79000000014',
+            access_code='210014',
+            position='Машинист экскаватора',
+        )
+        assistant = Employee.objects.create(
+            full_name='Помощник Иван Викторович',
+            status=Employee.Status.ACTIVE,
+            base_specialization=ProductionSpecialization.objects.get(code='assistant_excavator_operator'),
+        )
+        plan, _created = get_or_create_crew_draft(role=self.excavator_role, actor=self.deputy)
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            {'role': self.excavator_role.code},
+            HTTP_HOST='localhost',
+        )
+        payload = response.context['planning_payload']
+        self.assertEqual(payload['secondary_employee_label'], 'Помощник или стажёр')
+        eligible_positions = {row['id']: row['eligible_positions'] for row in payload['employees']}
+        self.assertEqual(eligible_positions[operator.id], ['primary', 'secondary'])
+        self.assertEqual(eligible_positions[assistant.id], ['secondary'])
+
+        for employee, label in ((operator, 'Стажёр'), (assistant, 'Помощник машиниста')):
+            response, plan = self.autosave_slot(
+                plan,
+                equipment=excavator,
+                shift_type=WorkShiftType.SHIFT_1,
+                employee=employee,
+                position='secondary',
+            )
+            slot = response.json()['payload']['rows'][0]['slots'][0]
+            self.assertEqual(slot['secondary_label'], label)
+            self.assertEqual(slot['secondary_employee']['id'], employee.id)
+
+    def test_excel_import_preserves_unspecified_slots_and_rejects_duplicates(self):
+        response = self.upload_crew_excel([['Самосвал', self.truck_2.garage_number, self.driver.full_name, None]])
+        self.assertContains(response, 'Сотрудник оказался назначен дважды', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
+        self.assertEqual(get_active_equipment_assignment(self.driver, 'driver'), self.original_assignment)
+
+    def test_excel_import_does_not_publish_hand_edited_draft(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        response = self.upload_crew_excel([['Самосвал', self.truck_1.garage_number, self.driver.full_name, None]])
+        self.assertContains(response, 'есть ручные правки', status_code=409)
+        self.assertContains(response, 'Заменить черновик и опубликовать', status_code=409)
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, CrewPlanStatus.DRAFT)
+        self.assertEqual(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).employee, self.driver)
+
+    def test_excel_import_replaces_draft_and_publishes_only_excel_changes(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        workbook = self.crew_excel_bytes([
+            ['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name],
+        ])
+        preview = self.upload_crew_excel(workbook)
+        self.assertEqual(preview.status_code, 409)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+        response = self.upload_crew_excel(workbook, confirmation=preview.context['draft_confirmation'])
+        self.assertContains(response, 'Расстановка опубликована')
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, CrewPlanStatus.PUBLISHED)
+        self.assertIsNone(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).employee)
+        current = get_active_equipment_assignment(self.driver, 'driver')
+        self.assertEqual((current.equipment, current.shift_type), (self.truck_1, WorkShiftType.SHIFT_2))
+
+    def test_excel_import_requires_confirmation_again_if_file_or_draft_changed(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        workbook = self.crew_excel_bytes([['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name]])
+        preview = self.upload_crew_excel(workbook)
+        token = preview.context['draft_confirmation']
+        changed_file = self.crew_excel_bytes([['Самосвал', self.truck_1.garage_number, 'Снять', None]])
+        self.assertContains(
+            self.upload_crew_excel(changed_file, confirmation=token),
+            'Подтверди замену заново',
+            status_code=409,
+        )
+        plan.refresh_from_db()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_2, employee=self.driver)
+        response = self.upload_crew_excel(workbook, confirmation=token)
+        self.assertContains(response, 'Подтверди замену заново', status_code=409)
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, CrewPlanStatus.DRAFT)
+        self.assertEqual(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_2).employee, self.driver)
+        self.assertEqual(get_active_equipment_assignment(self.driver, 'driver'), self.original_assignment)
+
+    def test_excel_import_keeps_the_draft_if_confirmed_workbook_has_an_error(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        workbook = self.crew_excel_bytes([['Самосвал', '999', self.driver.full_name, None]])
+        preview = self.upload_crew_excel(workbook)
+        response = self.upload_crew_excel(workbook, confirmation=preview.context['draft_confirmation'])
+        self.assertContains(response, 'C2. Номер техники', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+        self.assertEqual(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).employee, self.driver)
+
+    def test_excel_import_rejects_an_old_date_and_other_roles(self):
+        url = reverse('deputy_mining_manager_import')
+        self.assertContains(self.client.get(url), 'Загрузить и опубликовать')
+        response = self.upload_crew_excel(
+            [['Самосвал', self.truck_1.garage_number, 'Снять', None]],
+            work_date=production_work_date() - timedelta(days=1),
+        )
+        self.assertContains(response, 'Производственные сутки изменились', status_code=400)
+        self.authenticate(self.client, self.driver_access)
+        self.assertRedirects(self.client.get(url), reverse('role_home'), fetch_redirect_response=False)
+        response = self.upload_crew_excel([['Самосвал', self.truck_1.garage_number, 'Снять', None]])
+        self.assertRedirects(response, reverse('role_home'), fetch_redirect_response=False)
+        self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
+
+    def autosave_slot(self, plan, *, equipment, shift_type, employee, position='primary'):
         response = self.client.post(
             reverse('deputy_mining_manager_slot'),
             data=json.dumps({
@@ -145,6 +887,7 @@ class DeputyPlanningViewTests(TestCase):
                 'equipment_id': equipment.id,
                 'shift_type': shift_type,
                 'employee_id': employee.id if employee else None,
+                'position': position,
             }),
             content_type='application/json',
             HTTP_HOST='localhost',
@@ -200,6 +943,176 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(categories['excavator_operator']['status_label'], 'Черновик')
         self.assertEqual(categories['excavator_operator']['revision'], excavator_plan.revision)
         self.assertEqual(categories['excavator_operator']['published_at_label'], '')
+
+    def test_dispatcher_card_shows_only_current_published_factual_crew(self):
+        person = Employee.objects.create(full_name='Водитель из фактического состава', status=Employee.Status.ACTIVE)
+        dispatcher_role, _ = Role.objects.get_or_create(code='dispatcher', defaults={'name': 'Горный диспетчер'})
+        _, dispatcher_access = self.create_employee_with_access(
+            'Тестовый диспетчер', dispatcher_role, phone='+79000000073', access_code='217773',
+        )
+
+        def read_card(board_name, detail_name):
+            page = self.client.get(reverse(board_name))
+            detail = reverse(detail_name, args=('equipment', self.truck_2.pk))
+            response = self.client.get(detail, {'state_version': page.context['operational_state_version']})
+            self.assertEqual(response.status_code, 200)
+            return response.json()['card']
+
+        day = datetime(2026, 11, 27, 11, 0, tzinfo=ZoneInfo('Asia/Vladivostok'))
+        with patch('core.production_time.timezone.now', return_value=day):
+            plan = self.create_draft()
+            plan.slots.filter(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).update(reported_employee=person)
+            board, detail = 'deputy_dispatcher_control', 'deputy_dispatcher_equipment_detail'
+            self.assertIsNone(read_card(board, detail)['employee'])
+            published = self.client.post(
+                reverse('deputy_mining_manager_publish'),
+                {'plan_id': plan.pk, 'expected_version': plan.version},
+                content_type='application/json',
+            )
+            self.assertEqual(published.status_code, 200, published.content)
+            card = read_card(board, detail)
+            self.assertEqual(card['employee']['name'], person.full_name)
+            self.assertIn('По опубликованной расстановке', card['employee']['presence_label'])
+            self.assertIsNone(card['shift'])
+            self.assertFalse((card['manual_trip'] or {}).get('can_add'))
+            self.authenticate(self.client, dispatcher_access)
+            dispatcher_card = read_card('dispatcher_control', 'dispatcher_equipment_detail')
+            self.assertEqual(dispatcher_card['employee'], card['employee'])
+
+            with patch('core.production_time.timezone.now', return_value=day + timedelta(hours=9)):
+                self.assertIsNone(read_card('dispatcher_control', 'dispatcher_equipment_detail')['employee'])
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=person).exists())
+        self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
+
+    def test_dispatcher_board_is_live_and_read_only_for_deputy(self):
+        board = reverse('deputy_dispatcher_control')
+        detail = reverse('deputy_dispatcher_equipment_detail', args=('equipment', self.truck_1.pk))
+        self.assertContains(self.client.get(reverse('deputy_mining_manager_placement')), board)
+        with patch('trips.views.reconcile_due_haul_assignments') as reconcile:
+            page = self.client.get(board)
+            fragment = self.client.get(board, {'_operational_fragment': 'dispatcher'})
+            version = page.context['operational_state_version']
+            card = self.client.get(detail, {'state_version': version})
+        reconcile.assert_not_called()
+        self.assertContains(page, 'data-dispatcher-view-only="true"')
+        self.assertContains(page, 'Только просмотр')
+        self.assertContains(page, 'data-dispatcher-equipment-search')
+        self.assertNotContains(page, 'data-dispatcher-move-url')
+        self.assertNotContains(page, 'draggable="true"')
+        self.assertNotContains(page, 'data-gd-setting-save')
+        self.assertEqual(fragment.status_code, 200)
+        self.assertIn('Только просмотр', fragment.json()['html'])
+        for html in (page.content.decode(), fragment.json()['html']):
+            self.assertIn(f'href="{reverse("deputy_mining_manager_placement")}">← Вернуться в расстановку</a>', html)
+            self.assertNotIn(f'href="{reverse("logout")}"', html)
+            self.assertNotIn('Ручной рейс', html)
+        self.assertEqual(card.status_code, 200)
+        self.assertEqual(self.client.post(board).status_code, 405)
+        self.assertEqual(self.client.post(detail).status_code, 403)
+        for name in ('dispatcher_assign_truck', 'dispatcher_move_excavator'):
+            self.assertEqual(self.client.post(reverse(name), {}, content_type='application/json').status_code, 403)
+        self.assertRedirects(Client().get(board), 'https://deputy.driverform.ru/', fetch_redirect_response=False)
+        self.authenticate(self.client, self.driver_access)
+        self.assertEqual(self.client.get(board).status_code, 403)
+        self.assertEqual(self.client.get(detail, {'state_version': version}).status_code, 403)
+
+    @override_settings(ALLOWED_HOSTS=['www.driverform.ru', 'deputy.driverform.ru', 'dispatcher.driverform.ru'])
+    def test_deputy_dispatcher_expired_session_returns_to_deputy_login_from_each_host(self):
+        board = reverse('deputy_dispatcher_control')
+        poll = reverse('deputy_dispatcher_state')
+        detail = reverse('deputy_dispatcher_equipment_detail', args=('equipment', self.truck_1.pk))
+        login_url = 'https://deputy.driverform.ru/'
+        self.deputy_access.last_login_at = timezone.now()
+        self.deputy_access.save(update_fields=['last_login_at'])
+
+        for host in ('www.driverform.ru', 'deputy.driverform.ru', 'dispatcher.driverform.ru'):
+            with self.subTest(host=host):
+                session = self.client.session
+                session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = self.deputy_access.last_login_at.isoformat()
+                session.save()
+                page = self.client.get(board, HTTP_HOST=host)
+                self.assertContains(page, f'loginUrl: "{login_url}"')
+                self.assertTrue(self.client.get(poll, HTTP_HOST=host).json()['role_active'])
+
+                session = self.client.session
+                session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = (self.deputy_access.last_login_at - timedelta(seconds=1)).isoformat()
+                session.save()
+                self.assertRedirects(self.client.get(board, HTTP_HOST=host), login_url, fetch_redirect_response=False)
+                for response in (
+                    self.client.get(poll, HTTP_HOST=host),
+                    self.client.get(board, {'_operational_fragment': 'dispatcher'}, HTTP_HOST=host),
+                    self.client.get(detail, {'state_version': page.context['operational_state_version']}, HTTP_HOST=host),
+                ):
+                    self.assertEqual(response.status_code, 401)
+
+    @override_settings(ALLOWED_HOSTS=['deputy.driverform.ru'])
+    def test_relogin_after_deputy_dispatcher_session_expiry_opens_placement_and_allows_roundtrip(self):
+        host = {'HTTP_HOST': 'deputy.driverform.ru', 'secure': True}
+        board = reverse('deputy_dispatcher_control')
+        placement = reverse('deputy_mining_manager_placement')
+        login = reverse('login')
+        for stale_session in (False, True):
+            with self.subTest(stale_session=stale_session):
+                client = Client()
+                if stale_session:
+                    self.deputy_access.last_login_at = timezone.now()
+                    self.deputy_access.save(update_fields=['last_login_at'])
+                    self.authenticate(client, self.deputy_access)
+                    session = client.session
+                    session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = (
+                        self.deputy_access.last_login_at - timedelta(seconds=1)
+                    ).isoformat()
+                    session.save()
+
+                expired = client.get(board, **host)
+                self.assertRedirects(expired, 'https://deputy.driverform.ru/', fetch_redirect_response=False)
+                self.assertContains(client.get(login, **host), 'Вход · Расстановка')
+                signed_in = client.post(
+                    login,
+                    {'phone': self.deputy.phone, 'access_code': '610001'},
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                    **host,
+                )
+                self.assertEqual(signed_in.json(), {'ok': True, 'redirect_url': placement})
+                roster = client.get(placement, **host)
+                self.assertContains(roster, self.deputy.full_name)
+                self.assertContains(roster, f'href="{board}">Диспетчерский пульт</a>')
+                in_board = client.get(board, **host)
+                self.assertContains(in_board, f'href="{placement}">← Вернуться в расстановку</a>')
+                self.assertContains(client.get(placement, **host), self.deputy.full_name)
+
+    def test_dispatcher_viewer_polls_production_events_without_running_reconciliation(self):
+        from core.models import bump_operational_state
+
+        endpoint = reverse('deputy_dispatcher_state')
+        current = self.client.get(reverse('deputy_dispatcher_control')).context['operational_state_version']
+        bump_operational_state(event_type='trip_changed', payload={'internal_detail': 'hidden'})
+        with patch('assignments.services.reconcile_due_haul_assignments_throttled') as reconcile:
+            response = self.client.get(endpoint, {'after': current, 'role_app_code': 'deputy_mining_manager'})
+        reconcile.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['role_active'])
+        self.assertEqual(response.json()['events'], [{'type': 'trip_changed', 'version': current + 1}])
+        self.assertFalse(self.client.get(reverse('operational_state_version'), {'after': current}).json()['events'])
+        self.authenticate(self.client, self.driver_access)
+        self.assertEqual(self.client.get(endpoint, {'after': current}).status_code, 403)
+
+    def test_category_data_uses_the_same_plan_and_permissions_as_page(self):
+        endpoint = reverse('deputy_mining_manager_placement_data')
+        for client in (Client(), self.client):
+            if client is self.client:
+                self.authenticate(client, self.driver_access)
+            self.assertEqual(client.get(endpoint).status_code, 403)
+        self.authenticate(self.client, self.deputy_access)
+        for query in ({'role': 'driver'}, {'role': 'excavator_operator'},
+                      {'role': 'driver', 'date': (production_work_date() - timedelta(days=1)).isoformat()}):
+            page = self.client.get(reverse('deputy_mining_manager_placement'), query)
+            response = self.client.get(endpoint, query)
+            initial = re.search(r'<script id="deputy-planning-data" type="application/json">(.*?)</script>',
+                                page.content.decode(), re.S)
+            self.assertEqual(response.json()['payload'], json.loads(initial.group(1)))
+            self.assertEqual(response.json()['access_id'], self.deputy_access.pk)
+            self.assertIn('no-store', response.headers['Cache-Control'])
 
     def test_profile_is_available_only_to_deputy_and_role_home_routes_to_board(self):
         response = self.client.get(reverse('role_home'), HTTP_HOST='localhost')
@@ -258,6 +1171,50 @@ class DeputyPlanningViewTests(TestCase):
             self.assertContains(response, 'name="apple-mobile-web-app-capable" content="yes"')
             self.assertContains(response, 'deputy-mining-manager-180.png')
             self.assertContains(response, 'deputy-mining-manager-pwa-v1.js')
+
+    def test_deputy_header_identity_uses_own_active_admin_profile_and_photo(self):
+        admin_access = EmployeeAccess.objects.create(
+            employee=self.deputy, role=Role.objects.create(code='admin', name='Администратор'),
+            access_code='110098', status=EmployeeAccess.Status.ACTIVATED,
+        )
+        with TemporaryDirectory() as directory, override_settings(MEDIA_ROOT=directory):
+            buffer = BytesIO()
+            Image.new('RGB', (1, 1)).save(buffer, format='PNG')
+            self.deputy.photo.save('avatar.png', SimpleUploadedFile('avatar.png', buffer.getvalue()))
+            for route in (
+                'deputy_off_equipment', 'deputy_mining_manager_placement',
+                'deputy_mining_manager_import', 'deputy_mining_manager_reports',
+                'deputy_mining_manager_arrival_roster_routing',
+            ):
+                with self.subTest(route=route):
+                    response = self.client.get(reverse(route))
+                    self.assertContains(response, '<em title="Администратор">Администратор</em>', html=True)
+                    self.assertContains(response, f'src="{self.deputy.photo.url}"')
+                    self.assertEqual(response.context['access'].pk, self.deputy_access.pk)
+
+            admin_access.status = EmployeeAccess.Status.BLOCKED
+            admin_access.save(update_fields=['status'])
+            self.deputy.photo.storage.delete(self.deputy.photo.name)
+            response = self.client.get(reverse('deputy_off_equipment'))
+            self.assertContains(response, f'<em title="{self.deputy_role.name}">{self.deputy_role.name}</em>', html=True)
+            self.assertContains(response, '<span class="admin-console-avatar" aria-hidden="true">З</span>', html=True)
+            self.assertNotContains(response, self.deputy.photo.url)
+
+    def test_deputy_header_identity_shows_signed_observer_without_changing_target(self):
+        admin, admin_access = self.create_employee_with_access(
+            'Администратор Проверочный', Role.objects.create(code='admin', name='Администратор'),
+            phone='+79000000199', access_code='110099',
+        )
+        url = reverse('deputy_off_equipment')
+        token = create_observer_token(actor_access=admin_access, target_access=self.deputy_access)
+        response = self.client.get(url, {'observe': token})
+        self.assertContains(response, f'<strong title="{admin.full_name}">{admin.full_name}</strong>', html=True)
+        self.assertContains(response, '<em title="Администратор">Администратор</em>', html=True)
+        self.assertEqual(response.context['access'], self.deputy_access)
+        self.assertEqual(response.context['observer_employee'], self.deputy)
+        self.assertEqual(self.client.post(url + '?observe=' + token, {}).status_code, 403)
+        self.authenticate(self.client, admin_access)
+        self.assertRedirects(self.client.get(url), reverse('role_home'), fetch_redirect_response=False)
 
     def test_deputy_pages_expose_standard_header_subtitles(self):
         expected_subtitles = {
@@ -397,7 +1354,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
         self.assertIn(
-            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v17";',
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v26";',
             script,
         )
         self.assertIn('/static/js/role-readonly.js', script)
@@ -650,6 +1607,154 @@ class DeputyPlanningViewTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertEqual(missing_response.status_code, 404)
+
+    def create_watch_roster(self):
+        work_date = production_work_date()
+        period = WatchPeriod.objects.create(name='Вахта для продления', starts_on=work_date, ends_on=work_date)
+        cycle = RotationCollectionCycle.objects.create(
+            name='Сбор', target_watch_period=period, response_deadline=timezone.now(),
+        )
+        people = {}
+        for index, (label, brigade, status, start, end) in enumerate([
+            ('Своя', 2, '', 0, 0),
+            ('Чужая', 3, '', 0, 0),
+            ('Продление', 4, 'approved', 0, 0),
+            ('Ожидание', 3, 'pending', -1, 1),
+            ('Отказ', 3, 'rejected', -1, 1),
+            ('Истекло', 4, 'approved', -2, -1),
+            ('Будущее', 4, 'approved', 1, 2),
+        ]):
+            person, _ = self.create_employee_with_access(
+                label, self.driver_role, phone=f'+7900010100{index}', access_code=f'29000{index}',
+                rotation=f'Бригада {brigade}',
+            )
+            people[label] = person
+            if status:
+                response = RotationResponse.objects.create(cycle=cycle, employee=person)
+                WatchExtensionCase.objects.create(
+                    response=response, extension_start=work_date + timedelta(days=start),
+                    extension_end=work_date + timedelta(days=end), decision_status=status,
+                    decision_by=self.deputy if status != 'pending' else None,
+                    decision_at=timezone.now() if status != 'pending' else None,
+                )
+        return people
+
+    def test_watch_roster_includes_only_own_brigades_and_current_approved_extensions(self):
+        work_date = production_work_date()
+        people = self.create_watch_roster()
+        excavator_operator, _ = self.create_employee_with_access(
+            'Машинист чужой вахты', self.excavator_role, phone='+79000102001', access_code='620002',
+            rotation='Бригада 3',
+        )
+        other_deputy, other_access = self.create_employee_with_access(
+            'Второй заместитель', self.deputy_role, phone='+79000102000', access_code='620001',
+        )
+
+        def test_identity(employee):
+            return sha256(f'|{employee.full_name.casefold()}'.encode()).hexdigest()
+
+        watch_map = {test_identity(self.deputy): ('1', '2'), test_identity(other_deputy): ('3', '4')}
+        url = reverse('deputy_mining_manager_placement')
+        with patch('assignments.deputy_views.DEPUTY_BRIGADES_BY_IDENTITY', watch_map):
+            response = self.client.get(url)
+            self.assertNotContains(response, 'data-brigade-filter="3"')
+            payload = response.context['planning_payload']
+            self.assertEqual({item['full_name'] for item in payload['employees']}, {'Своя', 'Продление'})
+            self.assertContains(response, 'data-brigade-filter="watch" aria-pressed="true"')
+            other_watch = {item['id']: item for item in payload['other_watch_employees']}
+            self.assertIn(people['Чужая'].pk, other_watch)
+            self.assertNotIn(excavator_operator.pk, other_watch)
+            self.assertNotIn('phone', other_watch[people['Чужая'].pk])
+            excavators = self.client.get(url, {'role': self.excavator_role.code}).context['planning_payload']
+            self.assertEqual([item['id'] for item in excavators['other_watch_employees']], [excavator_operator.pk])
+            extension = next(item for item in payload['employees'] if item['id'] == people['Продление'].pk)
+            expiry = datetime.combine(work_date + timedelta(days=1), time(7), ZoneInfo('Asia/Vladivostok'))
+            self.assertEqual(extension['extension_expires_at'], expiry.isoformat())
+            plan = CrewPlan.objects.get(pk=payload['plan']['id'])
+            blocked = self.client.post(reverse('deputy_mining_manager_slot'), {
+                'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+                'shift_type': WorkShiftType.SHIFT_2, 'employee_id': people['Ожидание'].pk,
+            }, content_type='application/json')
+            self.assertEqual(blocked.status_code, 400)
+            for shift in (WorkShiftType.SHIFT_1, WorkShiftType.SHIFT_2):
+                saved, plan = self.autosave_slot(plan, equipment=self.truck_2, shift_type=shift, employee=people['Продление'])
+                board = saved.json()['payload']
+                self.assertEqual(board['brigades'], ['1', '2'])
+                slot = next(slot for row in board['rows'] for slot in row['slots']
+                            if slot['employee'] and slot['employee']['id'] == people['Продление'].pk)
+                self.assertEqual(slot['shift_type'], shift)
+                self.assertEqual(slot['employee']['extension_until'], work_date.strftime('%d.%m.%Y'))
+            self.authenticate(self.client, other_access)
+            response = self.client.get(url)
+            self.assertNotContains(response, 'data-brigade-filter="1"')
+            board = response.context['planning_payload']
+            self.assertEqual({item['full_name'] for item in board['employees']},
+                             {'Чужая', 'Ожидание', 'Отказ', 'Истекло', 'Будущее'})
+            self.assertFalse(any(item['extension_until'] for item in board['employees']))
+            self.assertEqual(board['summary']['assigned_count'], 2)
+
+    def test_deputy_can_move_current_crew_for_other_or_unclassified_brigade(self):
+        plan = self.create_draft()
+        identity = sha256(f'|{self.deputy.full_name.casefold()}'.encode()).hexdigest()
+        with patch('assignments.deputy_views.DEPUTY_BRIGADES_BY_IDENTITY', {identity: ('1', '2')}):
+            for index, (rotation, shift) in enumerate([
+                ('Бригада 3', WorkShiftType.SHIFT_1),
+                ('', WorkShiftType.SHIFT_2),
+            ]):
+                person, _ = self.create_employee_with_access(
+                    f'Машинист тестовый {index}', self.driver_role,
+                    phone=f'+7900010410{index}', access_code=f'62002{index}', rotation=rotation,
+                )
+                plan.slots.filter(equipment=self.truck_2, shift_type=shift).update(employee=person)
+                _, plan = self.autosave_slot(plan, equipment=self.truck_1, shift_type=shift, employee=person)
+                self.assertEqual(plan.slots.filter(employee=person).count(), 1)
+                self.assertTrue(plan.slots.filter(equipment=self.truck_1, shift_type=shift, employee=person).exists())
+
+            other, _ = self.create_employee_with_access(
+                'Свободный сотрудник другой вахты', self.driver_role,
+                phone='+79000104001', access_code='620012', rotation='Бригада 3',
+            )
+            denied = self.client.post(reverse('deputy_mining_manager_slot'), {
+                'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+                'shift_type': WorkShiftType.SHIFT_2, 'employee_id': other.pk,
+                'source_equipment_id': self.truck_1.pk, 'source_shift_type': WorkShiftType.SHIFT_1,
+            }, content_type='application/json')
+            self.assertEqual(denied.status_code, 400)
+            self.assertIn('нет согласованного продления', denied.json()['error'])
+            self.assertFalse(plan.slots.filter(employee=other).exists())
+
+    def test_move_reported_crew_keeps_warning_and_checks_source_and_target(self):
+        person, _ = self.create_employee_with_access(
+            'Фактический сотрудник другой вахты', self.excavator_role,
+            phone='+79000104002', access_code='620013', rotation='Бригада 3',
+        )
+        plan = self.create_draft()
+        source = plan.slots.get(equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_2)
+        source.reported_employee = person
+        source.save(update_fields=['reported_employee'])
+        identity = sha256(f'|{self.deputy.full_name.casefold()}'.encode()).hexdigest()
+        body = {
+            'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+            'shift_type': WorkShiftType.SHIFT_2, 'employee_id': person.pk,
+            'move_reported': True, 'source_equipment_id': self.truck_1.pk, 'source_shift_type': WorkShiftType.SHIFT_2,
+        }
+        url = reverse('deputy_mining_manager_slot')
+        with patch('assignments.deputy_views.DEPUTY_BRIGADES_BY_IDENTITY', {identity: ('1', '2')}):
+            occupied = self.client.post(url, {**body, 'equipment_id': self.truck_1.pk, 'shift_type': WorkShiftType.SHIFT_1},
+                                        content_type='application/json')
+            self.assertEqual(occupied.json()['code'], 'reported_target_occupied')
+            stale = self.client.post(url, {**body, 'source_shift_type': WorkShiftType.SHIFT_1}, content_type='application/json')
+            self.assertEqual(stale.status_code, 409)
+            moved = self.client.post(url, body, content_type='application/json')
+            self.assertEqual(moved.status_code, 200, moved.content)
+        source.refresh_from_db()
+        self.assertIsNone(source.reported_employee_id)
+        self.assertEqual(plan.slots.filter(reported_employee=person).count(), 1)
+        target = plan.slots.get(reported_employee=person)
+        self.assertEqual(target.equipment_id, self.truck_2.pk)
+        self.assertIsNone(target.employee_id)
+        row = next(r for r in moved.json()['payload']['rows'] if r['equipment']['id'] == self.truck_2.pk)
+        self.assertTrue(row['slots'][1]['specialization_review']['warning'])
 
     def test_board_payload_exposes_brigade_and_record_details_without_new_schema(self):
         second_driver, _second_access = self.create_employee_with_access(
@@ -989,3 +2094,50 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(detail_payload['plan']['status'], CrewPlanStatus.PUBLISHED)
         self.assertFalse(detail_payload['plan']['editable'])
         self.assertEqual(detail_payload['employees'], [])
+
+    def test_deputy_rejects_not_activated_access(self):
+        _, access = self.create_employee_with_access(
+            'Депутат без активации T-021',
+            self.deputy_role,
+            phone='+79000000031',
+            access_code='610031',
+        )
+        access.status = EmployeeAccess.Status.NOT_ACTIVATED
+        access.save(update_fields=['status'])
+
+        deputy_client = Client()
+        self.authenticate(deputy_client, access)
+        response = deputy_client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('role_home'),
+            fetch_redirect_response=False,
+        )
+
+    def test_deputy_rejects_stale_session_generation(self):
+        deputy_client = Client()
+        self.authenticate(deputy_client, self.deputy_access)
+        session = deputy_client.session
+        session['active_role_access_id'] = self.deputy_access.id
+        session['active_role_code'] = self.deputy_role.code
+        session['active_role_login_at'] = (
+            timezone.now() - timedelta(days=2)
+        ).isoformat()
+        session.save()
+        self.deputy_access.last_login_at = timezone.now()
+        self.deputy_access.save(update_fields=['last_login_at'])
+
+        response = deputy_client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('role_home'),
+            fetch_redirect_response=False,
+        )

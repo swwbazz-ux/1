@@ -2588,6 +2588,8 @@ class SettlementResident(StableIdentifierModel):
         blank=True,
     )
     phone = models.CharField('Телефон внешнего жильца', max_length=64, blank=True)
+    external_personnel_number = models.CharField('Табельный номер внешнего жильца', max_length=64, blank=True)
+    housing_note = models.TextField('Заметка по проживанию', max_length=3000, blank=True)
     external_sex = models.CharField(
         'Пол внешнего жильца',
         max_length=7,
@@ -2671,9 +2673,7 @@ class SettlementResident(StableIdentifierModel):
                             created_by_access__isnull=False,
                         )
                         & ~models.Q(full_name='')
-                        & ~models.Q(position_title='')
                         & ~models.Q(organization='')
-                        & ~models.Q(phone='')
                     )
                 ),
                 name='settlement_resident_subject_valid',
@@ -2698,12 +2698,14 @@ class SettlementResident(StableIdentifierModel):
             ),
         ]
 
-    EXTERNAL_MUTABLE_FIELDS = (
+    CARD_MUTABLE_FIELDS = (
         'full_name',
         'photo',
         'position_title',
         'organization',
         'phone',
+        'external_personnel_number',
+        'housing_note',
         'external_sex',
         'status',
         'archived_at',
@@ -2720,6 +2722,12 @@ class SettlementResident(StableIdentifierModel):
         return self.full_name
 
     @property
+    def personnel_number(self):
+        if self.employee_id:
+            return self.employee.personnel_number
+        return self.external_personnel_number
+
+    @property
     def display_identity(self):
         return f'{self.stable_id} · {self.display_name}'
 
@@ -2732,7 +2740,7 @@ class SettlementResident(StableIdentifierModel):
 
     def clean(self):
         super().clean()
-        for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+        for field_name in ('full_name', 'position_title', 'organization', 'phone', 'external_personnel_number'):
             value = getattr(self, field_name)
             if isinstance(value, str):
                 setattr(self, field_name, ' '.join(value.split()))
@@ -2741,7 +2749,7 @@ class SettlementResident(StableIdentifierModel):
         if self.resident_type == self.ResidentType.EMPLOYEE:
             if not self.employee_id:
                 errors['employee'] = 'Внутренний resident требует Employee.'
-            for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+            for field_name in ('full_name', 'position_title', 'organization', 'phone', 'external_personnel_number'):
                 if getattr(self, field_name):
                     errors[field_name] = (
                         'Карточные поля не являются кадровым источником внутреннего Employee.'
@@ -2763,7 +2771,7 @@ class SettlementResident(StableIdentifierModel):
                 self.ResidentType.EXTERNAL_OTHER,
             }:
                 errors['resident_type'] = 'Неизвестный тип внешнего жильца.'
-            for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+            for field_name in ('full_name', 'organization'):
                 if not getattr(self, field_name):
                     errors[field_name] = 'Поле обязательно для внешнего жильца.'
             if not self.created_by_access_id:
@@ -2796,6 +2804,8 @@ class SettlementResident(StableIdentifierModel):
             'position_title',
             'organization',
             'phone',
+            'external_personnel_number',
+            'housing_note',
             'external_sex',
             'status',
             'archived_at',
@@ -2814,7 +2824,7 @@ class SettlementResident(StableIdentifierModel):
 
         changed = any(
             original[field_name] != getattr(self, field_name)
-            for field_name in self.EXTERNAL_MUTABLE_FIELDS
+            for field_name in self.CARD_MUTABLE_FIELDS
         )
         if changed:
             if self.revision != original['revision'] + 1:
@@ -3875,6 +3885,28 @@ class SettlementPreviewApplication(StableIdentifierModel):
         _raise_apply_write_forbidden()
 
 
+class SettlementWatchTemplate(models.Model):
+    """Saved factual housing map, independent of a proposed arrival plan."""
+
+    name = models.CharField('Название шаблона', max_length=128)
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='housing_templates',
+    )
+    work_date = models.DateField('Рабочая дата карты')
+    saved_at = models.DateTimeField('Сохранён', default=timezone.now)
+    saved_by = models.ForeignKey(
+        'users.EmployeeAccess', on_delete=models.PROTECT, related_name='saved_housing_templates',
+    )
+    fingerprint = models.CharField(max_length=64, unique=True)
+    snapshot = models.JSONField('Снимок фактического расселения')
+
+    class Meta:
+        verbose_name = 'Шаблон расселения вахты'
+        verbose_name_plural = 'Шаблоны расселения вахт'
+        ordering = ['-saved_at', '-pk']
+
+
 class EmployeeBedOccupancyQuerySet(models.QuerySet):
     MASS_WRITE_FORBIDDEN_CODE = 'employee_bed_occupancy_mass_write_forbidden'
     MASS_WRITE_FORBIDDEN_MESSAGE = (
@@ -3924,7 +3956,13 @@ class EmployeeBedOccupancy(models.Model):
     class AssignmentType(models.TextChoices):
         PERMANENT = 'permanent', 'Постоянное'
         TEMPORARY = 'temporary', 'Временное'
+        # Историческое значение: новые ручные заселения с ним запрещены,
+        # существующие строки должны оставаться читаемыми.
         PROPOSED = 'proposed', 'Предложенное'
+        TEMPORARY_UNAPPROVED = (
+            'temporary_unapproved',
+            'Временное до утверждения',
+        )
 
     class SourceKind(models.TextChoices):
         MANUAL = 'manual', 'Ручное'
@@ -3952,8 +3990,13 @@ class EmployeeBedOccupancy(models.Model):
     )
     assignment_type = models.CharField(
         'Тип закрепления',
-        max_length=16,
+        max_length=24,
         choices=AssignmentType.choices,
+    )
+    placement_reason = models.TextField(
+        'Причина срочного размещения',
+        blank=True,
+        default='',
     )
     source_kind = models.CharField(
         'Источник размещения',
@@ -4639,6 +4682,534 @@ class SettlementControlEvent(models.Model):
 
     def __str__(self):
         return f'{self.scope}: {self.event_type} @ {self.occurred_at:%Y-%m-%d %H:%M:%S}'
+
+    @classmethod
+    def _immutability_error(cls):
+        return ValidationError(
+            cls.IMMUTABLE_MESSAGE,
+            code=cls.IMMUTABLE_CODE,
+        )
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise self._immutability_error()
+        using = kwargs.get('using') or router.db_for_write(type(self), instance=self)
+        if (
+            self.pk is not None
+            and type(self)._base_manager.using(using).filter(pk=self.pk).exists()
+        ):
+            raise self._immutability_error()
+        if kwargs.get('force_update'):
+            raise self._immutability_error()
+        kwargs['force_insert'] = True
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise self._immutability_error()
+
+
+class SettlementBedPreparation(models.Model):
+    """Подготовленное место: койка придержана за жильцом до приезда.
+
+    Подготовка — не факт проживания. Проживание по-прежнему хранится только
+    в EmployeeBedOccupancy; подготовка лишь не даёт выдать койку другому.
+    """
+
+    class Status(models.TextChoices):
+        PREPARED = 'prepared', 'Подготовлено'
+        CONFIRMED = 'confirmed', 'Подтверждено'
+        CANCELLED = 'cancelled', 'Снято'
+
+    resident = models.ForeignKey(
+        SettlementResident,
+        verbose_name='Жилец',
+        on_delete=models.PROTECT,
+        related_name='bed_preparations',
+    )
+    physical_bed = models.ForeignKey(
+        PhysicalBed,
+        verbose_name='Физическое койко-место',
+        on_delete=models.PROTECT,
+        related_name='bed_preparations',
+    )
+    arrival_date = models.DateField('Дата приезда')
+    hold_until = models.DateTimeField('Держать место до')
+    status = models.CharField(
+        'Статус подготовки',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PREPARED,
+    )
+    basis = models.TextField(
+        'Основание (пропуск, заявка)',
+        blank=True,
+        default='',
+    )
+    created_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Кто подготовил место',
+        on_delete=models.PROTECT,
+        related_name='created_bed_preparations',
+    )
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменено', auto_now=True)
+    confirmed_at = models.DateTimeField(
+        'Подтверждено',
+        null=True,
+        blank=True,
+    )
+    confirmed_occupancy = models.ForeignKey(
+        EmployeeBedOccupancy,
+        verbose_name='Размещение по приезду',
+        on_delete=models.PROTECT,
+        related_name='source_bed_preparations',
+        null=True,
+        blank=True,
+    )
+    cancelled_at = models.DateTimeField('Снято', null=True, blank=True)
+    cancelled_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Кто снял подготовку',
+        on_delete=models.PROTECT,
+        related_name='cancelled_bed_preparations',
+        null=True,
+        blank=True,
+    )
+    cancel_reason = models.TextField(
+        'Причина снятия',
+        blank=True,
+        default='',
+    )
+
+    class Meta:
+        verbose_name = 'Подготовленное место'
+        verbose_name_plural = 'Подготовленные места'
+        ordering = ['-created_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['physical_bed'],
+                condition=models.Q(status='prepared'),
+                name='unique_prepared_bed',
+            ),
+            models.UniqueConstraint(
+                fields=['resident'],
+                condition=models.Q(status='prepared'),
+                name='unique_prepared_resident',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=['prepared', 'confirmed', 'cancelled'],
+                ),
+                name='bed_preparation_status_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='prepared')
+                    | models.Q(
+                        confirmed_at__isnull=True,
+                        confirmed_occupancy__isnull=True,
+                        cancelled_at__isnull=True,
+                        cancelled_by_access__isnull=True,
+                        cancel_reason='',
+                    )
+                ),
+                name='bed_preparation_prepared_state_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='confirmed')
+                    | models.Q(
+                        confirmed_at__isnull=False,
+                        confirmed_occupancy__isnull=False,
+                        cancelled_at__isnull=True,
+                        cancelled_by_access__isnull=True,
+                        cancel_reason='',
+                    )
+                ),
+                name='bed_preparation_confirmed_state_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='cancelled')
+                    | (
+                        models.Q(
+                            confirmed_occupancy__isnull=True,
+                            cancelled_at__isnull=False,
+                            cancelled_by_access__isnull=False,
+                        )
+                        & ~models.Q(cancel_reason='')
+                    )
+                ),
+                name='bed_preparation_cancelled_state_valid',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['status', 'hold_until'],
+                name='bed_prep_status_hold_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.resident} — {self.physical_bed} ({self.arrival_date})'
+
+
+class SettlementBedReserve(models.Model):
+    """Отметка клерка «эта койка резервная», с историей изменений.
+
+    Снятие отметки — перевод строки в is_active=False со временем и автором,
+    а не удаление: история резерва сохраняется строками.
+    """
+
+    physical_bed = models.ForeignKey(
+        PhysicalBed,
+        verbose_name='Физическое койко-место',
+        on_delete=models.PROTECT,
+        related_name='reserve_marks',
+    )
+    is_active = models.BooleanField('Резерв активен', default=True)
+    reason = models.TextField('Причина резерва', blank=True, default='')
+    created_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Кто поставил в резерв',
+        on_delete=models.PROTECT,
+        related_name='created_bed_reserves',
+    )
+    created_at = models.DateTimeField('Поставлено в резерв', auto_now_add=True)
+    deactivated_at = models.DateTimeField(
+        'Снято с резерва',
+        null=True,
+        blank=True,
+    )
+    deactivated_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Кто снял с резерва',
+        on_delete=models.PROTECT,
+        related_name='deactivated_bed_reserves',
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = 'Отметка резервной койки'
+        verbose_name_plural = 'Отметки резервных коек'
+        ordering = ['-created_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['physical_bed'],
+                condition=models.Q(is_active=True),
+                name='unique_active_bed_reserve',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        is_active=True,
+                        deactivated_at__isnull=True,
+                        deactivated_by_access__isnull=True,
+                    )
+                    | models.Q(
+                        is_active=False,
+                        deactivated_at__isnull=False,
+                        deactivated_by_access__isnull=False,
+                    )
+                ),
+                name='bed_reserve_state_valid',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['is_active', 'physical_bed'],
+                name='bed_reserve_active_bed_idx',
+            ),
+        ]
+
+    def __str__(self):
+        state = 'резерв' if self.is_active else 'снят с резерва'
+        return f'{self.physical_bed}: {state}'
+
+
+class SettlementClerkShift(models.Model):
+    """Вахтенная смена делопроизводителя (T-031).
+
+    Одна открытая смена на вахту и одна открытая смена на доступ клерка.
+    Смена не связана с производственной сменой водителя/машиниста
+    (``shifts.EmployeeShift``): у клерка нет техники и day/night-смены, а
+    передача вахты — отдельное действие с причиной.
+    """
+
+    class Status(models.TextChoices):
+        OPEN = 'open', 'Открыта'
+        CLOSED = 'closed', 'Закрыта'
+
+    class CloseKind(models.TextChoices):
+        NORMAL = 'normal', 'Обычное закрытие'
+        HANDOVER = 'handover', 'Передача вахты'
+        ADMIN = 'admin', 'Закрыто администратором'
+
+    clerk_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ делопроизводителя',
+        on_delete=models.PROTECT,
+        related_name='settlement_clerk_shifts',
+    )
+    watch_period = models.ForeignKey(
+        'shifts.WatchPeriod',
+        verbose_name='Вахта',
+        on_delete=models.PROTECT,
+        related_name='settlement_clerk_shifts',
+    )
+    status = models.CharField(
+        'Статус смены',
+        max_length=16,
+        choices=Status.choices,
+        default=Status.OPEN,
+        db_index=True,
+    )
+    opened_at = models.DateTimeField('Открыта', default=timezone.now)
+    closed_at = models.DateTimeField('Закрыта', null=True, blank=True)
+    closed_by_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Кто закрыл смену',
+        on_delete=models.PROTECT,
+        related_name='closed_settlement_clerk_shifts',
+        null=True,
+        blank=True,
+    )
+    close_kind = models.CharField(
+        'Вид закрытия',
+        max_length=16,
+        choices=CloseKind.choices,
+        default=CloseKind.NORMAL,
+    )
+    close_reason = models.TextField(
+        'Причина закрытия',
+        blank=True,
+        default='',
+    )
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+    updated_at = models.DateTimeField('Изменено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Смена делопроизводителя'
+        verbose_name_plural = 'Смены делопроизводителя'
+        ordering = ['-opened_at', '-pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['watch_period'],
+                condition=models.Q(status='open'),
+                name='unique_open_clerk_shift_per_watch',
+            ),
+            models.UniqueConstraint(
+                fields=['clerk_access'],
+                condition=models.Q(status='open'),
+                name='unique_open_clerk_shift_per_access',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=['open', 'closed']),
+                name='clerk_shift_status_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='open')
+                    | models.Q(
+                        closed_at__isnull=True,
+                        closed_by_access__isnull=True,
+                        close_reason='',
+                    )
+                ),
+                name='clerk_shift_open_state_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status='closed')
+                    | models.Q(
+                        closed_at__isnull=False,
+                        closed_by_access__isnull=False,
+                    )
+                ),
+                name='clerk_shift_closed_state_valid',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(close_kind__in=['normal', 'handover', 'admin']),
+                name='clerk_shift_close_kind_valid',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(close_kind__in=['handover', 'admin'])
+                    | ~models.Q(close_reason='')
+                ),
+                name='clerk_shift_reason_required',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['status', 'watch_period'],
+                name='clerk_shift_status_period_idx',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.status == self.Status.OPEN:
+            if self.closed_at is not None:
+                errors['closed_at'] = (
+                    'У открытой смены не может быть времени закрытия.'
+                )
+            if self.closed_by_access_id is not None:
+                errors['closed_by_access'] = (
+                    'У открытой смены не может быть закрывающего.'
+                )
+            if self.close_reason:
+                errors['close_reason'] = (
+                    'У открытой смены не может быть причины закрытия.'
+                )
+        elif self.status == self.Status.CLOSED:
+            if self.closed_at is None:
+                errors['closed_at'] = (
+                    'У закрытой смены укажите время закрытия.'
+                )
+            if self.closed_by_access_id is None:
+                errors['closed_by_access'] = (
+                    'У закрытой смены укажите, кто закрыл.'
+                )
+        if (
+            self.close_kind in {
+                self.CloseKind.HANDOVER,
+                self.CloseKind.ADMIN,
+            }
+            and not self.close_reason.strip()
+        ):
+            errors['close_reason'] = (
+                'Для передачи вахты и закрытия администратором '
+                'причина обязательна.'
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return (
+            f'{self.clerk_access} / {self.watch_period} / '
+            f'{self.get_status_display()}'
+        )
+
+
+class SettlementPlacementEventQuerySet(models.QuerySet):
+    IMMUTABLE_CODE = 'settlement.placement.event_immutable'
+    IMMUTABLE_MESSAGE = 'События размещения неизменяемы.'
+
+    def _raise_immutable(self):
+        raise ValidationError(
+            self.IMMUTABLE_MESSAGE,
+            code=self.IMMUTABLE_CODE,
+        )
+
+    def update(self, **kwargs):
+        self._raise_immutable()
+
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        self._raise_immutable()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._raise_immutable()
+
+    def delete(self):
+        self._raise_immutable()
+
+
+class SettlementPlacementEvent(models.Model):
+    """Неизменяемый журнал решений по койкам: кто, что, когда.
+
+    Заменяет собой отдельные журналы подготовки/временного/резерва.
+    Контрольные события управления остаются в SettlementControlEvent.
+    """
+
+    IMMUTABLE_CODE = SettlementPlacementEventQuerySet.IMMUTABLE_CODE
+    IMMUTABLE_MESSAGE = SettlementPlacementEventQuerySet.IMMUTABLE_MESSAGE
+
+    class EventType(models.TextChoices):
+        PREPARED = 'prepared', 'Место подготовлено'
+        CONFIRMED = 'confirmed', 'Подготовка подтверждена'
+        CANCELLED = 'cancelled', 'Подготовка снята'
+        TEMPORARY_CREATED = 'temporary_created', 'Временное размещение создано'
+        TEMPORARY_RELOCATED = 'temporary_relocated', 'Временный переселен'
+        TEMPORARY_RELEASED = (
+            'temporary_released',
+            'Временное размещение освобождено',
+        )
+        RESERVE_SET = 'reserve_set', 'Койка поставлена в резерв'
+        RESERVE_CLEARED = 'reserve_cleared', 'Койка снята с резерва'
+        # T-029 этап C: изменения жилфонда (включая арендованный у подрядчика).
+        FUND_DORMITORY_CREATED = 'fund_dormitory_created', 'Общежитие добавлено'
+        FUND_ROOM_CREATED = 'fund_room_created', 'Комната добавлена'
+        FUND_BED_CREATED = 'fund_bed_created', 'Койко-место добавлено'
+        FUND_DORMITORY_CLOSED = 'fund_dormitory_closed', 'Общежитие закрыто'
+        FUND_DORMITORY_REOPENED = 'fund_dormitory_reopened', 'Общежитие открыто'
+
+    objects = SettlementPlacementEventQuerySet.as_manager()
+
+    event_type = models.CharField(
+        'Тип события',
+        max_length=32,
+        choices=EventType.choices,
+    )
+    resident = models.ForeignKey(
+        SettlementResident,
+        verbose_name='Жилец',
+        on_delete=models.PROTECT,
+        related_name='placement_events',
+        null=True,
+        blank=True,
+    )
+    physical_bed = models.ForeignKey(
+        PhysicalBed,
+        verbose_name='Физическое койко-место',
+        on_delete=models.PROTECT,
+        related_name='placement_events',
+        null=True,
+        blank=True,
+    )
+    actor_access = models.ForeignKey(
+        'users.EmployeeAccess',
+        verbose_name='Доступ инициатора',
+        on_delete=models.PROTECT,
+        related_name='settlement_placement_events',
+        null=True,
+        blank=True,
+    )
+    reason = models.TextField('Причина', blank=True, default='')
+    payload = models.JSONField(
+        'Безопасные детали события',
+        default=dict,
+        blank=True,
+    )
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Событие размещения'
+        verbose_name_plural = 'События размещения'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(
+                fields=['physical_bed', 'created_at'],
+                name='placement_event_bed_time_idx',
+            ),
+            models.Index(
+                fields=['resident', 'created_at'],
+                name='placement_event_res_time_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.event_type} @ {self.created_at:%Y-%m-%d %H:%M:%S}'
 
     @classmethod
     def _immutability_error(cls):

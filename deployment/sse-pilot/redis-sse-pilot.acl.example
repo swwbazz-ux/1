@@ -1,0 +1,4 @@
+# LOCAL EXAMPLE ONLY. Replace the password and run id outside Git.
+user default off
+user sse-pilot reset on >REPLACE_WITH_LOCAL_ONLY_PASSWORD resetchannels &accounting-mvp:sse:qa-pilot:REPLACE_WITH_RUN_ID:* -@all +ping +publish +subscribe +unsubscribe +psubscribe +punsubscribe
+

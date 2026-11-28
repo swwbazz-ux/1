@@ -293,6 +293,9 @@ class Employee(models.Model):
     is_protected = models.BooleanField(
         'Защищённая карточка', default=False, db_default=False,
     )
+    allow_parallel_role_shifts = models.BooleanField(
+        'Параллельные смены владельца', default=False, db_default=False, editable=False,
+    )
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     updated_at = models.DateTimeField('Обновлен', auto_now=True)
 
@@ -302,6 +305,15 @@ class Employee(models.Model):
         ordering = ['full_name']
         base_manager_name = 'objects'
         constraints = [
+            models.CheckConstraint(
+                condition=models.Q(allow_parallel_role_shifts=False) | models.Q(is_protected=True),
+                name='parallel_shifts_require_protected_employee',
+            ),
+            models.UniqueConstraint(
+                fields=['allow_parallel_role_shifts'],
+                condition=models.Q(allow_parallel_role_shifts=True),
+                name='one_employee_with_parallel_role_shifts',
+            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(brigade_number__isnull=True)
@@ -583,8 +595,22 @@ class ProductionSpecialization(models.Model):
 class PersonnelPosition(models.Model):
     """Official personnel position imported from 1C or selected in the employee card."""
 
+    class SettlementCategory(models.TextChoices):
+        UNCLASSIFIED = '', 'Не указана'
+        WORKER = 'worker', 'Рабочий'
+        ITR = 'itr', 'ИТР'
+
     code = models.SlugField('Код должности', max_length=96, unique=True)
     name = models.CharField('Кадровая должность', max_length=255, unique=True)
+    settlement_category = models.CharField(
+        'Категория для расселения',
+        max_length=8,
+        choices=SettlementCategory.choices,
+        default=SettlementCategory.UNCLASSIFIED,
+        blank=True,
+        help_text='Для авторасселения рабочих и ИТР по разным комнатам.',
+    )
+    requires_equipment = models.BooleanField('Требуется техника', default=False, db_default=False)
     requires_specialization = models.BooleanField(
         'Требует производственную специализацию',
         default=False,
@@ -612,6 +638,17 @@ class PersonnelPosition(models.Model):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        if self.requires_equipment and self.settlement_category == self.SettlementCategory.ITR:
+            raise ValidationError({'requires_equipment': 'Для ИТР в расселении показывается должность.'})
+
+    @property
+    def settlement_category_label(self):
+        return dict(self.SettlementCategory.choices).get(
+            self.settlement_category, self.SettlementCategory.UNCLASSIFIED.label,
+        )
 
 
 class TemporaryWorkTransfer(models.Model):

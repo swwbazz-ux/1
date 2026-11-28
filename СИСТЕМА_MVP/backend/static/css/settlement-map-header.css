@@ -1,0 +1,403 @@
+/* Map workspace only; the import and housing-stock screens share the role header. */
+[data-settlement-root] :is(.clerk-workplace-header, .settlement-map-entry, .settlement-toolbar, .settlement-floor-heading) {
+    font-family: "Segoe UI", Arial, sans-serif;
+}
+
+[data-settlement-root] .clerk-workplace-header {
+    grid-template-columns: minmax(13rem, max-content) minmax(0, 1fr) auto;
+    align-items: center;
+    min-height: 54px;
+    height: auto;
+    max-height: none;
+    padding: 4px 12px;
+    gap: 16px;
+}
+
+[data-settlement-root] .clerk-workplace-header > section {
+    padding: 0;
+    border: 0;
+}
+
+[data-settlement-root] .admin-console-identity {
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 8px;
+    max-width: 24rem;
+}
+
+[data-settlement-root] .admin-console-avatar { width: 36px; height: 36px; }
+[data-settlement-root] .admin-console-identity strong { font-size: 15px; font-weight: 650; }
+[data-settlement-root] .admin-console-identity em { font-size: 10px; }
+[data-settlement-root] .admin-console-main { display: block; grid-column: 2; grid-row: 1; }
+
+/* The role is already visible under the operator's name. Keep its heading for navigation. */
+[data-settlement-root] .admin-console-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+}
+
+[data-settlement-root] .admin-console-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+[data-settlement-root] .admin-console-nav :is(a, button) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto;
+    min-height: 36px;
+    height: auto;
+    padding: 5px 12px;
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: none;
+    white-space: normal;
+}
+
+[data-settlement-root] .admin-console-nav a:not(.is-active) {
+    border-color: transparent;
+    background: transparent;
+    color: var(--admin-ink);
+}
+
+[data-settlement-root] .admin-console-nav a:hover,
+[data-settlement-root] .admin-console-nav a:focus-visible { background: var(--admin-panel-soft); }
+
+[data-settlement-root] .clerk-console-actions {
+    grid-column: 3;
+    grid-row: 1;
+    grid-template-columns: 36px auto;
+    align-self: center;
+}
+
+[data-settlement-root] .clerk-console-actions :is(a, button) { min-height: 36px; }
+[data-settlement-root] .clerk-console-actions .admin-theme-button { width: 36px; min-width: 36px; }
+
+.settlement-page {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.settlement-page > .settlement-map-mode-panel {
+    flex: 1 1 auto;
+}
+
+.settlement-page > [data-map-mode-panel="current"] {
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+.settlement-page .settlement-map-entry,
+.settlement-page .settlement-toolbar {
+    --bar-control-size: 36px;
+    padding: 6px 8px;
+    gap: 8px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    box-shadow: none;
+}
+
+.settlement-page .settlement-map-entry {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.settlement-map-entry .settlement-map-modes { box-shadow: none; }
+.settlement-map-entry .settlement-map-modes button,
+.settlement-map-entry .settlement-map-entry__excel a,
+.settlement-map-entry .settlement-template-trigger,
+.settlement-map-entry .settlement-control-actions button,
+.settlement-map-entry .settlement-clerk-shift-actions button {
+    min-height: var(--bar-control-size);
+    padding-inline: 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.settlement-map-entry .settlement-map-entry__excel {
+    padding-inline-start: 8px;
+    border-inline-start: 1px solid var(--admin-line);
+}
+
+.settlement-map-entry__excel svg { width: 20px; height: 20px; }
+
+.settlement-template-trigger {
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    cursor: pointer;
+}
+
+.settlement-watch-template-form {
+    display: grid;
+    gap: 10px;
+}
+
+.settlement-watch-template-form p { margin: 0; }
+.settlement-watch-template-form label { display: grid; gap: 5px; font-weight: 600; }
+.settlement-watch-template-form input,
+.settlement-watch-template-form select {
+    min-width: 0;
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+}
+.settlement-watch-template-dialog [data-watch-template-result]:empty { display: none; }
+.settlement-watch-template-dialog ul { padding-inline-start: 1.3em; }
+.settlement-watch-template-dialog [hidden] { display: none; }
+.settlement-map-entry [data-current-excel][hidden] { display: none; }
+.settlement-template-receipt { overflow-wrap: anywhere; }
+.settlement-template-receipt strong { font-size: 1.1rem; }
+.settlement-template-receipt p { color: var(--admin-muted); }
+.settlement-watch-template-dialog:has(.settlement-template-receipt:not([hidden])) h2 {
+    color: var(--settlement-accent);
+}
+.settlement-template-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settlement-template-actions a { display: inline-flex; align-items: center; text-decoration: none; }
+
+.settlement-map-entry .settlement-control-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-inline-start: auto;
+    padding: 0;
+    gap: 5px 8px;
+    border: 0;
+    background: transparent;
+}
+
+.settlement-map-entry .settlement-control-copy { max-inline-size: 27ch; }
+.settlement-map-entry .settlement-control-copy strong { font-size: 13px; }
+.settlement-map-entry .settlement-control-copy small { font-size: 11px; }
+.settlement-map-entry .settlement-control-actions { display: flex; flex-wrap: wrap; }
+.settlement-map-entry .settlement-control-actions button { width: auto; }
+.settlement-control-panel:has(.is-start-action) [data-control-acquire],
+.settlement-control-panel[data-control-state="held"] [data-control-acquire],
+.settlement-control-panel:not([data-control-state="held"]) [data-control-release],
+.settlement-control-panel:not([data-control-state="busy"]) [data-control-takeover] { display: none; }
+
+.settlement-map-entry .settlement-clerk-shift {
+    position: relative;
+    flex-wrap: wrap;
+    justify-content: start;
+    width: auto;
+    gap: 5px;
+    padding: 0 0 0 8px;
+    border: 0;
+    border-inline-start: 1px solid var(--admin-line);
+}
+
+.settlement-map-entry .settlement-clerk-shift-actions .is-start-action {
+    border-color: var(--settlement-accent);
+    background: var(--settlement-accent);
+    color: white;
+    white-space: normal;
+}
+.settlement-map-entry .settlement-clerk-shift-actions { width: auto; }
+.settlement-clerk-shift-actions:not(:has(button:not([hidden]))) { display: none; }
+
+.settlement-shift-info summary,
+.settlement-resident-lists .settlement-watch-extensions summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: var(--bar-control-size);
+    padding: 3px 9px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    list-style: none;
+    white-space: nowrap;
+}
+
+.settlement-shift-info summary::after,
+.settlement-resident-lists summary::after {
+    content: "";
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin-inline-start: 2px;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    transform: translateY(-1px) rotate(45deg);
+}
+
+.settlement-shift-info[open] summary::after,
+.settlement-resident-lists details[open] summary::after { transform: translateY(2px) rotate(225deg); }
+
+.settlement-shift-info .settlement-clerk-shift-copy,
+.settlement-resident-lists .settlement-watch-extensions__content {
+    position: absolute;
+    inset: calc(100% + 4px) 0 auto auto;
+    z-index: 40;
+    width: min(20rem, calc(100vw - 32px));
+    padding: 6px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-shift-info .settlement-clerk-shift-copy { padding: 12px; }
+.settlement-shift-info .settlement-clerk-shift-copy small { font-size: 13px; }
+
+.settlement-page .settlement-toolbar {
+    grid-template-columns: auto auto auto minmax(15rem, 1fr) auto;
+    align-items: center;
+}
+
+.settlement-toolbar .settlement-current-date { min-height: 0; }
+.settlement-toolbar .settlement-move-picker {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 10px;
+    border-inline-start: 4px solid var(--settlement-accent);
+    background: var(--admin-panel);
+}
+.settlement-move-picker [role="status"] { display: grid; gap: 2px; }
+.settlement-move-picker span, .settlement-move-help { font-size: 13px; }
+.settlement-move-picker button { width: auto; flex: none; }
+.settlement-toolbar .settlement-move-picker[hidden],
+[data-settlement-form] label[hidden] { display: none; }
+.is-picking-move .is-transferred .settlement-bed.is-free:not(:disabled) {
+    outline: 2px dashed var(--settlement-accent);
+    outline-offset: -3px;
+}
+.is-dragging-resident .settlement-toolbar .settlement-filter-buttons button:not(.is-active) {
+    border: 1px dashed var(--settlement-accent);
+}
+.is-dragging-resident .settlement-toolbar button.is-drag-hover {
+    outline: 3px solid var(--settlement-accent);
+    outline-offset: 1px;
+}
+.settlement-toolbar .settlement-filter-buttons button,
+.settlement-toolbar .settlement-search-field input { min-height: var(--bar-control-size); font-size: 13px; }
+.settlement-toolbar .settlement-filter-buttons button { padding-inline: 10px; font-weight: 600; }
+.settlement-toolbar .settlement-search-field input {font-weight: 500;}
+.settlement-toolbar .settlement-map-searches { grid-template-columns: minmax(6rem, 2fr) minmax(8rem, 3fr); }
+
+.settlement-resident-lists {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding-inline-start: 8px;
+    border-inline-start: 1px solid var(--admin-line);
+}
+
+.settlement-resident-lists :is(.settlement-work-badge, .settlement-external-residents-trigger) {
+    width: auto;
+    min-height: var(--bar-control-size);
+    padding-inline: 9px;
+    border: 1px solid var(--admin-line);
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    box-shadow: none;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+.settlement-resident-lists .settlement-work-badge i { display: none; }
+.settlement-resident-lists .settlement-work-badge b { background: var(--admin-gray-soft); color: var(--admin-ink); }
+.settlement-resident-lists .settlement-watch-extensions summary b { margin: 0; }
+.settlement-resident-lists :is(button, summary):hover,
+.settlement-shift-info summary:hover { border-color: var(--admin-green); }
+
+[data-settlement-root] :is(.settlement-map-entry, .settlement-toolbar, .clerk-workplace-header) :is(a, button, summary):focus-visible {
+    outline: 2px solid var(--settlement-accent);
+    outline-offset: -2px;
+}
+
+@media (max-width: 1180px) {
+    .settlement-page > [data-map-mode-panel="current"] { grid-template-rows: auto auto; }
+    .settlement-page .settlement-toolbar {
+        grid-template-columns: auto auto auto minmax(0, 1fr);
+    }
+    .settlement-toolbar .settlement-map-searches { grid-column: 4; }
+    .settlement-resident-lists { grid-column: 1 / -1; padding: 0; border: 0; }
+    .settlement-page > .settlement-map-mode-panel { flex: none; }
+}
+
+@media (max-width: 900px) {
+    [data-settlement-root] .clerk-workplace-header {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 2px 8px;
+    }
+    [data-settlement-root] .admin-console-main { grid-column: 1 / -1; grid-row: 2; }
+    [data-settlement-root] .clerk-console-actions { grid-column: 2; grid-row: 1; }
+    .settlement-map-entry .settlement-control-panel { width: 100%; margin: 0; }
+    .settlement-map-entry .settlement-clerk-shift { margin-inline-start: auto; }
+    .settlement-map-entry .settlement-control-copy { max-inline-size: 40ch; }
+}
+
+@media (max-width: 720px) {
+    [data-settlement-root] .clerk-workplace-header { padding: 3px 6px; }
+    [data-settlement-root] .admin-console-nav { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+    [data-settlement-root] .admin-console-nav :is(a, button) { min-height: 44px; padding: 3px 8px; font-size: 12px; }
+    [data-settlement-root] .clerk-console-actions :is(a, button) { min-height: 44px; }
+    [data-settlement-root] .clerk-console-actions { grid-template-columns: 44px auto; }
+    [data-settlement-root] .clerk-console-actions .admin-theme-button { width: 44px; }
+    .settlement-page .settlement-toolbar,
+    .settlement-page .settlement-map-entry { --bar-control-size: 44px; padding: 4px; gap: 4px; }
+    .settlement-page .settlement-map-entry { display: grid; grid-template-columns: minmax(0, 1fr); }
+    .settlement-map-entry .settlement-map-modes,
+    .settlement-map-entry .settlement-map-entry__excel { width: 100%; }
+    .settlement-map-entry .settlement-map-modes button { flex: 1; }
+    .settlement-map-entry .settlement-map-entry__excel { padding: 0; border: 0; }
+    .settlement-map-entry .settlement-control-panel {
+        display: grid;
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+        gap: 4px 6px;
+        padding-top: 4px;
+        border-top: 1px solid var(--admin-line-soft);
+    }
+    .settlement-map-entry .settlement-control-actions { grid-column: auto; justify-content: end; }
+    .settlement-map-entry .settlement-clerk-shift { grid-column: 2 / -1; margin: 0; padding: 0; border: 0; }
+    .settlement-page .settlement-toolbar { grid-template-columns: auto auto minmax(0, 1fr); }
+    .settlement-toolbar .settlement-current-date { grid-column: auto; padding-inline: 2px; }
+    .settlement-toolbar .settlement-current-date strong { font-size: 12px; }
+    .settlement-toolbar .settlement-filter-buttons button { padding-inline: 6px; }
+    .settlement-toolbar .settlement-map-searches,
+    .settlement-resident-lists { grid-column: 1 / -1; width: 100%; }
+    .settlement-resident-lists { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.1fr); padding: 0; border: 0; }
+    .settlement-resident-lists :is(.settlement-external-residents-trigger,.settlement-work-badge, .settlement-watch-extensions summary) {
+        width: 100%; white-space: normal; text-align: center; line-height: 1.2; font-size: 12px;
+    }
+    .settlement-resident-lists :is(.settlement-work-badge, .settlement-external-residents-trigger, .settlement-watch-extensions summary) { padding-inline: 5px; }
+    .settlement-shift-info .settlement-clerk-shift-copy { inset-inline: 0 auto; max-width: 100%; }
+}
+
+@media (max-width: 374px) {
+    .settlement-resident-lists { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .settlement-resident-lists .settlement-watch-extensions { grid-column: 1 / -1; }
+}
+
+@media (max-width: 350px) {
+    .settlement-page .settlement-toolbar { grid-template-columns: auto minmax(0, 1fr); }
+    .settlement-toolbar .settlement-current-date { grid-column: 1 / -1; }
+}

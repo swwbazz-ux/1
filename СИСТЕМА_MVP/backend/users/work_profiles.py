@@ -2,10 +2,11 @@
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.utils import timezone
 
 from .protected_cards import protected_writes_allowed
-from .models import Employee, EmployeeAccess, TemporaryWorkTransfer
+from .models import Employee, EmployeeAccess, PersonnelPosition, ProductionSpecialization, TemporaryWorkTransfer
 
 
 PRODUCTION_APP_ROLE_CODES = frozenset({'driver', 'excavator_operator'})
@@ -61,29 +62,80 @@ def expire_due_temporary_work_transfers(*, as_of=None):
     return expired
 
 
-def active_temporary_work_transfer(employee, *, as_of=None):
-    if not employee or not employee.pk:
-        return None
-    as_of = as_of or timezone.localdate()
+def _effective_work_transfers(as_of):
     return (
         TemporaryWorkTransfer.objects.filter(
-            employee=employee,
             status=TemporaryWorkTransfer.Status.APPROVED,
             effective_from__lte=as_of,
             effective_to__gte=as_of,
         )
         .select_related('target_specialization', 'target_specialization__access_role')
+    )
+
+
+def active_temporary_work_transfer(employee, *, as_of=None):
+    if not employee or not employee.pk:
+        return None
+    return (
+        _effective_work_transfers(as_of or timezone.localdate()).filter(employee=employee)
         .order_by('-reviewed_at', '-id')
         .first()
     )
 
 
-def effective_specialization(employee, *, as_of=None):
+def active_specializations_for_positions(position_ids):
+    if not position_ids:
+        return {}
+    positions = PersonnelPosition.objects.filter(pk__in=position_ids, is_active=True).prefetch_related(
+        Prefetch(
+            'allowed_specializations',
+            queryset=ProductionSpecialization.objects.filter(is_active=True).select_related('access_role'),
+        ),
+    )
+    return {position.pk: list(position.allowed_specializations.all()) for position in positions}
+
+
+def effective_specialization(employee, *, as_of=None, infer_from_position=False):
     """Return the approved temporary specialization first, then the official base one."""
     transfer = active_temporary_work_transfer(employee, as_of=as_of)
     if transfer:
         return transfer.target_specialization
-    return getattr(employee, 'base_specialization', None)
+    base = getattr(employee, 'base_specialization', None)
+    if base or not infer_from_position or not getattr(employee, 'personnel_position_id', None):
+        return base
+    position_id = employee.personnel_position_id
+    choices = active_specializations_for_positions({position_id}).get(position_id, ())
+    return choices[0] if len(choices) == 1 else None
+
+
+def effective_specializations_by_employee_id(employees, *, as_of=None, infer_from_position=False):
+    employees = list(employees)
+    specializations = {employee.pk: employee.base_specialization for employee in employees}
+    if not specializations:
+        return specializations
+    transferred = {}
+    for transfer in _effective_work_transfers(as_of or timezone.localdate()).filter(
+        employee_id__in=specializations,
+    ).order_by('employee_id', '-reviewed_at', '-id'):
+        transferred.setdefault(transfer.employee_id, transfer.target_specialization)
+    specializations.update(transferred)
+    if infer_from_position:
+        unset = [employee for employee in employees if not specializations[employee.pk] and employee.personnel_position_id]
+        choices_by_position = active_specializations_for_positions({employee.personnel_position_id for employee in unset})
+        for employee in unset:
+            choices = choices_by_position.get(employee.personnel_position_id, ())
+            if len(choices) == 1:
+                specializations[employee.pk] = choices[0]
+    return specializations
+
+
+def _specialization_matches_role(specialization, role_code):
+    return bool(
+        specialization
+        and specialization.is_active
+        and specialization.access_role_id
+        and specialization.access_role.code == role_code
+    )
 
 
 def employee_has_effective_access_role(
@@ -92,6 +144,7 @@ def employee_has_effective_access_role(
     *,
     as_of=None,
     allow_pending_access=False,
+    infer_from_position=False,
 ):
     """Whether an employee may use a production app role at this date.
 
@@ -121,33 +174,44 @@ def employee_has_effective_access_role(
             is_active=True,
         ).exists()
 
-    specialization = effective_specialization(employee, as_of=as_of)
-    return bool(
-        specialization
-        and specialization.is_active
-        and specialization.access_role_id
-        and specialization.access_role.code == role_code
-    )
+    return _specialization_matches_role(effective_specialization(
+        employee, as_of=as_of, infer_from_position=infer_from_position,
+    ), role_code)
 
 
-def eligible_employee_ids_for_work_role(role_code, *, as_of=None):
+def eligible_employee_ids_for_work_role(role_code, *, as_of=None, infer_from_position=False):
     """Evaluate eligibility in one place so deputy planning and admin agree."""
     as_of = as_of or timezone.localdate()
-    employees = (
-        Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE)
-        .select_related(
-            'personnel_position',
-            'base_specialization',
-            'base_specialization__access_role',
-            'contractor_organization',
-        )
-        .prefetch_related('accesses__role')
-        .order_by('id')
+    eligible = Employee.objects.filter(
+        Employee.work_eligibility_q(as_of),
+        is_active=True,
+        status=Employee.Status.ACTIVE,
     )
-    return {
-        employee.id
-        for employee in employees
-        if employee_has_effective_access_role(employee, role_code, as_of=as_of)
+    if role_code not in PRODUCTION_APP_ROLE_CODES:
+        return set(eligible.values_list('id', flat=True))
+
+    legacy_access = EmployeeAccess.objects.filter(
+        employee_id=OuterRef('pk'),
+        role__code=role_code,
+        role__is_active=True,
+        status=EmployeeAccess.Status.ACTIVATED,
+        is_active=True,
+    )
+    legacy_ids = set(
+        eligible.filter(personnel_position__isnull=True).filter(
+            Q(work_category=role_code)
+            | (Q(work_category=Employee.WorkCategory.OTHER) & Exists(legacy_access)),
+        ).values_list('id', flat=True)
+    )
+    specialized = eligible.filter(personnel_position__isnull=False).select_related(
+        'base_specialization__access_role',
+    )
+    return legacy_ids | {
+        employee_id
+        for employee_id, specialization in effective_specializations_by_employee_id(
+            specialized, as_of=as_of, infer_from_position=infer_from_position,
+        ).items()
+        if _specialization_matches_role(specialization, role_code)
     }
 
 
@@ -194,6 +258,23 @@ def production_access_is_out_of_sync(employee, *, as_of=None):
     return not any(access.role_id == target_role.id for access in active_accesses)
 
 
+def _revoke_sessions_for_changed_accesses(accesses):
+    """Гасит вход для доступов, которые только что изменились.
+
+    Сдвига поколения мало: `reclaim-session` его не сверяет и перевыдал бы
+    сессию без PIN. Поэтому удаляем строки `django_session` и двигаем
+    поколение через общий механизм отзыва. Импорт ленивый — чтобы не тянуть
+    цепочку `live_monitor` при импорте профилей.
+    """
+    unique = {access.pk: access for access in accesses if access.pk}
+    if not unique:
+        return
+    from .live_monitor import force_end_access_sessions
+
+    for access in unique.values():
+        force_end_access_sessions(access=access)
+
+
 def sync_employee_production_access(*, employee, as_of=None):
     """Keep exactly one production app access aligned with effective specialization.
 
@@ -216,6 +297,7 @@ def sync_employee_production_access(*, employee, as_of=None):
         .order_by('id')
     )
     active_accesses = [access for access in production_accesses if access.is_active]
+    changed_accesses = []
 
     if not target_role:
         now = timezone.now()
@@ -224,6 +306,8 @@ def sync_employee_production_access(*, employee, as_of=None):
             access.is_active = False
             access.deactivated_at = now
             access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+            changed_accesses.append(access)
+        _revoke_sessions_for_changed_accesses(changed_accesses)
         return None
 
     target_access = next((access for access in production_accesses if access.role_id == target_role.id), None)
@@ -233,6 +317,8 @@ def sync_employee_production_access(*, employee, as_of=None):
         reusable_access.role = target_role
         reusable_access.save(update_fields=['role'])
         target_access = reusable_access
+        # Смена роли на месте — новый вход: старые сессии этого доступа мертвы.
+        changed_accesses.append(reusable_access)
 
     if target_access is None:
         target_access = EmployeeAccess.objects.create(
@@ -251,6 +337,8 @@ def sync_employee_production_access(*, employee, as_of=None):
         )
         target_access.deactivated_at = None
         target_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+        # Реактивация не должна оживлять cookie, выданную до отключения.
+        changed_accesses.append(target_access)
 
     now = timezone.now()
     for access in production_accesses:
@@ -260,6 +348,8 @@ def sync_employee_production_access(*, employee, as_of=None):
         access.is_active = False
         access.deactivated_at = now
         access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+        changed_accesses.append(access)
+    _revoke_sessions_for_changed_accesses(changed_accesses)
     return target_access
 
 
@@ -274,6 +364,24 @@ def validate_base_specialization(*, personnel_position, specialization):
         raise ValidationError('Выбранная производственная специализация отключена.')
     if not personnel_position.allowed_specializations.filter(pk=specialization.pk).exists():
         raise ValidationError('Эта специализация не разрешена для выбранной кадровой должности.')
+
+
+def resolve_base_specialization(*, personnel_position, selected=None, previous=None):
+    """Use an explicit choice, a compatible saved value, or the only active option."""
+    if selected:
+        validate_base_specialization(personnel_position=personnel_position, specialization=selected)
+        return selected
+    allowed = list(personnel_position.allowed_specializations.all())
+    active = [specialization for specialization in allowed if specialization.is_active]
+    if previous in active:
+        return previous
+    if len(active) == 1:
+        return active[0]
+    if len(active) > 1:
+        raise ValidationError('Выберите производственную специализацию для этой должности.')
+    if allowed or personnel_position.default_specialization_id or personnel_position.requires_specialization:
+        raise ValidationError('У должности нет действующей производственной специализации. Проверьте справочник должностей.')
+    return None
 
 
 @transaction.atomic

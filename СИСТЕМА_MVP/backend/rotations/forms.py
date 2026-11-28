@@ -255,12 +255,12 @@ class RotationResponseForm(forms.ModelForm):
     extension_start = forms.DateField(
         label='Продление с',
         required=False,
-        widget=forms.DateInput(attrs={'type': 'date'}),
+        widget=forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
     )
     extension_end = forms.DateField(
         label='Продление по',
         required=False,
-        widget=forms.DateInput(attrs={'type': 'date'}),
+        widget=forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
     )
 
     class Meta:

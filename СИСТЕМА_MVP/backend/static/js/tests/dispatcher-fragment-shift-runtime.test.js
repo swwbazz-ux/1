@@ -649,7 +649,7 @@ test("fragment refresh synchronizes shift runtime before replacement and rebind"
     assert.ok(bindIndex > fallbackIndex);
     assert.match(
         TEMPLATE_SOURCE,
-        /data-dispatcher-shift-open="\{% if dispatcher_header\.active_shift %\}true/
+        /data-dispatcher-shift-open="\{% if dispatcher_header\.active_shift and not deputy_dispatcher_viewer %\}true/
     );
 });
 

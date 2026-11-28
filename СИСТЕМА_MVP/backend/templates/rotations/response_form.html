@@ -70,10 +70,29 @@
                     </p>
                 </span>
             </div>
-            <span class="rotation-status-chip status-{{ response.state|default:'pending' }}">
-                {{ response.get_state_display|default:"Ожидает ответа" }}
-            </span>
+            {% if current_extension %}
+                <span class="rotation-status-chip status-approved">На продлении</span>
+            {% else %}
+                <span class="rotation-status-chip status-{{ response.state|default:'pending' }}">
+                    {{ response.get_state_display|default:"Ожидает ответа" }}
+                </span>
+            {% endif %}
         </section>
+
+        {% if not is_timekeeper %}
+            {% with case=response.extension_case %}
+                {% if case %}
+                    <section class="rotation-decision-result" aria-label="Решение по продлению">
+                        <strong>{{ case.get_decision_status_display }}</strong>
+                        <p>
+                            {% if case.decision_status == 'approved' %}Согласованный период{% else %}Запрошенный период{% endif %}
+                            {{ case.extension_start|date:"d.m.Y" }} — {{ case.extension_end|date:"d.m.Y" }}
+                        </p>
+                        {% if case.decision_comment %}<p>{{ case.decision_comment }}</p>{% endif %}
+                    </section>
+                {% endif %}
+            {% endwith %}
+        {% endif %}
 
         <div class="rotation-response-layout">
             <section class="rotation-form-card" aria-labelledby="rotation-form-title">

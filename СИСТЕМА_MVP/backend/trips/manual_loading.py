@@ -28,7 +28,7 @@ def manual_loading_enabled():
 
 
 def passive_manual_trip(trip):
-    """Признак фиксируется при отправке и не зависит от последующего входа водителя."""
+    """У рейса сохранено состояние участия водителя, но нет смены для разгрузки."""
     return bool(
         trip
         and trip.driver_participation_recorded
@@ -52,6 +52,31 @@ def manual_dump_card_is_visible(trip, *, now=None):
     if expires_at is None:
         return True
     return expires_at > (now or timezone.now())
+
+
+def attach_pending_excavator_trip_to_driver_shift(shift):
+    """Передать открытый рейс на разгрузку, сохранив автора и время погрузки."""
+    from .models import Trip, TripStatus
+
+    trip = (
+        Trip.objects.select_for_update(of=('self',))
+        .filter(
+            truck_id=shift.equipment_id,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            driver_participation_recorded=True,
+            driver_control_shift__isnull=True,
+            driver__isnull=True,
+            excavator_operator__isnull=False,
+            loading_shift__isnull=False,
+            loaded_at__lte=shift.opened_at,
+        )
+        .first()
+    )
+    if trip and manual_dump_card_is_visible(trip):
+        trip.driver_control_shift = shift
+        trip.save(update_fields=['driver_control_shift'])
+        return trip
+    return None
 
 
 def manual_dump_card_visibility_filter(*, now):
@@ -104,6 +129,10 @@ def reconcile_expired_manual_trips(*, now=None):
         driver_control_shift__closed_at__isnull=False,
         driver_control_shift__closed_at__lte=cutoff,
     )
+    expired = Q(driver_control_shift_id__isnull=True) & (expired_by_device_time | expired_by_created_time)
+    # A recorded load without a driver's shift needs expiry even with manual controls disabled.
+    if manual_loading_enabled():
+        expired |= expired_by_closed_shift
 
     with transaction.atomic():
         lock_production_state()
@@ -114,10 +143,7 @@ def reconcile_expired_manual_trips(*, now=None):
             Trip.objects.select_for_update(of=('self',)).filter(
                 status=TripStatus.LOADED_WAITING_UNLOAD,
                 driver_participation_recorded=True,
-            ).filter(
-                (Q(driver_control_shift_id__isnull=True) & (expired_by_device_time | expired_by_created_time))
-                | expired_by_closed_shift
-            )
+            ).filter(expired)
         )
         if not trips:
             return []
@@ -258,8 +284,6 @@ def _release_manual_trip_reconcile_server_gate(lock_file):
 
 
 def reconcile_expired_manual_trips_throttled():
-    if not manual_loading_enabled():
-        return []
     if not _acquire_manual_trip_reconcile_process_gate():
         return []
     try:

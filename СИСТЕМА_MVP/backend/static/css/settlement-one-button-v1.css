@@ -1,0 +1,486 @@
+/* T-036 W3: оформление блока «Авторасселение вахты» (одна кнопка).
+   Только собственные селекторы .settlement-one-button*; геометрия карты,
+   комнат и кроватей не меняется. */
+
+.settlement-one-button {
+    display: grid;
+    gap: calc(8 * var(--settlement-density-unit));
+    min-width: 0;
+    padding: calc(10 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(8 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-one-button-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: calc(8 * var(--settlement-density-unit));
+    align-items: start;
+}
+
+.settlement-one-button-header > div {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+    min-width: 0;
+}
+
+.settlement-one-button-header h2 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: calc(14 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-header span,
+.settlement-one-button-context,
+.settlement-one-button-empty,
+.settlement-one-button-run small {
+    color: var(--admin-muted);
+    font-size: calc(11 * var(--settlement-density-unit));
+    line-height: 1.35;
+}
+
+.settlement-one-button-context,
+.settlement-one-button-empty,
+.settlement-one-button-feedback,
+.settlement-one-button-lease-hint {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.settlement-one-button-refresh {
+    min-height: var(--settlement-control-height);
+    padding: 0 calc(12 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: calc(11 * var(--settlement-density-unit));
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-one-button-refresh:hover,
+.settlement-one-button-refresh:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+    color: var(--settlement-accent);
+}
+
+.settlement-one-button-refresh:disabled {
+    opacity: .48;
+    cursor: not-allowed;
+}
+
+.settlement-one-button-empty,
+.settlement-one-button-feedback,
+.settlement-one-button-lease-hint {
+    padding: calc(10 * var(--settlement-density-unit));
+    border: 1px solid var(--admin-line-soft);
+    border-radius: calc(7 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+}
+
+.settlement-one-button-empty[hidden],
+.settlement-one-button-feedback[hidden],
+.settlement-one-button-lease-hint[hidden],
+.settlement-one-button-progress[hidden],
+.settlement-one-button-summary[hidden],
+.settlement-one-button-exceptions[hidden],
+.settlement-one-button-shifts[hidden],
+.settlement-one-button-cohort[hidden] {
+    display: none;
+}
+
+.settlement-one-button-feedback.is-error {
+    border-color: color-mix(in srgb, var(--admin-red) 55%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-red) 10%, var(--admin-panel));
+}
+
+.settlement-one-button-feedback.is-warning,
+.settlement-one-button-lease-hint.is-warning {
+    border-color: color-mix(in srgb, var(--admin-yellow) 55%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-yellow-soft) 72%, var(--admin-panel));
+}
+
+.settlement-one-button-feedback.is-success {
+    border-color: color-mix(in srgb, var(--admin-green) 42%, var(--admin-line));
+}
+
+.settlement-one-button-feedback.is-progress {
+    border-color: color-mix(in srgb, var(--settlement-accent) 40%, var(--admin-line));
+}
+
+.settlement-one-button-feedback strong,
+.settlement-one-button-empty strong {
+    display: block;
+    color: var(--admin-ink);
+}
+
+.settlement-one-button-cohort {
+    display: grid;
+    gap: calc(4 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-cohort-field {
+    display: grid;
+    gap: calc(4 * var(--settlement-density-unit));
+    min-width: 0;
+}
+
+.settlement-one-button-cohort-field > span {
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 900;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.settlement-one-button-cohort-field select {
+    width: 100%;
+    min-height: calc(38 * var(--settlement-density-unit));
+    padding: 0 calc(10 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-cohort-copy {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: calc(11 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-progress {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(8 * var(--settlement-density-unit));
+    align-items: center;
+    padding: calc(10 * var(--settlement-density-unit));
+    border: 1px dashed color-mix(in srgb, var(--settlement-accent) 45%, var(--admin-line));
+    border-radius: calc(7 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-progress strong {
+    font-weight: 900;
+}
+
+.settlement-one-button-spinner {
+    width: calc(14 * var(--settlement-density-unit));
+    height: calc(14 * var(--settlement-density-unit));
+    border: 2px solid color-mix(in srgb, var(--settlement-accent) 30%, transparent);
+    border-top-color: var(--settlement-accent);
+    border-radius: 50%;
+    animation: settlement-one-button-spin 900ms linear infinite;
+}
+
+@keyframes settlement-one-button-spin {
+    to { transform: rotate(360deg); }
+}
+
+.settlement-one-button-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(8 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-actions button {
+    min-height: calc(40 * var(--settlement-density-unit));
+    padding: 0 calc(14 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(7 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-one-button-actions button[hidden] {
+    display: none;
+}
+
+.settlement-one-button-actions .settlement-one-button-primary {
+    border-color: var(--settlement-accent);
+    background: var(--settlement-accent);
+    color: #fff;
+}
+
+.settlement-one-button-actions button.is-danger {
+    border-color: var(--admin-red);
+    background: var(--admin-red);
+    color: #fff;
+}
+
+.settlement-one-button-actions button:disabled {
+    opacity: .48;
+    cursor: not-allowed;
+}
+
+.settlement-one-button-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(10 * var(--settlement-density-unit));
+    align-items: stretch;
+}
+
+.settlement-one-button-summary article {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+    min-width: calc(120 * var(--settlement-density-unit));
+    padding: calc(8 * var(--settlement-density-unit)) calc(10 * var(--settlement-density-unit));
+    border: 1px solid var(--admin-line-soft);
+    border-radius: calc(7 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+}
+
+.settlement-one-button-summary article span {
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.settlement-one-button-summary article strong {
+    color: var(--admin-ink);
+    font-size: calc(20 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-summary .is-success strong {
+    color: var(--settlement-accent);
+}
+
+.settlement-one-button-summary .is-conflict strong {
+    color: var(--admin-red);
+}
+
+.settlement-one-button-run {
+    flex-basis: 100%;
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+    margin: 0;
+}
+
+.settlement-one-button-stale {
+    flex-basis: 100%;
+    margin: 0;
+    padding: calc(8 * var(--settlement-density-unit)) calc(10 * var(--settlement-density-unit));
+    border-left: calc(4 * var(--settlement-density-unit)) solid var(--admin-yellow);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: color-mix(in srgb, var(--admin-yellow-soft) 72%, var(--admin-panel));
+    color: var(--admin-ink);
+    font-size: calc(11 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-exceptions,
+.settlement-one-button-shifts {
+    display: grid;
+    gap: calc(8 * var(--settlement-density-unit));
+    min-width: 0;
+}
+
+.settlement-one-button-list {
+    display: grid;
+    gap: calc(6 * var(--settlement-density-unit));
+    min-width: 0;
+}
+
+.settlement-one-button-list h3 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-exception {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+    padding: calc(8 * var(--settlement-density-unit)) calc(10 * var(--settlement-density-unit));
+    border: 1px solid var(--admin-line-soft);
+    border-left: calc(4 * var(--settlement-density-unit)) solid var(--admin-red);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+}
+
+.settlement-one-button-exception.is-excluded {
+    border-left-color: var(--admin-gray);
+}
+
+.settlement-one-button-exception strong {
+    color: var(--admin-ink);
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-exception-reason {
+    color: var(--admin-muted);
+    font-size: calc(11 * var(--settlement-density-unit));
+    line-height: 1.35;
+}
+
+.settlement-one-button-shift {
+    display: grid;
+    gap: calc(6 * var(--settlement-density-unit));
+    padding: calc(10 * var(--settlement-density-unit));
+    border: 1px solid var(--admin-line-soft);
+    border-left: calc(4 * var(--settlement-density-unit)) solid var(--admin-gray);
+    border-radius: calc(7 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+}
+
+.settlement-one-button-shift.is-applied,
+.settlement-one-button-shift.is-ready {
+    border-left-color: var(--settlement-accent);
+}
+
+.settlement-one-button-shift.is-applying {
+    border-left-color: var(--admin-yellow);
+}
+
+.settlement-one-button-shift.is-error,
+.settlement-one-button-shift.is-cancelled {
+    border-left-color: var(--admin-red);
+}
+
+.settlement-one-button-shift-head {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-shift-head strong {
+    color: var(--admin-ink);
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-shift-state {
+    color: var(--admin-muted);
+    font-size: calc(11 * var(--settlement-density-unit));
+    line-height: 1.35;
+}
+
+.settlement-one-button-shift.is-error .settlement-one-button-shift-state {
+    color: var(--admin-red);
+}
+
+.settlement-one-button-shift-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(4 * var(--settlement-density-unit)) calc(12 * var(--settlement-density-unit));
+    padding: calc(6 * var(--settlement-density-unit)) calc(8 * var(--settlement-density-unit));
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-size: calc(11 * var(--settlement-density-unit));
+    font-weight: 900;
+}
+
+.settlement-one-button-skip-list {
+    display: grid;
+    gap: calc(6 * var(--settlement-density-unit));
+    min-width: 0;
+}
+
+.settlement-one-button-skip {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+    padding: calc(8 * var(--settlement-density-unit)) calc(10 * var(--settlement-density-unit));
+    border: 1px solid var(--admin-line-soft);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+}
+
+/* Плановая строка не применена — красным. */
+.settlement-one-button-skip.is-plan-skip {
+    border-left: calc(4 * var(--settlement-density-unit)) solid var(--admin-red);
+    background: color-mix(in srgb, var(--admin-red) 7%, var(--admin-panel));
+}
+
+.settlement-one-button-skip.is-plan-skip .settlement-one-button-skip-state {
+    color: var(--admin-red);
+}
+
+/* Внеплановая занятость — серым. */
+.settlement-one-button-skip.is-out-of-plan-skip {
+    border-left: calc(4 * var(--settlement-density-unit)) solid var(--admin-gray);
+}
+
+.settlement-one-button-skip.is-out-of-plan-skip .settlement-one-button-skip-state {
+    color: var(--admin-muted);
+}
+
+.settlement-one-button-skip.is-unclassified-skip {
+    border-left: calc(4 * var(--settlement-density-unit)) solid var(--admin-yellow);
+}
+
+.settlement-one-button-skip strong {
+    color: var(--admin-ink);
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-skip-state {
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.settlement-one-button-skip-reason {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: calc(11 * var(--settlement-density-unit));
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.settlement-one-button-skip small {
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-rules {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(4 * var(--settlement-density-unit));
+}
+
+.settlement-one-button-rule {
+    padding: 1px calc(6 * var(--settlement-density-unit));
+    border: 1px solid var(--admin-line);
+    border-radius: calc(4 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 900;
+}
+
+@media (max-width: 720px) {
+    .settlement-one-button-header {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settlement-one-button-refresh {
+        justify-self: start;
+    }
+
+    .settlement-one-button-actions button {
+        flex: 1 1 100%;
+    }
+
+    .settlement-one-button-summary article {
+        flex: 1 1 calc(50% - 10px);
+        min-width: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .settlement-one-button-spinner {
+        animation: none;
+    }
+}

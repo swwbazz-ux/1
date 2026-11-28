@@ -1,0 +1,412 @@
+{% extends "clerk/base.html" %}
+{% load static %}
+
+{% block clerk_extra_head %}
+<link rel="stylesheet" href="{% static 'css/settlement-clerk-fund.css' %}?v={{ static_asset_release }}-settlement-clerk-fund-v2">
+{% endblock %}
+
+{% block clerk_content %}
+<main class="admin-console-page settlement-fund-page" data-settlement-fund>
+
+    <section class="settlement-fund-intro" aria-labelledby="settlement-fund-title">
+        <header class="settlement-fund-intro-header">
+            <div>
+                <span>Физический фонд</span>
+                <h2 id="settlement-fund-title">Жилфонд</h2>
+                <p>Здесь добавляют переданные комнаты в КИС-5 и КИС-6 и ведут арендованный фонд.</p>
+            </div>
+        </header>
+        <p class="settlement-fund-intro-note">Арендованный фонд не попадает на карту КИС-5/6, и авторасселение в него не селит: места такого фонда используются только вручную, после серверных проверок.</p>
+    </section>
+
+    {% if fund_message %}
+    <div class="settlement-fund-message is-{{ fund_message_level|default:'info' }}" role="status" aria-live="polite">
+        <strong>{{ fund_message }}</strong>
+        {% if fund_form_errors %}
+        <ul>
+            {% for error in fund_form_errors %}<li>{{ error }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+    {% elif fund_form_errors %}
+    <div class="settlement-fund-message is-error" role="alert">
+        <strong>Действие не выполнено.</strong>
+        <ul>
+            {% for error in fund_form_errors %}<li>{{ error }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <section class="settlement-fund-list" aria-labelledby="settlement-fund-list-title">
+        <header class="settlement-fund-section-header">
+            <div>
+                <span>Общежития и комнаты</span>
+                <h2 id="settlement-fund-list-title">Фонд в системе</h2>
+            </div>
+        </header>
+
+        {% for dormitory in fund_dormitories %}
+        <article class="settlement-fund-dormitory is-{{ dormitory.kind }}"
+                 data-fund-dormitory="{{ dormitory.number }}">
+            <header class="settlement-fund-dormitory-header">
+                <div class="settlement-fund-dormitory-title">
+                    <div class="settlement-fund-dormitory-badges">
+                        <span class="settlement-fund-kind is-{{ dormitory.kind }}">{{ dormitory.kind_label }}</span>
+                        {% if dormitory.is_active %}
+                        <span class="settlement-fund-state is-active">Активно</span>
+                        {% else %}
+                        <span class="settlement-fund-state is-closed">Закрыто</span>
+                        {% endif %}
+                        {% if not dormitory.can_add_room and not dormitory.is_manageable %}
+                        <span class="settlement-fund-state is-readonly">Только чтение</span>
+                        {% endif %}
+                    </div>
+                    <h3>Общежитие {{ dormitory.number }}</h3>
+                    <p>
+                        {% if dormitory.contractor_organization %}
+                        Арендодатель: {{ dormitory.contractor_organization }}
+                        {% else %}
+                        Собственный фонд организации
+                        {% endif %}
+                    </p>
+                    {% if dormitory.note %}
+                    <p class="settlement-fund-dormitory-note">{{ dormitory.note }}</p>
+                    {% endif %}
+                </div>
+                <dl class="settlement-fund-counts">
+                    <div>
+                        <dt>Комнаты</dt>
+                        <dd>{{ dormitory.counts.rooms }}</dd>
+                    </div>
+                    <div>
+                        <dt>Койко-места</dt>
+                        <dd>{{ dormitory.counts.beds }}</dd>
+                    </div>
+                    <div>
+                        <dt>Вместимость</dt>
+                        <dd>{{ dormitory.counts.capacity }}</dd>
+                    </div>
+                </dl>
+            </header>
+
+            {% if dormitory.rooms %}
+            <details class="settlement-fund-rooms"{% if dormitory.is_manageable %} open{% endif %}>
+                <summary>Комнаты и койко-места <small>{{ dormitory.counts.rooms }}</small></summary>
+                <div class="settlement-fund-table-wrap">
+                    <table class="settlement-fund-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Этаж</th>
+                                <th scope="col">Комната</th>
+                                <th scope="col">Тип</th>
+                                <th scope="col">Сторона</th>
+                                <th scope="col">Позиция</th>
+                                <th scope="col">Вместимость</th>
+                                <th scope="col">Передача</th>
+                                <th scope="col">Койко-места</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for room in dormitory.rooms %}
+                            <tr data-fund-room="{{ room.id }}">
+                                <td>{{ room.floor }}</td>
+                                <td>{{ room.number }}</td>
+                                <td>{{ room.room_type_label }}</td>
+                                <td>{% if room.corridor_side == 'left' %}Левая{% else %}Правая{% endif %}</td>
+                                <td>{{ room.side_position }}</td>
+                                <td>{{ room.capacity }}</td>
+                                <td>
+                                    {% if room.transfer_status == 'transferred' %}
+                                    <span class="settlement-fund-state is-active">Передана</span>
+                                    {% else %}
+                                    <span class="settlement-fund-state is-pending">Не передана</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% for bed in room.beds %}
+                                    <span class="settlement-fund-bed" title="{{ bed.stable_id }}">{{ bed.block_label }}-{{ bed.position }}</span>
+                                    {% empty %}
+                                    <span class="settlement-fund-muted">не заведены</span>
+                                    {% endfor %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+            {% else %}
+            <p class="settlement-fund-dormitory-empty">Комнаты пока не заведены.</p>
+            {% endif %}
+        </article>
+        {% empty %}
+        <div class="settlement-fund-empty">
+            <strong>Жилой фонд не заведён</strong>
+            <p>Собственный фонд загружается подготовкой подтверждённого фонда КИС-5 и КИС-6. Арендованное общежитие добавьте формой ниже.</p>
+        </div>
+        {% endfor %}
+    </section>
+
+    {% if fund_can_manage %}
+    <section class="settlement-fund-manage" aria-labelledby="settlement-fund-manage-title">
+        <header class="settlement-fund-section-header">
+            <div>
+                <h2 id="settlement-fund-manage-title">Управление жилфондом</h2>
+            </div>
+            <p>Изменения жилфонда записываются в журнал.</p>
+        </header>
+
+        <div class="settlement-fund-forms">
+
+            <details class="settlement-fund-form-card" data-fund-form="create_dormitory">
+                <summary>
+                    <strong>Добавить арендованное общежитие</strong>
+                    <small>Номер, арендодатель, примечание</small>
+                </summary>
+                {% if contractor_organizations %}
+                <form class="settlement-fund-form" method="post" action="{% url 'settlement_fund' %}" data-fund-action="create_dormitory">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create_dormitory">
+                    <input type="hidden" name="kind" value="rented">
+                    <div class="settlement-fund-form-grid">
+                        <label class="settlement-fund-field">
+                            <span>Номер общежития</span>
+                            <input type="text" name="number" maxlength="16" autocomplete="off" required>
+                        </label>
+                        <label class="settlement-fund-field">
+                            <span>Организация-арендодатель</span>
+                            <select name="contractor_organization" required>
+                                <option value="">Выберите организацию</option>
+                                {% for organization in contractor_organizations %}
+                                <option value="{{ organization.id }}">{{ organization.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field is-wide">
+                            <span>Примечание</span>
+                            <textarea name="note" rows="2" autocomplete="off"></textarea>
+                        </label>
+                        <label class="settlement-fund-field is-wide">
+                            <span>Основание</span>
+                            <input type="text" name="reason" maxlength="255" autocomplete="off" required>
+                        </label>
+                    </div>
+                    <div class="settlement-fund-form-actions">
+                        <button type="submit">Добавить общежитие</button>
+                    </div>
+                </form>
+                {% else %}
+                <p class="settlement-fund-form-blocked">Нет активных организаций-арендодателей. Сначала заведите организацию подрядчика, иначе арендованное общежитие создать нельзя.</p>
+                {% endif %}
+            </details>
+
+            <details class="settlement-fund-form-card" data-fund-form="create_room">
+                <summary>
+                    <strong>Добавить комнату</strong>
+                    <small>КИС-5, КИС-6 или арендованное общежитие</small>
+                </summary>
+                <form class="settlement-fund-form" method="post" action="{% url 'settlement_fund' %}" data-fund-action="create_room">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create_room">
+                    <div class="settlement-fund-form-grid">
+                        <label class="settlement-fund-field is-wide">
+                            <span>Общежитие</span>
+                            <select name="dormitory" required data-fund-room-dormitory>
+                                <option value="">Выберите общежитие</option>
+                                {% for dormitory in fund_dormitories %}
+                                {% if dormitory.can_add_room %}
+                                <option value="{{ dormitory.id }}"{% if dormitory.kind == 'rented' %} data-fund-rented{% endif %}>Общежитие {{ dormitory.number }}{% if dormitory.contractor_organization %} · {{ dormitory.contractor_organization }}{% endif %}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field">
+                            <span>Этаж</span>
+                            <select name="floor" required>
+                                <option value="1">1 этаж</option>
+                                <option value="2">2 этаж</option>
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field">
+                            <span>Номер комнаты</span>
+                            <input type="number" name="number" min="1" max="32767" step="1" required>
+                        </label>
+                        <label class="settlement-fund-field">
+                            <span>Вместимость</span>
+                            <select name="capacity" required>
+                                <option value="1">1 место</option>
+                                <option value="2">2 места</option>
+                                <option value="3">3 места</option>
+                                <option value="4">4 места</option>
+                                <option value="5">5 мест</option>
+                                <option value="6">6 мест</option>
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field" data-fund-rented-layout hidden>
+                            <span>Сторона коридора</span>
+                            <select name="corridor_side" disabled required>
+                                <option value="left">Левая сторона</option>
+                                <option value="right">Правая сторона</option>
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field" data-fund-rented-layout hidden>
+                            <span>Позиция на стороне</span>
+                            <input type="number" name="side_position" min="1" max="32767" step="1" placeholder="В конец ряда" disabled>
+                        </label>
+                        <label class="settlement-fund-field">
+                            <span>Тип комнаты</span>
+                            <select name="room_type" required>
+                                <option value="standard">Стандартная</option>
+                                <option value="itr">ИТР</option>
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field is-wide">
+                            <span>Основание</span>
+                            <input type="text" name="reason" maxlength="255" autocomplete="off" required>
+                        </label>
+                    </div>
+                    <p class="settlement-fund-form-hint">Комната сразу считается переданной. Для КИС-5 и КИС-6 койко-места создаются автоматически. В комнате ИТР до двух мест.</p>
+                    <div class="settlement-fund-form-actions">
+                        <button type="submit">Добавить комнату</button>
+                    </div>
+                </form>
+            </details>
+
+            <details class="settlement-fund-form-card" data-fund-form="create_bed">
+                <summary>
+                    <strong>Добавить койко-место</strong>
+                    <small>Блок, позиция, основание</small>
+                </summary>
+                <form class="settlement-fund-form" method="post" action="{% url 'settlement_fund' %}" data-fund-action="create_bed">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create_bed">
+                    <div class="settlement-fund-form-grid">
+                        <label class="settlement-fund-field is-wide">
+                            <span>Общежитие</span>
+                            <select data-fund-bed-dormitory aria-label="Фильтр комнат по общежитию">
+                                <option value="">Все арендованные общежития</option>
+                                {% for dormitory in fund_dormitories %}
+                                {% if dormitory.is_manageable and dormitory.is_active %}
+                                <option value="{{ dormitory.id }}">Общежитие {{ dormitory.number }}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field is-wide">
+                            <span>Комната</span>
+                            <select name="room" required data-fund-bed-room>
+                                <option value="">Выберите переданную комнату</option>
+                                {% for dormitory in fund_dormitories %}
+                                {% if dormitory.is_manageable and dormitory.is_active %}
+                                {% for room in dormitory.rooms %}
+                                {% if room.transfer_status == 'transferred' %}
+                                <option value="{{ room.id }}" data-dormitory-id="{{ dormitory.id }}">Общежитие {{ dormitory.number }} · {{ room.floor }} этаж · комната {{ room.number }} ({{ room.capacity }})</option>
+                                {% endif %}
+                                {% endfor %}
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field">
+                            <span>Блок</span>
+                            <select name="block" required>
+                                <option value="A">А</option>
+                                <option value="B">Б</option>
+                                <option value="ITR">ИТР</option>
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field">
+                            <span>Позиция в блоке</span>
+                            <select name="position" required>
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field is-wide">
+                            <span>Основание</span>
+                            <input type="text" name="reason" maxlength="255" autocomplete="off" required>
+                        </label>
+                    </div>
+                    <p class="settlement-fund-form-hint" data-fund-bed-hint hidden>Для выбранного общежития нет переданных комнат: сначала добавьте комнату.</p>
+                    <p class="settlement-fund-form-hint">В комнате ИТР койко-места нумеруются блоком ИТР, доступны позиции 1–2. В обычной комнате — блоки А и Б, позиции 1–3.</p>
+                    <div class="settlement-fund-form-actions">
+                        <button type="submit">Добавить койко-место</button>
+                    </div>
+                </form>
+            </details>
+
+            <details class="settlement-fund-form-card" data-fund-form="close_dormitory">
+                <summary>
+                    <strong>Закрыть общежитие</strong>
+                    <small>Записи фонда сохраняются</small>
+                </summary>
+                <form class="settlement-fund-form" method="post" action="{% url 'settlement_fund' %}" data-fund-action="close_dormitory">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="close_dormitory">
+                    <div class="settlement-fund-form-grid">
+                        <label class="settlement-fund-field is-wide">
+                            <span>Общежитие</span>
+                            <select name="dormitory" required>
+                                <option value="">Выберите арендованное общежитие</option>
+                                {% for dormitory in fund_dormitories %}
+                                {% if dormitory.is_manageable and dormitory.is_active %}
+                                <option value="{{ dormitory.id }}">Общежитие {{ dormitory.number }}{% if dormitory.contractor_organization %} · {{ dormitory.contractor_organization }}{% endif %}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field is-wide">
+                            <span>Основание</span>
+                            <input type="text" name="reason" maxlength="255" autocomplete="off" required>
+                        </label>
+                    </div>
+                    <p class="settlement-fund-form-hint">Закрытие не удаляет комнаты и койко-места. Если в фонде есть активные заселения или подготовки, сервер откажет и назовёт причину.</p>
+                    <div class="settlement-fund-form-actions">
+                        <button type="submit" class="is-danger">Закрыть общежитие</button>
+                    </div>
+                </form>
+            </details>
+
+            <details class="settlement-fund-form-card" data-fund-form="reopen_dormitory">
+                <summary>
+                    <strong>Открыть общежитие заново</strong>
+                    <small>Только закрытый арендованный фонд</small>
+                </summary>
+                <form class="settlement-fund-form" method="post" action="{% url 'settlement_fund' %}" data-fund-action="reopen_dormitory">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="reopen_dormitory">
+                    <div class="settlement-fund-form-grid">
+                        <label class="settlement-fund-field is-wide">
+                            <span>Общежитие</span>
+                            <select name="dormitory" required>
+                                <option value="">Выберите закрытое арендованное общежитие</option>
+                                {% for dormitory in fund_dormitories %}
+                                {% if dormitory.is_manageable and not dormitory.is_active %}
+                                <option value="{{ dormitory.id }}">Общежитие {{ dormitory.number }}{% if dormitory.contractor_organization %} · {{ dormitory.contractor_organization }}{% endif %}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="settlement-fund-field is-wide">
+                            <span>Основание</span>
+                            <input type="text" name="reason" maxlength="255" autocomplete="off" required>
+                        </label>
+                    </div>
+                    <p class="settlement-fund-form-hint">Открытие возвращает общежитие в работу и не удаляет комнаты и койко-места: после открытия фонд снова доступен для добавления мест и ручного заселения. Если закрытых арендованных общежитий нет, список будет пуст.</p>
+                    <div class="settlement-fund-form-actions">
+                        <button type="submit">Открыть общежитие</button>
+                    </div>
+                </form>
+            </details>
+
+        </div>
+    </section>
+    {% endif %}
+
+</main>
+{% endblock %}
+
+{% block clerk_scripts %}
+<script src="{% static 'js/settlement-clerk-fund.js' %}?v={{ static_asset_release }}-settlement-clerk-fund-v2" defer></script>
+{% endblock %}
