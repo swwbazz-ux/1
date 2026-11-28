@@ -27,25 +27,6 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         return dispatcherShiftOpen;
     }
-    function expireDispatcherFreeBucketMarkers() {
-        var currentBoard = document.querySelector(".dispatcher-board");
-        var renderedServerNow = currentBoard && Date.parse(currentBoard.dataset.serverNow || "");
-        var clientCapturedAt = currentBoard && Number(currentBoard.dataset.serverNowClientCapturedAt || 0);
-        if (currentBoard && Number.isFinite(renderedServerNow) && !clientCapturedAt) {
-            clientCapturedAt = Date.now();
-            currentBoard.dataset.serverNowClientCapturedAt = String(clientCapturedAt);
-        }
-        var serverClockOffset = Number.isFinite(renderedServerNow)
-            ? renderedServerNow - clientCapturedAt
-            : 0;
-        var effectiveNow = Date.now() + serverClockOffset;
-        document.querySelectorAll("[data-dispatcher-free-bucket-expires-at]").forEach(function (marker) {
-            var deadline = Date.parse(marker.dataset.dispatcherFreeBucketExpiresAt || "");
-            if (Number.isFinite(deadline) && deadline <= effectiveNow) marker.remove();
-        });
-    }
-    expireDispatcherFreeBucketMarkers();
-    window.setInterval(expireDispatcherFreeBucketMarkers, 1000);
   // 2. Shared request helpers and transport integration.
     function getCookie(name) {
         var value = "; " + document.cookie;
@@ -181,6 +162,11 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     var isDispatcherOperationalRefreshUnsafe = dispatcherRealtime.isOperationalRefreshUnsafe;
     var refreshDispatcherDesktopBoardFromServer = dispatcherRealtime.refreshBoardFromServer;
+    if (typeof window.startDispatcherFreeBucketRefresh === "function") {
+        window.startDispatcherFreeBucketRefresh(".dispatcher-board", isDispatcherOperationalRefreshUnsafe, function () {
+            return refreshDispatcherDesktopBoardFromServer({ allowSameVersion: true });
+        });
+    }
     var seedDispatcherBoardFingerprints = dispatcherRealtime.seedBoardFingerprints;
     window.applyOperationalStateRefresh = function (context) {
         return dispatcherRealtime.applyOperationalStateRefresh(context);

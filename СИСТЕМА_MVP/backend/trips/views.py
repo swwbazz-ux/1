@@ -612,7 +612,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v279";
+const CACHE_NAME = "excavator-mobile-shell-v280";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -626,32 +626,32 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v279",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v279",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v279",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v279",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v279",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v279",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v279",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v280",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v280",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v280",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v280",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v280",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v280",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v280",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-downtime-edge-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-work-feedback-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-work-runtime-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-work-screen-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-work-pwa-v1.js?v=excavator-mobile-shell-v279",
-  "/static/js/excavator-work-boot-v1.js?v=excavator-mobile-shell-v279",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v279",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-downtime-edge-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-work-feedback-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-work-runtime-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-work-screen-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-work-pwa-v1.js?v=excavator-mobile-shell-v280",
+  "/static/js/excavator-work-boot-v1.js?v=excavator-mobile-shell-v280",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v280",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -1817,10 +1817,9 @@ def build_dispatcher_dashboard_context(
         list(excavators),
         key=dispatcher_equipment_sort_key,
     )
-    # The dispatcher keeps a truck in its primary complex.  This separate
-    # annotation explains a temporary free-bucket operation without turning it
-    # into a dispatcher reassignment.
-    from trips.models import FreeBucketAcceptance
+    # Keep the assignment rows for placement and analytics. The operational
+    # board projects the temporary move independently.
+    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
     free_bucket_marker_by_truck_id = {}
     free_bucket_marker_now = timezone.now()
     for acceptance in (
@@ -1837,6 +1836,17 @@ def build_dispatcher_dashboard_context(
             {
                 'label': 'Свободный ковш · ' + equipment_short_name(acceptance.excavator),
                 'expires_at': free_bucket_acceptance_expires_at(acceptance),
+                'excavator_id': acceptance.excavator_id,
+                'destination': dispatcher_complex_label(acceptance.excavator),
+                'state': acceptance.status,
+                'on_board': (
+                    acceptance.status != FreeBucketAcceptanceStatus.USED
+                    or bool(acceptance.used_trip and acceptance.used_trip.status in OPEN_TRIP_STATUSES)
+                ),
+                'refresh_at': (
+                    free_bucket_acceptance_expires_at(acceptance)
+                    or acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL
+                ),
             },
         )
     shift_trip_queryset = Trip.objects.none()
@@ -2265,6 +2275,9 @@ def build_dispatcher_dashboard_context(
         if assignment.excavator_id and assignment.action != HaulAssignmentAction.RELEASE
     )
     active_excavator_ids.update(trip.excavator_id for trip in active_trips_list if trip.excavator_id)
+    active_excavator_ids.update(
+        marker['excavator_id'] for marker in free_bucket_marker_by_truck_id.values() if marker['on_board']
+    )
 
     downtime_state_code_by_equipment_id = {
         equipment_id: downtime_equipment_state_code(downtime)
@@ -2333,6 +2346,7 @@ def build_dispatcher_dashboard_context(
             trips_by_excavator_id[trip.excavator_id].append(trip)
 
     complex_cards = []
+    truck_by_id = {truck.id: truck for truck in trucks_list}
     for excavator in shown_excavators:
         # Техника с гаражным номером «ТЕСТ...» — заглушка, а не настоящий
         # экскаватор, даже если она активна в справочнике. Номер комплекса
@@ -2408,7 +2422,6 @@ def build_dispatcher_dashboard_context(
                 target_by_truck[trip.truck_id] = str(trip.dump_point)
             if trip.rock_type:
                 rock_by_truck[trip.truck_id] = str(trip.rock_type)
-        truck_by_id = {truck.id: truck for truck in trucks_list}
         for truck_id in sorted(current_truck_ids, key=lambda item: dispatcher_garage_number_int(truck_by_id.get(item)) if item in truck_by_id else 9999):
             truck = truck_by_id.get(truck_id)
             if not truck:
@@ -2938,6 +2951,54 @@ def build_dispatcher_dashboard_context(
             ),
         })
 
+    # Only the operational pult uses these tiles. "Расстановка" continues to
+    # use the permanent assignment snapshot, including its draggable sources.
+    complexes_by_id = {card['excavator'].id: card for card in complex_cards}
+    primary_truck_slots = {}
+    for card in complex_cards:
+        card['board_truck_tiles'] = list(card['active_truck_tiles'])
+        for index, tile in enumerate(card['active_truck_tiles']):
+            primary_truck_slots[tile['card_id']] = (card, index, tile)
+    garage_tiles_by_id = {tile['card_id']: tile for tile in truck_garage_tiles}
+    displayed_bucket_truck_ids = set()
+    free_bucket_board_deadlines = []
+    for truck_id, marker in free_bucket_marker_by_truck_id.items():
+        destination = complexes_by_id.get(marker['excavator_id'])
+        if not destination or not marker['on_board']:
+            continue
+        card_id = str(truck_id)
+        primary, slot_index, original = primary_truck_slots.get(card_id, (None, None, None))
+        original = original or garage_tiles_by_id.get(card_id) or {}
+        truck = truck_by_id[truck_id]
+        status, status_label, state_code = truck_state_by_id[truck_id]
+        if truck_id not in active_trip_truck_ids and truck_id not in active_downtime_ids:
+            status_label = (
+                'Ожидает приёма' if marker['state'] == FreeBucketAcceptanceStatus.REQUESTED
+                else 'Под погрузку'
+            )
+        temporary = {
+            **original,
+            'card_id': card_id,
+            'name': dispatcher_truck_garage_number(truck, 0) or equipment_short_name(truck),
+            'status': status,
+            'label': status_label,
+            'equipment_state_code': state_code,
+            'free_bucket_label': marker['label'],
+            'free_bucket_expires_at': marker['refresh_at'],
+            'free_bucket_temporary': True,
+        }
+        if primary is destination:
+            primary['board_truck_tiles'][slot_index] = temporary
+        else:
+            if primary:
+                primary['board_truck_tiles'][slot_index] = {
+                    **original,
+                    'free_bucket_away_to': marker['destination'],
+                }
+            destination['board_truck_tiles'].append(temporary)
+        displayed_bucket_truck_ids.add(card_id)
+        free_bucket_board_deadlines.append(marker['refresh_at'])
+
     completed_shift_percent = (
         int((completed_tons / DISPATCHER_PLAN_TOTAL_TONS) * 100)
         if DISPATCHER_PLAN_TOTAL_TONS
@@ -3337,6 +3398,10 @@ def build_dispatcher_dashboard_context(
         'stable_complex_order': stable_complex_order,
         'mobile_complex_zones': mobile_complex_zones,
         'truck_garage_tiles': truck_garage_tiles,
+        'board_truck_garage_tiles': [
+            tile for tile in truck_garage_tiles if tile['card_id'] not in displayed_bucket_truck_ids
+        ],
+        'free_bucket_board_refresh_at': min(free_bucket_board_deadlines, default=None),
         'mobile_truck_garage_tiles': mobile_truck_garage_tiles,
         'equipment_cards': equipment_cards,
         'equipment_state_ui': {
@@ -5678,16 +5743,22 @@ def excavator_work_view(request):
             .filter(
                 truck_id__in=[assignment.truck_id for assignment in available_assignments],
             )
-            .filter(free_bucket_reservation_filter(now=free_bucket_snapshot_at))
+            .filter(active_free_bucket_acceptance_filter(now=free_bucket_snapshot_at))
+            .exclude(
+                Q(status=FreeBucketAcceptanceStatus.USED)
+                & ~Q(used_trip__status__in=OPEN_TRIP_STATUSES)
+            )
             .exclude(excavator=current_excavator)
-            .select_related('excavator')
+            .select_related('excavator', 'used_trip')
             .order_by('-occurred_at', '-id')
         ):
-            free_bucket_deadlines.append(acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL)
+            free_bucket_deadlines.append(
+                free_bucket_acceptance_expires_at(acceptance) or acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL
+            )
             foreign_free_bucket_by_truck_id.setdefault(
                 acceptance.truck_id,
                 {
-                    'label': str(acceptance.excavator.garage_number or acceptance.excavator),
+                    'label': dispatcher_complex_label(acceptance.excavator),
                 },
             )
 
@@ -5704,12 +5775,12 @@ def excavator_work_view(request):
         if foreign_free_bucket:
             load_block = {
                 'code': 'free_bucket_reserved_elsewhere',
-                'label': 'Самосвал временно обслуживается другим экскаватором.',
+                'label': f'Самосвал временно в {foreign_free_bucket["label"]}.',
             }
         block_reason = load_block['label'] if load_block else ''
         load_block_reason_code = load_block['code'] if load_block else ''
         participation = driver_participation[assignment.truck_id]
-        manual_available = bool(manual_loading_enabled() and participation['passive']
+        manual_available = bool(not foreign_free_bucket and manual_loading_enabled() and participation['passive']
                                 and not assignment_load_block(assignment, active_trip, manual_control=True))
         unowned_previous = bool(active_trip and active_trip.driver_participation_recorded
                                 and not active_trip.driver_control_shift_id and not participation['passive']
@@ -5740,7 +5811,7 @@ def excavator_work_view(request):
             'equipment_state_code': equipment_state_code,
             'status_key': status_key,
             'status_label': (
-                'Под свободным ковшом'
+                f'В {foreign_free_bucket["label"]}'
                 if foreign_free_bucket
                 else active_truck_downtime.reason.button_label
                 if active_truck_downtime
@@ -5751,7 +5822,7 @@ def excavator_work_view(request):
                 )
             ),
             'target_label': target_label,
-            'is_selected': assignment.id == first_ready_assignment_id,
+            'is_selected': not foreign_free_bucket and assignment.id == first_ready_assignment_id,
             'is_locked': is_locked,
             'is_inactive': is_inactive,
             'is_load_blocked': bool(load_block and soft_driver_block),

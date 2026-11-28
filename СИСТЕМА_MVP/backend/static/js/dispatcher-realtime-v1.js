@@ -167,7 +167,8 @@
                     return renderedBoardCoversRequest && lastAppliedFragmentVersion >= payloadVersion;
                 }
                 if (payloadVersion === lastAppliedFragmentVersion) {
-                    if (!refreshOptions.forceFullBoard || requestGeneration < lastAppliedFragmentGeneration) {
+                    if (!(refreshOptions.forceFullBoard || refreshOptions.allowSameVersion)
+                        || requestGeneration < lastAppliedFragmentGeneration) {
                         return renderedBoardCoversRequest;
                     }
                 }

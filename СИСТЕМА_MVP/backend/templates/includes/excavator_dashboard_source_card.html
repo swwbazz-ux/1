@@ -27,7 +27,7 @@
     data-plan-status="{{ card.plan_status|default:'no_plan_group' }}"
     data-plan-progress-status="{{ card.plan_status_key|default:'empty' }}"
     {% if card.is_inactive %}data-eo-truck-inactive="1"{% endif %}
-    {% if driver_manual_dashboard %}data-driver-manual-source data-driver-manual-excavator-id="{{ card.equipment_id }}" aria-label="Перетащите экскаватор в точку разгрузки"{% elif not open_shift %}disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% elif card.is_locked %}aria-disabled="true"{% endif %}
+    {% if driver_manual_dashboard %}data-driver-manual-source data-driver-manual-excavator-id="{{ card.equipment_id }}" aria-label="Перетащите экскаватор в точку разгрузки"{% elif not open_shift %}disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% elif card.foreign_free_bucket %}disabled aria-disabled="true" aria-label="Самосвал {{ card.number }} временно в {{ card.foreign_free_bucket.label }}"{% elif card.is_locked %}aria-disabled="true"{% endif %}
 >
     <b class="eo-driver-presence presence-{{ card.driver_presence_code }}" title="{{ card.driver_presence_label }}" aria-label="{% if driver_manual_dashboard %}Назначение{% else %}Водитель{% endif %}: {{ card.driver_presence_label }}"></b>
     <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
@@ -40,12 +40,11 @@
         <u class="eo-transfer-glow" aria-hidden="true"></u>
     {% endif %}
     {% if card.foreign_free_bucket %}
-        <div class="eo-free-bucket-remote-marker" aria-label="Самосвал временно обслуживается {{ card.foreign_free_bucket.label }}">
-            Свободный ковш · {{ card.foreign_free_bucket.label }}
-        </div>
+        <div class="eo-free-bucket-remote-marker">{{ card.status_label }}</div>
+    {% else %}
+        <span>{{ card.status_label }}</span>
+        <small>{% if card.plan_has_plan %}{{ card.plan_percent }}%{% else %}{{ card.plan_short_label }}{% endif %}</small>
+        {% if card.plan_visual.has_completed_loops %}<b class="eo-truck-progress-loop" aria-label="Завершено циклов: {{ card.plan_visual.completed_loops }}">×{{ card.plan_visual.completed_loops }}</b>{% endif %}
+        {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
     {% endif %}
-    <span>{{ card.status_label }}</span>
-    <small>{% if card.plan_has_plan %}{{ card.plan_percent }}%{% else %}{{ card.plan_short_label }}{% endif %}</small>
-    {% if card.plan_visual.has_completed_loops %}<b class="eo-truck-progress-loop" aria-label="Завершено циклов: {{ card.plan_visual.completed_loops }}">×{{ card.plan_visual.completed_loops }}</b>{% endif %}
-    {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
 </button>

@@ -11,7 +11,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v169";
+const CACHE_NAME = "dispatcher-desktop-shell-v170";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -21,6 +21,7 @@ const CORE_ASSETS = [
   "/static/js/realtime-client.js?v=__STATIC_ASSET_RELEASE__",
   "/static/js/connection-indicators-v1.js?v=__STATIC_ASSET_RELEASE__",
   "/static/js/role-readonly.js",
+  "/static/js/dispatcher-free-bucket-v1.js?v=1",
   "/static/js/dispatcher-control-v1.js",
   "/static/js/dispatcher-transport-v1.js",
   "/static/js/dispatcher-detail-settings-v1.js",
@@ -44,6 +45,7 @@ const CORE_ASSETS = [
   "/static/css/dispatcher-detail-v1.css",
   "/static/css/dispatcher-adaptive-v1.css",
   "/static/css/dispatcher-detail-overrides-v1.css",
+  "/static/css/dispatcher-free-bucket-v1.css?v=1",
   "/static/css/dispatcher-canvas-v1.css",
   "/static/favicon.ico",
   "/static/img/pwa/dispatcher-180.png",

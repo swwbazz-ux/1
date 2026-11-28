@@ -188,13 +188,13 @@ test('a rejected repeat acceptance is removed instead of becoming a dead card', 
     assert.match(source, /item\.can_accept_free_bucket !== false/);
 });
 
-test('dispatcher removes the used marker at its server deadline without polling', () => {
-    assert.match(dispatcherTemplate, /data-dispatcher-free-bucket-expires-at/);
+test('dispatcher refreshes the placement at the server deadline', () => {
+    assert.match(dispatcherTemplate, /data-dispatcher-free-bucket-refresh-at/);
     assert.match(dispatcherTemplate, /data-server-now=/);
-    assert.match(dispatcherSource, /function expireDispatcherFreeBucketMarkers\(\)/);
-    assert.match(dispatcherSource, /serverNowClientCapturedAt/);
-    assert.match(dispatcherSource, /marker\.remove\(\)/);
-    assert.match(dispatcherSource, /setInterval\(expireDispatcherFreeBucketMarkers, 1000\)/);
+    assert.match(dispatcherTemplate, /complex\.board_truck_tiles/);
+    assert.match(dispatcherTemplate, /is-free-bucket-away[^>]+disabled/);
+    assert.match(dispatcherSource, /startDispatcherFreeBucketRefresh/);
+    assert.match(dispatcherSource, /refreshDispatcherDesktopBoardFromServer\(\{ allowSameVersion: true \}\)/);
 });
 
 test('one successful free-bucket swipe removes the upper card and keeps a separate five-minute badge', () => {
@@ -207,8 +207,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v279/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v279/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v280/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v280/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {
@@ -221,7 +221,7 @@ test('temporary card adds semantics without replacing production status', () => 
     assert.match(template, /eo-free-bucket-remote-marker/);
     assert.match(template, /foreign_free_bucket %\} is-free-bucket-remote/);
     assert.match(css, /\.eo-free-bucket-remote-marker/);
-    assert.match(css, /is-free-bucket-remote \{[\s\S]*grid-template-areas:\s*"icon" "number" "freebucket" "target"/);
+    assert.match(css, /is-free-bucket-remote \{[\s\S]*grid-template-areas:\s*"icon" "number" "freebucket"/);
     assert.match(css, /grid-area:\s*freebucket/);
 });
 

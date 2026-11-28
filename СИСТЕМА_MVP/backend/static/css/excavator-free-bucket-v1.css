@@ -507,33 +507,34 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket.is-free-b
     opacity: .66;
 }
 
-/* Основная карточка остаётся в своём комплексе, но явно показывает временную
-   работу у другого экскаватора. Метка не подменяет производственный цвет. */
-body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote {
-    grid-template-areas: "icon" "number" "freebucket" "target" !important;
+/* Слот занят временно отсутствующим самосвалом. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.is-free-bucket-remote {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "icon" "number" "freebucket" !important;
+    grid-template-rows: minmax(0, 1fr) auto auto !important;
+    border: 1px dashed #586873 !important;
+    filter: grayscale(1) !important;
+    cursor: default;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-outgoing,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-incoming {
+    grid-template-areas: "icon" "number" "transfer" "freebucket" !important;
     grid-template-rows: minmax(0, 1fr) auto auto auto !important;
 }
 
-body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-outgoing,
-body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-incoming {
-    grid-template-areas: "icon" "number" "transfer" "freebucket" "target" !important;
-    grid-template-rows: minmax(0, 1fr) auto auto auto auto !important;
-}
-
-body.excavator-operator-screen .eo-dashboard-truck-card .eo-free-bucket-remote-marker {
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card > .eo-free-bucket-remote-marker {
     grid-area: freebucket !important;
     position: relative !important;
     z-index: 8 !important;
     display: block !important;
-    max-width: calc(100% - 4px) !important;
+    justify-self: stretch;
+    min-width: 0;
     box-sizing: border-box;
-    padding: 2px 5px;
+    padding: 2px 0;
     overflow: hidden;
-    border: 1px solid rgba(255, 211, 72, .52);
-    border-radius: 999px;
-    background: rgba(37, 31, 9, .86);
-    color: #ffe071;
-    font-size: clamp(7px, 1.9vw, 10px);
+    color: #d5dee3;
+    font-size: clamp(9px, 2.8vw, 13px);
     font-weight: 900;
     line-height: 1.05;
     text-align: center;
@@ -542,14 +543,14 @@ body.excavator-operator-screen .eo-dashboard-truck-card .eo-free-bucket-remote-m
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote {
-    grid-template-areas: "icon" "number" "freebucket" "target" !important;
-    grid-template-rows: minmax(12px, 1fr) auto auto auto !important;
+    grid-template-areas: "icon" "number" "freebucket" !important;
+    grid-template-rows: minmax(12px, 1fr) auto auto !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-outgoing,
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-incoming {
-    grid-template-areas: "icon" "number" "transfer" "freebucket" "target" !important;
-    grid-template-rows: minmax(8px, 1fr) auto auto auto auto !important;
+    grid-template-areas: "icon" "number" "transfer" "freebucket" !important;
+    grid-template-rows: minmax(8px, 1fr) auto auto auto !important;
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-highlight {

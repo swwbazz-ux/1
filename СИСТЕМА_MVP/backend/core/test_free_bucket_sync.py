@@ -481,6 +481,9 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(downtime.ended_at, loaded_at)
 
     def test_excavator_cancel_before_acceptance_time_is_terminal_conflict(self):
+        # The stale cancellation must still fall inside the shift.
+        self.shift.opened_at -= timedelta(minutes=1)
+        self.shift.save(update_fields=['opened_at'])
         accepted = self.accept_event(event_id='free-accept-before-stale-cancel')
         accepted_result = self.sync([accepted]).json()['results'][0]
         self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
@@ -2516,6 +2519,18 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertIn('Свободный ковш', primary_tile['free_bucket_label'])
         self.assertIn(str(self.other_excavator.garage_number), primary_tile['free_bucket_label'])
         self.assertIsNone(primary_tile['free_bucket_expires_at'])
+        dashboard = self.dispatcher_dashboard()
+        by_excavator = {card['excavator'].pk: card for card in dashboard['complex_cards']}
+        primary = by_excavator[self.excavator.id]
+        receiver = by_excavator[self.other_excavator.id]
+        self.assertEqual(primary['board_truck_tiles'][0]['free_bucket_away_to'], receiver['id'])
+        temporary = next(tile for tile in receiver['board_truck_tiles'] if tile.get('free_bucket_temporary'))
+        self.assertEqual(temporary['label'], 'Ожидает приёма')
+        self.assertEqual(temporary['card_id'], str(self.truck.pk))
+        self.assertNotIn(str(self.truck.pk), {tile['card_id'] for tile in receiver['active_truck_tiles']})
+        self.assertIsNotNone(dashboard['free_bucket_board_refresh_at'])
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.excavator_id, self.excavator.id)
 
     def test_dispatcher_used_marker_is_visible_only_for_five_minutes(self):
         other_client, other_operator, other_shift = (
@@ -2544,6 +2559,10 @@ class FreeBucketServerIntegrationTests(TestCase):
         recent_tile = self.dispatcher_primary_tile()
         self.assertIn('Свободный ковш', recent_tile['free_bucket_label'])
         self.assertEqual(recent_tile['free_bucket_expires_at'], recent + timedelta(minutes=5))
+        board = self.dispatcher_dashboard()
+        destination = next(card for card in board['complex_cards'] if card['excavator'] == self.other_excavator)
+        temporary = next(tile for tile in destination['board_truck_tiles'] if tile.get('free_bucket_temporary'))
+        self.assertEqual(temporary['label'], 'На разгрузку')
 
         expired = timezone.now() - timedelta(minutes=5, seconds=1)
         Trip.objects.filter(pk=trip.pk).update(loaded_at=expired)
@@ -2551,6 +2570,10 @@ class FreeBucketServerIntegrationTests(TestCase):
         expired_tile = self.dispatcher_primary_tile()
         self.assertEqual(expired_tile['free_bucket_label'], '')
         self.assertIsNone(expired_tile['free_bucket_expires_at'])
+        board = self.dispatcher_dashboard()
+        primary = next(card for card in board['complex_cards'] if card['excavator'] == self.excavator)
+        self.assertEqual(primary['board_truck_tiles'], primary['active_truck_tiles'])
+        self.assertIsNone(board['free_bucket_board_refresh_at'])
 
     def test_spent_free_bucket_does_not_block_regular_loading_after_trip_completion(self):
         other_client, other_operator, other_shift = (
@@ -2573,6 +2596,8 @@ class FreeBucketServerIntegrationTests(TestCase):
 
         active = self.client.get(reverse('excavator_work')).context['truck_cards'][0]
         self.assertFalse(active['can_load'])
+        self.assertIsNotNone(active['foreign_free_bucket'])
+        self.assertFalse(active['manual_available'])
         trip = Trip.objects.get()
         # Reproduce a completed trip whose original visual record is still USED.
         Trip.objects.filter(pk=trip.pk).update(
