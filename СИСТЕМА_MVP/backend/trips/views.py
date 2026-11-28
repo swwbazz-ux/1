@@ -1935,10 +1935,6 @@ def build_dispatcher_dashboard_context(
             dispatcher_plan_shift_type,
         )
     shift_trips = list(shift_trip_queryset[:500])
-    master_period_facts_by_truck = (
-        dispatcher_trip_facts_by_truck(shift_trip_queryset.filter(status=TripStatus.COMPLETED))
-        if is_mining_master_reporting_period else {}
-    )
     first_open_shift_by_equipment_id = {}
     latest_open_shift_by_equipment_id = {}
     for shift in open_shifts:
@@ -2028,10 +2024,12 @@ def build_dispatcher_dashboard_context(
     )
     selected_equipment_shifts = list(open_shift_by_equipment_id.values())
     snapshot_trip_facts = aggregate_completed_trip_facts_by_shift(
+        # Личный план самосвала на обоих пультах учитывает рейсы,
+        # зачтённые смене водителя за весь её срок.
         unloading_shift_ids=(
             shift.id
             for shift in selected_equipment_shifts
-            if not is_mining_master_reporting_period and shift.equipment_id in truck_equipment_ids
+            if shift.equipment_id in truck_equipment_ids
         ),
         # План экскаватора общий для машиниста, диспетчера и мастера.
         # Погрузки относятся к смене экскаватора и учитываются до подтверждения разгрузки.
@@ -2049,9 +2047,7 @@ def build_dispatcher_dashboard_context(
             return plan_progress_display_context(None)
         if equipment_id not in plan_by_equipment_id:
             shift = open_shift_by_equipment_id.get(equipment_id)
-            if shift and equipment_id in truck_equipment_ids and is_mining_master_reporting_period:
-                progress = calculate_progress_from_snapshot_facts(shift, master_period_facts_by_truck.get(equipment_id))
-            elif shift and equipment_id in truck_equipment_ids:
+            if shift and equipment_id in truck_equipment_ids:
                 progress = calculate_progress_from_snapshot_facts(
                     shift,
                     snapshot_trip_facts['unloading'].get(shift.id),

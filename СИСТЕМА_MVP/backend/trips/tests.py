@@ -1346,6 +1346,45 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(assigned_tile['percent'], 25)
         self.assertFalse(assigned_tile['plan_inactive_fill'])
 
+    def test_master_truck_tile_and_card_use_the_whole_driver_shift(self):
+        self.create_plan_group(equipment=self.assigned_truck, mode=PlanCalculationMode.TRIPS, value='4.00')
+        ExcavatorPlacement.objects.create(excavator=self.excavator, zone=ExcavatorPlacement.Zone.ACTIVE)
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck, excavator=self.excavator, status=AssignmentStatus.ACCEPTED,
+        )
+        driver_shift = self.open_equipment_shift(self.assigned_truck, employee_name='Водитель самосвала')
+        master_started_at = driver_shift.opened_at + timedelta(minutes=20)
+        for _ in range(2):
+            self.create_completed_trip(truck=self.assigned_truck, excavator=self.excavator, unloading_shift=driver_shift)
+        later_trip = self.create_completed_trip(
+            truck=self.assigned_truck, excavator=self.excavator, unloading_shift=driver_shift,
+        )
+        Trip.objects.filter(pk=later_trip.pk).update(completed_at=master_started_at + timedelta(minutes=4))
+
+        # A trip completed during the master's period without credit to this driver
+        # shift belongs in the master's report, but contributes nothing to the tile.
+        other_trip = self.create_completed_trip(truck=self.assigned_truck, excavator=self.excavator)
+        Trip.objects.filter(pk=other_trip.pk).update(completed_at=master_started_at + timedelta(minutes=6))
+
+        def assigned_tile(dashboard):
+            return next(
+                tile
+                for complex_card in dashboard['complex_cards']
+                for tile in complex_card['active_truck_tiles']
+                if tile['name'] == self.assigned_truck.garage_number
+            )
+
+        dispatcher = self.build_dashboard()
+        tablet = self.build_dashboard(reporting_period={'starts_at': master_started_at})
+        for dashboard in (dispatcher, tablet):
+            tile = assigned_tile(dashboard)
+            plan = dashboard['equipment_cards'][str(self.assigned_truck.pk)]['plan']
+            self.assertEqual(tile['plan_fact_value'], '3')
+            self.assertEqual(tile['percent'], 75)
+            self.assertEqual(tile['plan_visual']['loop_progress'], 75)
+            self.assertEqual(plan['progress_percent'], 75)
+            self.assertEqual(plan['progress_loop_percent'], 75)
+
     def test_inactive_truck_plan_uses_seven_to_seven_period_without_dispatcher_shift(self):
         self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
         self.shift.save(update_fields=['opened_at'])

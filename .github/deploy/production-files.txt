@@ -1,11 +1,1 @@
-# Сводка сотрудников без техники и отображение профиля пользователя.
-СИСТЕМА_MVP/backend/assignments/off_equipment_views.py
-СИСТЕМА_MVP/backend/assignments/templatetags/__init__.py
-СИСТЕМА_MVP/backend/assignments/templatetags/deputy_identity.py
-СИСТЕМА_MVP/backend/static/css/deputy-duty-overview.css
-СИСТЕМА_MVP/backend/static/css/deputy-mining-manager-v3.css
-СИСТЕМА_MVP/backend/static/img/deputy-duty-icons.svg
-СИСТЕМА_MVP/backend/static/js/deputy-duty-overview.js
-СИСТЕМА_MVP/backend/templates/assignments/deputy_off_equipment.html
-СИСТЕМА_MVP/backend/templates/assignments/includes/deputy_duty_overview.html
-СИСТЕМА_MVP/backend/templates/includes/deputy_mining_manager_header.html
+СИСТЕМА_MVP/backend/trips/views.py
