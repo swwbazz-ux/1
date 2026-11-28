@@ -1,2 +1,6 @@
-СИСТЕМА_MVP/backend/trips/dispatcher_read_model.py
+СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/static/js/excavator-work-screen-v1.js
+СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py
 СИСТЕМА_MVP/backend/trips/views.py
+СИСТЕМА_MVP/backend/users/role_apps.py
