@@ -1,0 +1,88 @@
+{% load static %}
+{% static 'img/deputy-duty-icons.svg' as duty_icons %}
+{% url 'deputy_off_equipment' as duty_url %}
+<section class="duty-overview" data-duty-overview aria-labelledby="duty-title">
+    <header class="duty-heading">
+        <h2 id="duty-title">Сотрудники без техники</h2>
+        <span class="duty-date"><svg aria-hidden="true"><use href="{{ duty_icons }}#date"/></svg>Производственные сутки <b>{{ work_date|date:"d.m.Y" }}</b></span>
+    </header>
+    <nav class="duty-metrics" aria-label="Число сотрудников по состояниям">
+        {% for card in status_cards %}
+        <a class="duty-metric duty-{{ card.key }}" data-duty-status="{{ card.key }}"
+           href="{{ duty_url }}{% querystring status=card.key %}" {% if active_filter == card.key %}aria-current="true"{% endif %}>
+            <svg class="duty-metric-icon" aria-hidden="true"><use href="{{ duty_icons }}#{{ card.key }}"/></svg>
+            <strong class="duty-number">{{ card.count }}</strong>
+            <span class="duty-metric-label">{% if card.key == 'all' %}Всего в списке{% elif card.key == 'suspended' %}Отстранены от управления{% else %}{{ card.label }}{% endif %}</span>
+            {% if card.key != 'all' %}<span class="duty-track" aria-hidden="true"><i style="width:{% widthratio card.count summary_total 100 %}%"></i></span>{% endif %}
+        </a>
+        {% endfor %}
+    </nav>
+    <div class="duty-panel">
+        <form class="duty-toolbar" method="get" action="{{ duty_url }}" data-duty-filters>
+            <label class="duty-field">Поиск сотрудника
+                <span class="duty-search"><svg aria-hidden="true"><use href="{{ duty_icons }}#search"/></svg>
+                <input name="q" data-duty-search type="search" maxlength="100" value="{{ query }}" placeholder="Фамилия или табельный номер" autocomplete="off"></span>
+            </label>
+            <label class="duty-field">Должность
+                <select name="profession"><option value="">Все должности</option>{% for profession in profession_options %}<option value="{{ profession }}"{% if profession == active_profession %} selected{% endif %}>{{ profession }}</option>{% endfor %}</select>
+            </label>
+            <input type="hidden" name="status" value="{{ active_filter }}">
+            <button type="submit" class="admin-button admin-button-secondary duty-find">Найти</button>
+            <a class="duty-reset" data-duty-reset href="{{ duty_url }}"{% if not query and not active_profession and active_filter == 'all' %} hidden{% endif %}>Сбросить фильтры</a>
+        </form>
+        <p class="duty-request-error" data-duty-request-error role="alert" hidden></p>
+        <div class="duty-results" data-duty-results>
+            {% if error %}<p class="duty-feedback is-error" role="alert">{{ error }}</p>{% endif %}
+            {% for message in messages %}<p class="duty-feedback" role="status">{{ message }}</p>{% endfor %}
+            <div class="duty-found" role="status">
+                <h3>Список сотрудников <span data-duty-result-count>{{ filtered_count }}</span></h3>
+                {% if outside_count %}<span>Из них вне списка суток — <b>{{ outside_count }}</b></span>{% endif %}
+            </div>
+            {% if rows %}
+            <div class="duty-list" aria-label="Список сотрудников" tabindex="0">
+                <div class="duty-columns" aria-hidden="true"><span>Сотрудник / должность</span><span>Состояние</span><span>Смена / место работы</span><span></span></div>
+                {% for row in rows %}
+                <article class="deputy-duty-row">
+                    {% if row.editable %}<details{% if row.employee.pk|stringformat:"s" == editing_employee_id %} open{% endif %}><summary class="duty-row-head">{% else %}<div class="duty-row-head">{% endif %}
+                        <span class="duty-person"><strong>{{ row.employee.full_name }}</strong><small>{{ row.profession|default:"Должность не указана" }}{% if row.employee.personnel_number %} · Таб. {{ row.employee.personnel_number }}{% endif %}</small>{% if row.outside_roster %}<small class="duty-outside">Вне списка суток</small>{% endif %}</span>
+                        <span class="duty-badge duty-{{ row.status }}"><svg aria-hidden="true"><use href="{{ duty_icons }}#{{ row.status }}"/></svg>{{ row.label }}</span>
+                        <span class="duty-shift">{% if row.shift %}{{ row.shift_label }}{% else %}Смена не указана{% endif %}{% if row.entry.location %}<small>{{ row.entry.location }}</small>{% endif %}</span>
+                        {% if row.editable %}<span class="duty-edit"><svg aria-hidden="true"><use href="{{ duty_icons }}#edit"/></svg>{% if row.entry %}Изменить статус{% else %}Указать статус{% endif %}</span></summary>
+                        <div class="duty-editor">
+                            <form method="post" class="duty-edit-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="employee_id" value="{{ row.employee.pk }}">
+                                <input type="hidden" name="expected_version" value="{{ row.version }}">
+                                <input type="hidden" name="work_date" value="{{ work_date|date:'Y-m-d' }}">
+                                <label class="duty-field">Состояние<select name="status" required>
+                                    <option value="">Выберите состояние</option>{% for value,label in row.choices %}<option value="{{ value }}"{% if value == row.form_status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select></label>
+                                <label class="duty-field">Смена<select name="shift_type">
+                                    <option value="">Требует уточнения</option>{% for value,label in shift_choices %}<option value="{{ value }}"{% if value == row.form_shift %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select></label>
+                                <label class="duty-field">Где и чем занят<input name="location" value="{{ row.form_location }}" maxlength="180" placeholder="Например, помогает слесарям"></label>
+                                <button type="submit" class="admin-button admin-button-primary">Опубликовать статус</button>
+                            </form>
+                            {% if row.entry %}
+                            <form method="post" class="duty-clear-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="employee_id" value="{{ row.employee.pk }}">
+                                <input type="hidden" name="expected_version" value="{{ row.version }}">
+                                <input type="hidden" name="work_date" value="{{ work_date|date:'Y-m-d' }}">
+                                <button type="submit" name="status" value="cleared" class="admin-button admin-button-secondary">{% if row.status == 'suspended' %}Подтвердить возврат к управлению{% else %}Снять отметку{% endif %}</button>
+                            </form>
+                            {% endif %}
+                        </div></details>
+                        {% else %}<small class="duty-readonly">{{ row.readonly_reason }}</small></div>{% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="duty-empty"><svg aria-hidden="true"><use href="{{ duty_icons }}#search"/></svg>
+                {% if query or active_profession or active_filter != 'all' %}<strong>Совпадений нет</strong><span>Измените запрос или сбросьте фильтры.</span>
+                {% else %}<strong>Список на эти сутки пуст</strong>{% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</section>
