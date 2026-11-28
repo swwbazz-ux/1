@@ -2377,7 +2377,90 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(self.assignment.ended_at)
 
-    def test_changed_primary_assignment_does_not_break_accepted_free_bucket_load(self):
+    def test_expired_operator_acceptance_can_be_replaced_at_the_exact_deadline(self):
+        first = self.accept_event()
+        self.assertEqual(self.sync([first]).json()['results'][0]['status'], 'accepted')
+        old = FreeBucketAcceptance.objects.get()
+        deadline = timezone.now()
+        start = deadline - timedelta(minutes=10)
+        FreeBucketAcceptance.objects.filter(pk=old.pk).update(occurred_at=start, accepted_at=start)
+        again = self.accept_event('accept-at-deadline', 2, occurred_at=deadline)
+        result = self.sync([again]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        old.refresh_from_db()
+        self.assertEqual((old.status, old.cancelled_at), (FreeBucketAcceptanceStatus.CANCELLED, deadline))
+        self.assertNotEqual(result['server_ids']['free_bucket_acceptance_id'], old.pk)
+        self.assertFalse(Trip.objects.exists())
+
+        late = self.load_event(first, 'old-offline-swipe', 3, occurred_at=deadline - timedelta(seconds=1))
+        self.assertEqual(self.sync([late]).json()['results'][0]['status'], 'conflict')
+        self.assertFalse(Trip.objects.exists())
+        self.assertEqual(FreeBucketAcceptance.objects.get(status=FreeBucketAcceptanceStatus.ACCEPTED).pk,
+                         result['server_ids']['free_bucket_acceptance_id'])
+
+    def test_expiry_keeps_an_offline_swipe_only_when_it_was_made_before_the_deadline(self):
+        from trips.free_bucket import reconcile_expired_free_bucket_acceptances
+
+        start = timezone.now() - timedelta(minutes=12)
+        EmployeeShift.objects.filter(pk=self.shift.pk).update(opened_at=start - timedelta(minutes=1))
+        first = self.accept_event(occurred_at=start)
+        self.assertEqual(self.sync([first]).json()['results'][0]['status'], 'accepted')
+        deadline = start + timedelta(minutes=10)
+        self.assertEqual(reconcile_expired_free_bucket_acceptances(now=deadline), 1)
+        self.assertEqual(reconcile_expired_free_bucket_acceptances(now=deadline), 0)
+        missed = self.load_event(first, 'swipe-at-expiry', 2, occurred_at=deadline)
+        self.assertEqual(self.sync([missed]).json()['results'][0]['code'], 'free_bucket_expired')
+        timely = self.load_event(first, 'swipe-before-expiry', 3, occurred_at=deadline - timedelta(seconds=1))
+        result = self.sync([timely]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.get().loaded_at, deadline - timedelta(seconds=1))
+        self.assertEqual(FreeBucketAcceptance.objects.get().status, FreeBucketAcceptanceStatus.USED)
+
+    def test_transfer_to_bucket_owner_ends_only_when_assignment_takes_effect(self):
+        from assignments.services import accept_haul_assignment_now, schedule_haul_assignment
+
+        client, identity = self.other_excavator_identity()
+        accepted = self.accept_event(**identity)
+        result = self.sync([accepted], client=client, actor=identity['actor'], access=identity['access']).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        pending, _ = schedule_haul_assignment(truck=self.truck, excavator=self.other_excavator)
+        work = reverse('excavator_work')
+        screen = client.get(work)
+        self.assertEqual([card['truck_id'] for card in screen.context['free_bucket_cards']], [self.truck.pk])
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
+        applied, changed = accept_haul_assignment_now(pending.pk, truck_id=self.truck.pk)
+        self.assertTrue(changed)
+        acceptance.refresh_from_db()
+        self.assertEqual((acceptance.status, acceptance.cancelled_at),
+                         (FreeBucketAcceptanceStatus.CANCELLED, applied.accepted_at))
+        screen = client.get(work)
+        self.assertEqual(screen.context['free_bucket_cards'], [])
+        self.assertEqual([card['assignment'].pk for card in screen.context['truck_cards']
+                          if card['assignment'].truck_id == self.truck.pk], [applied.pk])
+        self.assertFalse(Trip.objects.exists())
+
+    def test_offline_accept_and_swipe_delivered_after_transfer_keep_the_device_times(self):
+        from assignments.services import accept_haul_assignment_now, schedule_haul_assignment
+
+        client, identity = self.other_excavator_identity()
+        accepted = self.accept_event(**identity)
+        loaded_at = timezone.now()
+        loaded = self.load_event(accepted, occurred_at=loaded_at, **identity)
+        pending, _ = schedule_haul_assignment(truck=self.truck, excavator=self.other_excavator)
+        applied, _ = accept_haul_assignment_now(pending.pk, truck_id=self.truck.pk)
+        sync_args = {'client': client, 'actor': identity['actor'], 'access': identity['access']}
+        self.assertEqual(self.sync([accepted], **sync_args).json()['results'][0]['status'], 'accepted')
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual((acceptance.status, acceptance.cancelled_at),
+                         (FreeBucketAcceptanceStatus.CANCELLED, applied.accepted_at))
+        result = self.sync([loaded], **sync_args).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.get().loaded_at, loaded_at)
+        applied.refresh_from_db()
+        self.assertEqual(applied.status, AssignmentStatus.ACCEPTED)
+
+    def test_transfer_to_a_third_excavator_does_not_break_accepted_free_bucket_load(self):
         other_client, other_operator, other_shift = (
             trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
         )
@@ -2396,16 +2479,14 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(accepted_response.json()['results'][0]['status'], 'accepted')
 
         changed_at = timezone.now()
-        self.assignment.status = AssignmentStatus.CANCELLED
-        self.assignment.ended_at = changed_at
-        self.assignment.save(update_fields=['status', 'ended_at'])
-        new_primary = HaulAssignment.objects.create(
-            truck=self.truck,
-            excavator=self.other_excavator,
-            status=AssignmentStatus.ACCEPTED,
-            assigned_at=changed_at,
-            accepted_at=changed_at,
+        from assignments.services import accept_haul_assignment_now, schedule_haul_assignment
+
+        third = Equipment.objects.create(garage_number='ЭКС-третий', equipment_type=self.excavator_type)
+        pending, _ = schedule_haul_assignment(truck=self.truck, excavator=third, now=changed_at)
+        new_primary, applied = accept_haul_assignment_now(
+            pending.pk, truck_id=self.truck.pk, at=changed_at,
         )
+        self.assertTrue(applied)
 
         loaded = self.load_event(accepted, **identity)
         loaded_response = self.sync(
@@ -2545,8 +2626,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         primary = self.client.get(reverse('excavator_work'))
         self.assertEqual(primary.context['truck_cards'][0]['load_block_reason_code'], 'free_bucket_reserved_elsewhere')
 
-        # Exact TTL boundary. Leave the stored acceptance untouched to exercise
-        # historical offline replay and assert the two display paths agree.
+        # The screen releases the same reservation that would otherwise block a new accept.
         FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(
             occurred_at=timezone.now() - timedelta(minutes=10),
         )
@@ -2564,7 +2644,8 @@ class FreeBucketServerIntegrationTests(TestCase):
         primary = self.client.get(reverse('excavator_work'))
         self.assertTrue(primary.context['truck_cards'][0]['can_load'])
         acceptance.refresh_from_db()
-        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(acceptance.cancelled_at, acceptance.occurred_at + timedelta(minutes=10))
         self.assertEqual(
             [card['truck_id'] for card in payload['free_bucket_cards']],
             [self.truck.id],

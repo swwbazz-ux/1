@@ -10,7 +10,8 @@ from datetime import timedelta
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
+from django.db.models.functions import Greatest, Least
 from django.utils import timezone
 
 
@@ -98,12 +99,13 @@ def active_free_bucket_acceptance_for_truck(truck, *, for_update=False, now=None
 
 @transaction.atomic
 def reconcile_expired_free_bucket_acceptances(*, now=None):
-    """Close only an already-used visual card; never cancel a request."""
+    """Release expired reservations and remove spent cards at their separate deadline."""
     from core.models import bump_operational_state, lock_production_state
     from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
 
     now = now or timezone.now()
     lock_production_state()
+    unspent_count = len(expire_stale_free_bucket_requests(now=now))
     expired = []
     for acceptance in (
         FreeBucketAcceptance.objects
@@ -119,7 +121,7 @@ def reconcile_expired_free_bucket_acceptances(*, now=None):
         acceptance.closed_at = expires_at
         expired.append(acceptance)
     if not expired:
-        return 0
+        return unspent_count
     FreeBucketAcceptance.objects.bulk_update(expired, ['status', 'closed_at'])
     bump_operational_state(
         'FreeBucketAcceptance:expired',
@@ -132,38 +134,26 @@ def reconcile_expired_free_bucket_acceptances(*, now=None):
             'excavator_ids': sorted({item.excavator_id for item in expired}),
         },
     )
-    return len(expired)
+    return unspent_count + len(expired)
 
 
-def expire_stale_free_bucket_requests(truck, *, now=None):
-    """Close the truck's REQUESTED rights that outlived ``FREE_BUCKET_REQUEST_TTL``.
-
-    Для экрана водителя такой запрос давно «не активен» (см.
-    ``active_free_bucket_acceptance_filter``), но приём нового выбора в
-    ``core.offline_sync`` смотрел только на статус и отвечал «уже выбран другой
-    экскаватор»: окно ничего не показывало, а выбрать другой было нельзя —
-    сервер держал работника (стенд 28.09.2026, принятие #4). Неиспользованное
-    право гасится так же, как при закрытии смены
-    (``cancel_free_bucket_acceptances_for_shift``): статус CANCELLED,
-    ``cancelled_at`` — момент истечения (CLOSED по ограничению модели принадлежит
-    только использованному праву с рейсом). ACCEPTED и USED не трогаем:
-    принятое машинистом право и уже созданный рейс живут по своим правилам.
-    Вызывать под блокировкой самосвала.
-    """
+def expire_stale_free_bucket_requests(truck=None, *, now=None):
+    """Cancel unspent rights at their original deadline under the caller's state lock."""
     from core.models import bump_operational_state
     from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
 
     now = now or timezone.now()
-    expired = list(
+    reservations = (
         FreeBucketAcceptance.objects
         .select_for_update(of=('self',))
         .filter(
-            truck=truck,
-            status=FreeBucketAcceptanceStatus.REQUESTED,
+            status__in=(FreeBucketAcceptanceStatus.REQUESTED, FreeBucketAcceptanceStatus.ACCEPTED),
             occurred_at__lte=now - FREE_BUCKET_REQUEST_TTL,
         )
-        .order_by('id')
     )
+    if truck is not None:
+        reservations = reservations.filter(truck=truck)
+    expired = list(reservations.order_by('id'))
     if not expired:
         return []
     for acceptance in expired:
@@ -177,11 +167,28 @@ def expire_stale_free_bucket_requests(truck, *, now=None):
         payload={
             'action': 'free_bucket_expired',
             'acceptance_ids': [item.id for item in expired],
-            'truck_ids': [truck.id],
+            'truck_ids': sorted({item.truck_id for item in expired}),
             'excavator_ids': sorted({item.excavator_id for item in expired}),
         },
     )
     return expired
+
+
+def cancel_free_bucket_for_applied_assignment(*, truck_id, excavator_id, at):
+    """An effective transfer to the bucket owner, or a release to the garage, ends the reservation."""
+    from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+
+    unspent = FreeBucketAcceptance.objects.filter(
+        truck_id=truck_id,
+        status__in=(FreeBucketAcceptanceStatus.REQUESTED, FreeBucketAcceptanceStatus.ACCEPTED),
+    )
+    if excavator_id is not None:
+        unspent = unspent.filter(excavator_id=excavator_id)
+    # Keep the earlier deadline when the assignment timer is processed late.
+    return unspent.update(
+        status=FreeBucketAcceptanceStatus.CANCELLED,
+        cancelled_at=Greatest('occurred_at', Least(F('occurred_at') + FREE_BUCKET_REQUEST_TTL, at)),
+    )
 
 
 def canonical_free_bucket_work_context_snapshot(excavator):

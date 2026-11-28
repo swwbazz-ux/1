@@ -18,6 +18,42 @@ const dispatcherSource = fs.readFileSync(path.join(backend, 'static', 'js', 'dis
 const dispatcherTemplate = dispatcherScreenSource();
 const css = fs.readFileSync(path.join(backend, 'static', 'css', 'excavator-free-bucket-v1.css'), 'utf8');
 
+test('a pending transfer yields to the actionable bucket and returns after cancellation', () => {
+    const ordinary = {dataset: {eoTransferDirection: 'incoming'}, hidden: false};
+    const cards = [ordinary];
+    const grid = {
+        classList: {toggle() {}},
+        querySelector: () => null,
+        querySelectorAll: () => cards,
+        insertBefore: card => cards.unshift(card),
+    };
+    const make = () => ({
+        dataset: {}, style: {setProperty() {}}, isConnected: true,
+        appendChild() {}, setAttribute() {},
+    });
+    const context = {
+        bucketCoveringIncoming: new WeakMap(), gridForShell: () => grid,
+        cardForTruck: () => cards[0], truckIdOf: item => String(item.id),
+        numberOf: () => '59', text: value => String(value ?? ''), iconUrl: () => '',
+        make, document: {createElement: make}, bindTruckCard() {},
+    };
+    vm.createContext(context);
+    vm.runInContext(source.slice(source.indexOf('    function normalizeGrid()'), source.indexOf('    function iconUrl(')), context);
+    vm.runInContext(source.slice(source.indexOf('    function renderLocalCard('), source.indexOf('    function findCatalogItem(')), context);
+    const bucket = context.renderLocalCard({id: 59}, {event_id: 'accept-59'}, false);
+    assert.equal(ordinary.hidden, true);
+    assert.equal(bucket.dataset.eoFreeBucket, '1');
+    assert.equal(bucket.dataset.eoFreeBucketAcceptanceLocalId, 'accept-59');
+    assert.equal(bucket.dataset.eoCanLoad, '1');
+    cards.shift();
+    bucket.isConnected = false;
+    context.normalizeGrid();
+    assert.equal(ordinary.hidden, false);
+    delete ordinary.dataset.eoTransferDirection;
+    assert.equal(context.renderLocalCard({id: 59}, {event_id: 'old-accept'}, false), null);
+    assert.equal(ordinary.dataset.eoFreeBucketAcceptanceLocalId, undefined);
+});
+
 test('a rejected load releases only its local truck projection', () => {
     const start = template.indexOf('window.attendExcavatorFieldEvent = function');
     const end = template.indexOf('\n    if (fieldOutbox)', start);
@@ -171,8 +207,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v278/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v278/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v279/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v279/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {

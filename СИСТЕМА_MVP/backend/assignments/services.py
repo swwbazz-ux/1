@@ -20,6 +20,7 @@ from core.models import bump_operational_state, lock_production_state
 from core.production_time import production_work_date as contract_production_work_date
 from references.models import Equipment
 from shifts.models import EmployeeShift
+from trips.free_bucket import cancel_free_bucket_for_applied_assignment
 from users.models import AdminActionLog, Employee, EmployeeAccess, Role, TemporaryWorkTransfer
 from users.work_profiles import (
     active_specializations_for_positions, effective_specialization, effective_specializations_by_employee_id,
@@ -1729,6 +1730,7 @@ def resolve_haul_handoffs_for_trip(trip, *, now=None):
     target.status = AssignmentStatus.ACCEPTED
     target.accepted_at = now
     target.save(update_fields=['status', 'accepted_at'])
+    cancel_free_bucket_for_applied_assignment(truck_id=target.truck_id, excavator_id=target.excavator_id, at=now)
     if handoff:
         handoff.status = HaulAssignmentHandoffStatus.RESOLVED
         handoff.resolved_at = now
@@ -2109,6 +2111,11 @@ def apply_pending_haul_assignment(assignment_id, *, now=None):
             pending.accepted_at = now
             pending.save(update_fields=['status', 'accepted_at'])
             applied_action = 'assignment_applied'
+        cancel_free_bucket_for_applied_assignment(
+            truck_id=pending.truck_id,
+            excavator_id=pending.excavator_id if pending.action != HaulAssignmentAction.RELEASE else None,
+            at=now,
+        )
         if handoffs:
             HaulAssignmentHandoff.objects.filter(pk__in=[item.pk for item in handoffs]).update(
                 status=HaulAssignmentHandoffStatus.EXPIRED,
